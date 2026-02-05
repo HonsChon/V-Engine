@@ -1,0 +1,38 @@
+{
+    "files.associations": {
+        "*.vert": "glsl",
+        "*.frag": "glsl",
+        "*.spv": "binary"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.intelliSenseMode": "macos-clang-x64",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/external",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "${env:VULKAN_SDK}/include"
+    ],
+    "C_Cpp.default.defines": [
+        "VK_USE_PLATFORM_MACOS_MVK",
+        "GLFW_INCLUDE_VULKAN"
+    ],
+    "cmake.configureOnOpen": false,
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.generator": "Unix Makefiles",
+    "cmake.configureArgs": [
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "files.exclude": {
+        "build/": true,
+        "**/*.spv": true
+    },
+    "search.exclude": {
+        "build/": true,
+        "**/*.spv": true
+    }
+}

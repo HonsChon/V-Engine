@@ -1,0 +1,39 @@
+# Build directories
+build/
+cmake-build-*/
+.cmake/
+
+# IDE files (user-specific settings)
+.vscode/c_cpp_properties.json
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+
+# Compiled shaders
+*.spv
+
+# Assets (if large)
+# assets/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
