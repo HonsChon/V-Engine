@@ -6,6 +6,36 @@
 #include <chrono>
 #include <thread>
 
+// 静态回调函数实现
+void VulkanRenderer::mouseCallback(GLFWwindow* window, double xposIn, double yposIn) {
+    auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
+    if (!renderer || !renderer->mouseEnabled) return;
+    
+    float xpos = static_cast<float>(xposIn);
+    float ypos = static_cast<float>(yposIn);
+    
+    if (renderer->firstMouse) {
+        renderer->lastMouseX = xpos;
+        renderer->lastMouseY = ypos;
+        renderer->firstMouse = false;
+    }
+    
+    float xoffset = xpos - renderer->lastMouseX;
+    float yoffset = renderer->lastMouseY - ypos; // Y轴反转
+    
+    renderer->lastMouseX = xpos;
+    renderer->lastMouseY = ypos;
+    
+    renderer->handleMouseMovement(xoffset, yoffset);
+}
+
+void VulkanRenderer::scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+    auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
+    if (renderer) {
+        renderer->handleMouseScroll(static_cast<float>(yoffset));
+    }
+}
+
 VulkanRenderer::VulkanRenderer() : window(nullptr), currentFrame(0), framebufferResized(false) {
     initWindow();
     initVulkan();
@@ -24,6 +54,10 @@ void VulkanRenderer::initWindow() {
     window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan PBR Renderer", nullptr, nullptr);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    
+    // 设置鼠标和滚轮回调
+    glfwSetCursorPosCallback(window, mouseCallback);
+    glfwSetScrollCallback(window, scrollCallback);
 }
 
 void VulkanRenderer::initVulkan() {
@@ -50,8 +84,18 @@ void VulkanRenderer::initVulkan() {
     createVertexBuffer();
     createIndexBuffer();
     
+    // 创建 Uniform Buffers
+    createUniformBuffers();
+    
+    // 创建描述符池和描述符集
+    createDescriptorPool();
+    createDescriptorSets();
+    
     // 创建命令缓冲
     createCommandBuffers();
+    
+    // 创建相机 - 位于 (0, 0, 5) 看向原点
+    camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
     
     std::cout << "Vulkan initialization complete!" << std::endl;
 }
@@ -99,11 +143,23 @@ void VulkanRenderer::createCommandBuffers() {
 
 void VulkanRenderer::mainLoop() {
     std::cout << "Starting main loop..." << std::endl;
+    std::cout << "Controls:" << std::endl;
+    std::cout << "  WASD - Move camera" << std::endl;
+    std::cout << "  Space/Shift - Move up/down" << std::endl;
+    std::cout << "  Right mouse button - Enable mouse look" << std::endl;
+    std::cout << "  Mouse scroll - Zoom in/out" << std::endl;
+    std::cout << "  ESC - Exit" << std::endl;
     
     int frameCount = 0;
     auto startTime = std::chrono::high_resolution_clock::now();
+    auto lastFrameTime = startTime;
     
     while (!glfwWindowShouldClose(window)) {
+        // 计算帧时间（deltaTime）
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime).count();
+        lastFrameTime = currentTime;
+        
         glfwPollEvents();
         
         // 检查窗口是否被意外关闭
@@ -112,11 +168,27 @@ void VulkanRenderer::mainLoop() {
             break;
         }
         
+        // 处理键盘输入
+        processKeyboardInput(deltaTime);
+        
+        // 处理鼠标模式切换（右键按下时启用鼠标控制）
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+            if (!mouseEnabled) {
+                mouseEnabled = true;
+                firstMouse = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            }
+        } else {
+            if (mouseEnabled) {
+                mouseEnabled = false;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            }
+        }
+        
         drawFrame(); // 现在启用真正的渲染！
         
         frameCount++;
         if (frameCount % 60 == 0) {
-            auto currentTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
             std::cout << "Rendered " << frameCount << " frames in " << duration << "ms" << std::endl;
         }
@@ -145,6 +217,38 @@ void VulkanRenderer::mainLoop() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 }
 
+void VulkanRenderer::processKeyboardInput(float deltaTime) {
+    if (!camera) return;
+    
+    // WASD 移动
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera->processKeyboard(FORWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera->processKeyboard(BACKWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera->processKeyboard(LEFT, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera->processKeyboard(RIGHT, deltaTime);
+    
+    // 空格/Shift 上下移动
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        camera->processKeyboard(UP, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        camera->processKeyboard(DOWN, deltaTime);
+}
+
+void VulkanRenderer::handleMouseMovement(float xoffset, float yoffset) {
+    if (camera) {
+        camera->processMouseMovement(xoffset, yoffset);
+    }
+}
+
+void VulkanRenderer::handleMouseScroll(float yoffset) {
+    if (camera) {
+        camera->processMouseScroll(yoffset);
+    }
+}
+
 void VulkanRenderer::drawFrame() {
     vkWaitForFences(device->getDevice(), 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -158,6 +262,9 @@ void VulkanRenderer::drawFrame() {
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("failed to acquire swap chain image!");
     }
+    
+    // 在重置 fence 之前更新 uniform buffer
+    updateUniformBuffer(currentFrame);
 
     vkResetFences(device->getDevice(), 1, &inFlightFences[currentFrame]);
 
@@ -207,7 +314,45 @@ void VulkanRenderer::drawFrame() {
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
-    // 更新uniform buffer - 临时空实现
+    UniformBufferObject ubo{};
+    
+    // Model 矩阵 - 立方体可以自动旋转
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    
+    // 立方体缓慢旋转
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    
+    // View 矩阵 - 从相机获取
+    if (camera) {
+        ubo.view = camera->getViewMatrix();
+    } else {
+        ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), 
+                               glm::vec3(0.0f, 0.0f, 0.0f), 
+                               glm::vec3(0.0f, 1.0f, 0.0f));
+    }
+    
+    // Projection 矩阵
+    float fov = camera ? glm::radians(camera->getZoom()) : glm::radians(45.0f);
+    float aspect = swapChain->getExtent().width / (float)swapChain->getExtent().height;
+    ubo.proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
+    
+    // Vulkan 的 Y 轴是反的（与 OpenGL 相反）
+    ubo.proj[1][1] *= -1;
+    
+    // Normal 矩阵（用于法线变换）
+    ubo.normalMatrix = glm::transpose(glm::inverse(ubo.model));
+    
+    // 相机位置（用于光照计算）
+    ubo.viewPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
+    
+    // 光源位置和颜色
+    ubo.lightPos = glm::vec3(5.0f, 5.0f, 5.0f);
+    ubo.lightColor = glm::vec3(300.0f, 300.0f, 300.0f); // 高强度点光源
+    
+    // 复制到映射的内存
+    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
 void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
@@ -236,6 +381,11 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
 
     // 绑定PBR图形管线
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pbrPipeline->getPipeline());
+    
+    // 绑定描述符集 (包含 MVP 矩阵和相机位置)
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                           pbrPipeline->getPipelineLayout(), 0, 1, 
+                           &descriptorSets[currentFrame], 0, nullptr);
     
     // 设置视口和裁剪矩形
     VkViewport viewport{};
@@ -328,6 +478,81 @@ void VulkanRenderer::createIndexBuffer() {
 
     // 将索引数据复制到缓冲区
     indexBuffer->copyFrom(indices.data(), bufferSize);
+}
+
+void VulkanRenderer::createUniformBuffers() {
+    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+    
+    uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        uniformBuffers[i] = std::make_unique<VulkanBuffer>(
+            std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}),
+            bufferSize,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        
+        // 持久映射
+        vkMapMemory(device->getDevice(), uniformBuffers[i]->getMemory(), 0, bufferSize, 0, &uniformBuffersMapped[i]);
+    }
+    
+    std::cout << "Created " << MAX_FRAMES_IN_FLIGHT << " uniform buffers" << std::endl;
+}
+
+void VulkanRenderer::createDescriptorPool() {
+    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    
+    if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor pool!");
+    }
+    
+    std::cout << "Created descriptor pool" << std::endl;
+}
+
+void VulkanRenderer::createDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, pbrPipeline->getDescriptorSetLayout());
+    
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    allocInfo.pSetLayouts = layouts.data();
+    
+    descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device->getDevice(), &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+        throw std::runtime_error("failed to allocate descriptor sets!");
+    }
+    
+    // 更新描述符集
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers[i]->getBuffer();
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
+        
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = descriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+        
+        vkUpdateDescriptorSets(device->getDevice(), 1, &descriptorWrite, 0, nullptr);
+    }
+    
+    std::cout << "Created and updated " << MAX_FRAMES_IN_FLIGHT << " descriptor sets" << std::endl;
 }
 
 void VulkanRenderer::cleanup() {

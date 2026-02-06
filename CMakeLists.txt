@@ -1,20 +1,109 @@
 cmake_minimum_required(VERSION 3.16)
+
+# ============================================================
+# vcpkg 配置 (必须在 project() 之前)
+# ============================================================
+# 设置 vcpkg triplet
+set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "Vcpkg target triplet")
+
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg-master/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file")
+endif()
+message(STATUS "Using vcpkg toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+message(STATUS "Vcpkg triplet: ${VCPKG_TARGET_TRIPLET}")
+
+# ============================================================
+# 项目配置
+# ============================================================
 project(VulkanPBR VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find packages
-find_package(Vulkan REQUIRED)
-find_package(glfw3 REQUIRED)
-find_package(glm REQUIRED)
+# 设置输出目录
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin)
 
+# ============================================================
+# 查找 Vulkan SDK
+# ============================================================
+find_package(Vulkan REQUIRED)
+
+if(Vulkan_FOUND)
+    message(STATUS "Found Vulkan: ${Vulkan_INCLUDE_DIRS}")
+    message(STATUS "Vulkan Libraries: ${Vulkan_LIBRARIES}")
+else()
+    message(FATAL_ERROR "Vulkan SDK not found! Please install Vulkan SDK from https://vulkan.lunarg.com/")
+endif()
+
+# ============================================================
+# GLFW 配置
+# ============================================================
+# 方法1: 使用 find_package (如果通过 vcpkg 或系统安装)
+find_package(glfw3 CONFIG QUIET)
+
+if(NOT glfw3_FOUND)
+    # 方法2: 手动指定 GLFW 路径 (用户需要根据实际情况修改)
+    message(STATUS "glfw3 not found via find_package, trying manual configuration...")
+    
+    # 用户可以设置 GLFW_DIR 环境变量或 CMake 变量
+    if(DEFINED ENV{GLFW_DIR})
+        set(GLFW_DIR $ENV{GLFW_DIR})
+    endif()
+    
+    if(GLFW_DIR)
+        set(GLFW_INCLUDE_DIR "${GLFW_DIR}/include")
+        set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2022/glfw3.lib")
+        
+        if(NOT EXISTS ${GLFW_LIBRARY})
+            set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2019/glfw3.lib")
+        endif()
+        
+        message(STATUS "Using GLFW from: ${GLFW_DIR}")
+    else()
+        message(FATAL_ERROR "GLFW not found! Please install GLFW or set GLFW_DIR")
+    endif()
+endif()
+
+# ============================================================
+# GLM 配置
+# ============================================================
+find_package(glm CONFIG QUIET)
+
+if(NOT glm_FOUND)
+    message(STATUS "glm not found via find_package, trying manual configuration...")
+    
+    if(DEFINED ENV{GLM_DIR})
+        set(GLM_DIR $ENV{GLM_DIR})
+    endif()
+    
+    if(GLM_DIR)
+        set(GLM_INCLUDE_DIR "${GLM_DIR}")
+        message(STATUS "Using GLM from: ${GLM_DIR}")
+    else()
+        message(FATAL_ERROR "GLM not found! Please install GLM or set GLM_DIR")
+    endif()
+endif()
+
+# ============================================================
 # Include directories
+# ============================================================
 include_directories(${Vulkan_INCLUDE_DIRS})
 include_directories(src)
-include_directories(external)
 
+if(DEFINED GLFW_INCLUDE_DIR)
+    include_directories(${GLFW_INCLUDE_DIR})
+endif()
+
+if(DEFINED GLM_INCLUDE_DIR)
+    include_directories(${GLM_INCLUDE_DIR})
+endif()
+
+# ============================================================
 # Source files
+# ============================================================
 set(SOURCES
     src/main.cpp
     src/VulkanRenderer.cpp
@@ -45,19 +134,63 @@ set(HEADERS
     src/Utils.h
 )
 
+# ============================================================
 # Create executable
+# ============================================================
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
+# ============================================================
 # Link libraries
-target_link_libraries(${PROJECT_NAME} 
-    ${Vulkan_LIBRARIES}
-    glfw
-    glm::glm
-)
+# ============================================================
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES})
 
-# Link macOS system frameworks
-if(APPLE)
-    target_link_libraries(${PROJECT_NAME} 
+if(glfw3_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+elseif(DEFINED GLFW_LIBRARY)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${GLFW_LIBRARY})
+endif()
+
+if(glm_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
+endif()
+
+# ============================================================
+# 平台特定配置
+# ============================================================
+if(WIN32)
+    # Windows 平台配置
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        VK_USE_PLATFORM_WIN32_KHR
+        GLFW_INCLUDE_VULKAN
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    
+    # Visual Studio 特定设置
+    if(MSVC)
+        # 设置启动项目
+        set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
+        
+        # 设置调试工作目录
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        )
+        
+        # 编译选项
+        target_compile_options(${PROJECT_NAME} PRIVATE /W4 /MP)
+        
+        # 使用 Unicode
+        target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
+    endif()
+    
+elseif(APPLE)
+    # macOS 平台配置
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        VK_USE_PLATFORM_MACOS_MVK
+        GLFW_INCLUDE_VULKAN
+    )
+    
+    target_link_libraries(${PROJECT_NAME} PRIVATE
         "-framework Cocoa"
         "-framework OpenGL" 
         "-framework IOKit"
@@ -65,14 +198,96 @@ if(APPLE)
         "-framework CoreGraphics"
         "-framework CoreFoundation"
     )
+    
+elseif(UNIX)
+    # Linux 平台配置
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        VK_USE_PLATFORM_XCB_KHR
+        GLFW_INCLUDE_VULKAN
+    )
 endif()
 
-# Compile definitions
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    VK_USE_PLATFORM_MACOS_MVK  # For macOS with MoltenVK
-    GLFW_INCLUDE_VULKAN
+# ============================================================
+# Copy shaders and assets to build directory
+# ============================================================
+# 复制 shaders 目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/shaders"
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders"
+    COMMENT "Copying shaders to output directory"
 )
 
-# Copy shaders to build directory
-file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${CMAKE_BINARY_DIR})
-file(COPY ${CMAKE_SOURCE_DIR}/assets DESTINATION ${CMAKE_BINARY_DIR})
+# 复制 assets 目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/assets"
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+    COMMENT "Copying assets to output directory"
+)
+
+# ============================================================
+# 编译 Shaders (可选)
+# ============================================================
+find_program(GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin")
+
+if(GLSLC)
+    message(STATUS "Found glslc: ${GLSLC}")
+    
+    # Shader 输出目录
+    set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/shaders")
+    file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+    
+    # 定义 shader 源文件和对应的输出文件名
+    set(SHADER_SOURCES
+        simple.vert
+        simple.frag
+        mesh.vert
+        mesh.frag
+        pbr.vert
+        pbr.frag
+        simple_mesh.vert
+        simple_mesh.frag
+    )
+    
+    foreach(SHADER_FILE ${SHADER_SOURCES})
+        set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
+        
+        # 将 simple.vert 转换为 simple_vert.spv 格式
+        string(REPLACE "." "_" SHADER_OUTPUT_NAME ${SHADER_FILE})
+        set(SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER_OUTPUT_NAME}.spv")
+        
+        if(EXISTS ${SHADER_SOURCE})
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+                DEPENDS ${SHADER_SOURCE}
+                COMMENT "Compiling shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv"
+            )
+            
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+            message(STATUS "  Shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv")
+        else()
+            message(WARNING "Shader file not found: ${SHADER_SOURCE}")
+        endif()
+    endforeach()
+    
+    if(SHADER_OUTPUTS)
+        add_custom_target(CompileShaders ALL DEPENDS ${SHADER_OUTPUTS})
+        add_dependencies(${PROJECT_NAME} CompileShaders)
+    endif()
+else()
+    message(WARNING "glslc not found. Shaders will not be compiled automatically.")
+    message(WARNING "Please compile shaders manually using: glslc shader.vert -o shader_vert.spv")
+endif()
+
+# ============================================================
+# 打印配置信息
+# ============================================================
+message(STATUS "")
+message(STATUS "=== VulkanPBR Configuration ===")
+message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
+message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
+message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "===============================")
+message(STATUS "")

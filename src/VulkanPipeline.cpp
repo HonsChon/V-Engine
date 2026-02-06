@@ -51,76 +51,32 @@ VkShaderModule VulkanPipeline::createShaderModule(const std::vector<char>& code)
 
 void VulkanPipeline::createDescriptorSetLayout() {
     // UBO binding (matrices, camera, light data)
+    // 暂时只使用 UBO，不使用纹理（shader 中纹理已被注释）
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorCount = 1;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.pImmutableSamplers = nullptr;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    // PBR texture bindings
-    std::array<VkDescriptorSetLayoutBinding, 5> samplerLayoutBindings{};
-    
-    // Albedo texture
-    samplerLayoutBindings[0].binding = 1;
-    samplerLayoutBindings[0].descriptorCount = 1;
-    samplerLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBindings[0].pImmutableSamplers = nullptr;
-    samplerLayoutBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Normal texture
-    samplerLayoutBindings[1].binding = 2;
-    samplerLayoutBindings[1].descriptorCount = 1;
-    samplerLayoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBindings[1].pImmutableSamplers = nullptr;
-    samplerLayoutBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Metallic texture
-    samplerLayoutBindings[2].binding = 3;
-    samplerLayoutBindings[2].descriptorCount = 1;
-    samplerLayoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBindings[2].pImmutableSamplers = nullptr;
-    samplerLayoutBindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Roughness texture
-    samplerLayoutBindings[3].binding = 4;
-    samplerLayoutBindings[3].descriptorCount = 1;
-    samplerLayoutBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBindings[3].pImmutableSamplers = nullptr;
-    samplerLayoutBindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // AO texture
-    samplerLayoutBindings[4].binding = 5;
-    samplerLayoutBindings[4].descriptorCount = 1;
-    samplerLayoutBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBindings[4].pImmutableSamplers = nullptr;
-    samplerLayoutBindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
-        uboLayoutBinding,
-        samplerLayoutBindings[0],
-        samplerLayoutBindings[1],
-        samplerLayoutBindings[2],
-        samplerLayoutBindings[3],
-        samplerLayoutBindings[4]
-    };
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &uboLayoutBinding;
 
     if (vkCreateDescriptorSetLayout(device->getDevice(), &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor set layout!");
     }
+    
+    std::cout << "Created descriptor set layout (UBO only)" << std::endl;
 }
 
 void VulkanPipeline::createGraphicsPipeline() {
     std::cout << "Creating PBR graphics pipeline..." << std::endl;
 
-    // 加载着色器代码
-    auto vertShaderCode = readFile("shaders/simple_vert.spv");
-    auto fragShaderCode = readFile("shaders/simple_frag.spv");
+    // 加载 PBR 着色器代码
+    auto vertShaderCode = readFile("shaders/pbr_vert.spv");
+    auto fragShaderCode = readFile("shaders/pbr_frag.spv");
 
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);

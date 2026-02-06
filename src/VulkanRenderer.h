@@ -34,6 +34,10 @@ public:
     ~VulkanRenderer();
 
     void run();
+    
+    // 输入处理函数（供回调使用）
+    void handleMouseMovement(float xoffset, float yoffset);
+    void handleMouseScroll(float yoffset);
 
 private:
     void initWindow();
@@ -42,6 +46,9 @@ private:
     void createCommandBuffers();
     void createVertexBuffer();
     void createIndexBuffer();
+    void createUniformBuffers();
+    void createDescriptorPool();
+    void createDescriptorSets();
     void mainLoop();
     void cleanup();
     
@@ -50,7 +57,10 @@ private:
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+    static void mouseCallback(GLFWwindow* window, double xpos, double ypos);
+    static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
     void recreateSwapChain();
+    void processKeyboardInput(float deltaTime);
 
     // Window
     GLFWwindow* window;
@@ -62,8 +72,12 @@ private:
     std::unique_ptr<VulkanSwapChain> swapChain;
     std::unique_ptr<VulkanPipeline> pbrPipeline;
     
-    // Resources
-    std::unique_ptr<VulkanBuffer> uniformBuffer;
+    // Uniform Buffers (每帧一个)
+    std::vector<std::unique_ptr<VulkanBuffer>> uniformBuffers;
+    std::vector<void*> uniformBuffersMapped;
+    
+    // Descriptors
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
     
     // Geometry
@@ -85,6 +99,12 @@ private:
     
     uint32_t currentFrame = 0;
     bool framebufferResized = false;
+    
+    // 鼠标状态
+    float lastMouseX = 640.0f;
+    float lastMouseY = 360.0f;
+    bool firstMouse = true;
+    bool mouseEnabled = false;
     
     static const int MAX_FRAMES_IN_FLIGHT = 2;
 };

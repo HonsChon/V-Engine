@@ -10,25 +10,24 @@ layout(location = 6) in vec3 fragLightPos;
 
 layout(location = 0) out vec4 outColor;
 
-// Material textures
-layout(binding = 1) uniform sampler2D albedoMap;
-layout(binding = 2) uniform sampler2D normalMap;
-layout(binding = 3) uniform sampler2D metallicMap;
-layout(binding = 4) uniform sampler2D roughnessMap;
-layout(binding = 5) uniform sampler2D aoMap;
+// 使用 push constant 或默认材质参数（暂时不使用纹理）
+// layout(binding = 1) uniform sampler2D albedoMap;
+// layout(binding = 2) uniform sampler2D normalMap;
+// layout(binding = 3) uniform sampler2D metallicMap;
+// layout(binding = 4) uniform sampler2D roughnessMap;
+// layout(binding = 5) uniform sampler2D aoMap;
 
 const float PI = 3.14159265359;
 
-// Cook-Torrance BRDF functions
-vec3 getNormalFromMap() {
-    vec3 tangentNormal = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
-    
-    vec3 N = normalize(fragNormal);
-    vec3 T = normalize(fragTangent);
-    vec3 B = normalize(fragBitangent);
-    mat3 TBN = mat3(T, B, N);
-    
-    return normalize(TBN * tangentNormal);
+// 默认材质参数
+const vec3 DEFAULT_ALBEDO = vec3(0.8, 0.2, 0.2);  // 红色
+const float DEFAULT_METALLIC = 0.0;   // 非金属
+const float DEFAULT_ROUGHNESS = 0.5;  // 中等粗糙度
+const float DEFAULT_AO = 1.0;         // 无遮蔽
+
+// 使用顶点法线（不使用法线贴图）
+vec3 getNormal() {
+    return normalize(fragNormal);
 }
 
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
@@ -68,15 +67,18 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 void main() {
-    vec3 albedo = pow(texture(albedoMap, fragTexCoord).rgb, vec3(2.2)); // gamma correction
-    float metallic = texture(metallicMap, fragTexCoord).r;
-    float roughness = texture(roughnessMap, fragTexCoord).r;
-    float ao = texture(aoMap, fragTexCoord).r;
+    // 使用默认材质参数（不使用纹理）
+    vec3 albedo = DEFAULT_ALBEDO;
+    float metallic = DEFAULT_METALLIC;
+    float roughness = DEFAULT_ROUGHNESS;
+    float ao = DEFAULT_AO;
     
-    vec3 N = getNormalFromMap();
+    vec3 N = getNormal();
     vec3 V = normalize(fragViewPos - fragWorldPos);
     
     // Calculate reflectance at normal incidence
+    // 对于非金属材质，F0 约为 0.04
+    // 对于金属材质，F0 为 albedo 颜色
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
     
@@ -88,7 +90,8 @@ void main() {
     vec3 H = normalize(V + L);
     float distance = length(fragLightPos - fragWorldPos);
     float attenuation = 1.0 / (distance * distance);
-    vec3 radiance = vec3(23.47, 21.31, 20.79) * attenuation; // Light color with attenuation
+    vec3 lightColor = vec3(300.0, 300.0, 300.0);  // 强光源
+    vec3 radiance = lightColor * attenuation;
     
     // Cook-Torrance BRDF
     float NDF = DistributionGGX(N, H, roughness);
@@ -97,7 +100,7 @@ void main() {
     
     vec3 kS = F;
     vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;
+    kD *= 1.0 - metallic;  // 金属没有漫反射
     
     vec3 numerator = NDF * G * F;
     float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
@@ -106,13 +109,14 @@ void main() {
     float NdotL = max(dot(N, L), 0.0);
     Lo += (kD * albedo / PI + specular) * radiance * NdotL;
     
-    // Ambient lighting (simplified)
+    // Ambient lighting (简化的环境光)
     vec3 ambient = vec3(0.03) * albedo * ao;
     
     vec3 color = ambient + Lo;
     
-    // HDR tonemapping
+    // HDR tonemapping (Reinhard)
     color = color / (color + vec3(1.0));
+    
     // Gamma correction
     color = pow(color, vec3(1.0/2.2));
     
