@@ -23,9 +23,9 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
     alignas(16) glm::mat4 normalMatrix;
-    alignas(16) glm::vec3 viewPos;
-    alignas(16) glm::vec3 lightPos;
-    alignas(16) glm::vec3 lightColor;
+    alignas(16) glm::vec4 viewPos;      // 使用 vec4 确保 std140 对齐
+    alignas(16) glm::vec4 lightPos;     // 使用 vec4 确保 std140 对齐
+    alignas(16) glm::vec4 lightColor;   // 使用 vec4 确保 std140 对齐
 };
 
 class VulkanRenderer {

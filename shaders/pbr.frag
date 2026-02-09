@@ -20,9 +20,9 @@ layout(location = 0) out vec4 outColor;
 const float PI = 3.14159265359;
 
 // 默认材质参数
-const vec3 DEFAULT_ALBEDO = vec3(0.8, 0.2, 0.2);  // 红色
-const float DEFAULT_METALLIC = 0.0;   // 非金属
-const float DEFAULT_ROUGHNESS = 0.5;  // 中等粗糙度
+const vec3 DEFAULT_ALBEDO = vec3(0.5, 0.2, 0.2);  // 红色
+const float DEFAULT_METALLIC = 1;   // 非金属
+const float DEFAULT_ROUGHNESS = 0.1;  // 中等粗糙度
 const float DEFAULT_AO = 1.0;         // 无遮蔽
 
 // 使用顶点法线（不使用法线贴图）

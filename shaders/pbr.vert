@@ -5,9 +5,9 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
     mat4 normalMatrix;
-    vec3 viewPos;
-    vec3 lightPos;
-    vec3 lightColor;
+    vec4 viewPos;      // 使用 vec4 确保 std140 对齐
+    vec4 lightPos;     // 使用 vec4 确保 std140 对齐
+    vec4 lightColor;   // 使用 vec4 确保 std140 对齐
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -28,8 +28,8 @@ void main() {
     vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
     
-    // Transform normal to world space
-    fragNormal = normalize(mat3(ubo.normalMatrix) * inNormal);
+    // Transform normal to world space (取反以修正法线方向)
+    fragNormal = -normalize(mat3(ubo.normalMatrix) * inNormal);
     
     // Transform tangent to world space
     fragTangent = normalize(mat3(ubo.normalMatrix) * inTangent);
@@ -40,9 +40,9 @@ void main() {
     // Pass through texture coordinates
     fragTexCoord = inTexCoord;
     
-    // Pass view and light positions
-    fragViewPos = ubo.viewPos;
-    fragLightPos = ubo.lightPos;
+    // Pass view and light positions (提取 xyz 分量)
+    fragViewPos = ubo.viewPos.xyz;
+    fragLightPos = ubo.lightPos.xyz;
     
     // Transform to clip space
     gl_Position = ubo.proj * ubo.view * worldPos;

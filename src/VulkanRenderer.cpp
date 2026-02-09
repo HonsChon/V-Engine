@@ -75,7 +75,7 @@ void VulkanRenderer::initVulkan() {
     
     // 创建几何体
     cubeMesh = std::make_unique<Mesh>();
-    cubeMesh->createCube();  // 创建立方体
+    cubeMesh->createSphere(128);  // 创建球体，32段细分
     
     std::cout << "Created cube with " << cubeMesh->getVertices().size() << " vertices and " 
               << cubeMesh->getIndices().size() << " indices" << std::endl;
@@ -316,13 +316,13 @@ void VulkanRenderer::drawFrame() {
 void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
     
-    // Model 矩阵 - 立方体可以自动旋转
+    // 计算时间
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
     
-    // 立方体缓慢旋转
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Model 矩阵 - 球体保持静止（单位矩阵）
+    ubo.model = glm::mat4(1.0f);
     
     // View 矩阵 - 从相机获取
     if (camera) {
@@ -344,12 +344,24 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     // Normal 矩阵（用于法线变换）
     ubo.normalMatrix = glm::transpose(glm::inverse(ubo.model));
     
-    // 相机位置（用于光照计算）
-    ubo.viewPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
+    // 相机位置（用于光照计算）- 使用 vec4，w 分量不使用
+    glm::vec3 camPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
+    ubo.viewPos = glm::vec4(camPos, 1.0f);
     
-    // 光源位置和颜色
-    ubo.lightPos = glm::vec3(5.0f, 5.0f, 5.0f);
-    ubo.lightColor = glm::vec3(300.0f, 300.0f, 300.0f); // 高强度点光源
+    // 光源绕球体旋转
+    float lightRadius = 5.0f;  // 灯光距离球体中心的距离
+    float lightSpeed = 0.5f;   // 旋转速度（每秒弧度数）
+    float lightAngle = time * lightSpeed;
+    
+    // 灯光在 XZ 平面上绕 Y 轴旋转，同时有一定高度
+    glm::vec3 lightPosition = glm::vec3(
+        lightRadius * cos(lightAngle),   // X 坐标
+        3.0f,                             // Y 坐标（高度）
+        lightRadius * sin(lightAngle)    // Z 坐标
+    );
+    ubo.lightPos = glm::vec4(lightPosition, 1.0f);
+    
+    ubo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f); // 高强度点光源
     
     // 复制到映射的内存
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
