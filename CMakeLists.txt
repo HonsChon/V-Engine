@@ -92,6 +92,11 @@ endif()
 # ============================================================
 include_directories(${Vulkan_INCLUDE_DIRS})
 include_directories(src)
+include_directories(src/core)
+include_directories(src/passes)
+include_directories(src/renderer)
+include_directories(src/resources)
+include_directories(src/third_party)
 
 if(DEFINED GLFW_INCLUDE_DIR)
     include_directories(${GLFW_INCLUDE_DIR})
@@ -102,42 +107,109 @@ if(DEFINED GLM_INCLUDE_DIR)
 endif()
 
 # ============================================================
-# Source files
+# Source files -- 按目录组织
 # ============================================================
-set(SOURCES
-    src/main.cpp
-    src/VulkanRenderer.cpp
-    src/VulkanDevice.cpp
-    src/VulkanSwapChain.cpp
-    src/VulkanBuffer.cpp
-    src/VulkanTexture.cpp
-    src/VulkanPipeline.cpp
-    src/Mesh.cpp
-    src/Material.cpp
-    src/Camera.cpp
-    src/Scene.cpp
-    src/Utils.cpp
+
+# Core - Vulkan 核心封装
+set(CORE_SOURCES
+    src/core/VulkanDevice.cpp
+    src/core/VulkanSwapChain.cpp
+    src/core/VulkanBuffer.cpp
+    src/core/VulkanTexture.cpp
+    src/core/VulkanPipeline.cpp
+    src/core/Utils.cpp
 )
 
-# Header files
-set(HEADERS
-    src/VulkanRenderer.h
-    src/VulkanDevice.h
-    src/VulkanSwapChain.h
-    src/VulkanBuffer.h
-    src/VulkanTexture.h
-    src/VulkanPipeline.h
-    src/Mesh.h
-    src/Material.h
-    src/Camera.h
-    src/Scene.h
-    src/Utils.h
+set(CORE_HEADERS
+    src/core/VulkanDevice.h
+    src/core/VulkanSwapChain.h
+    src/core/VulkanBuffer.h
+    src/core/VulkanTexture.h
+    src/core/VulkanPipeline.h
+    src/core/Utils.h
+)
+
+# Passes - 渲染通道
+set(PASSES_SOURCES
+    src/passes/GBuffer.cpp
+    src/passes/SSRPass.cpp
+    src/passes/WaterPass.cpp
+    src/passes/ForwardPass.cpp
+)
+
+set(PASSES_HEADERS
+    src/passes/RenderPassBase.h
+    src/passes/RenderContext.h
+    src/passes/GBuffer.h
+    src/passes/SSRPass.h
+    src/passes/WaterPass.h
+    src/passes/ForwardPass.h
+)
+
+# Renderer - 渲染器
+set(RENDERER_SOURCES
+    src/renderer/VulkanRenderer.cpp
+    src/renderer/Camera.cpp
+)
+
+set(RENDERER_HEADERS
+    src/renderer/VulkanRenderer.h
+    src/renderer/Camera.h
+)
+
+# Resources - 资源管理
+set(RESOURCES_SOURCES
+    src/resources/Mesh.cpp
+    src/resources/Material.cpp
+    src/resources/Scene.cpp
+)
+
+set(RESOURCES_HEADERS
+    src/resources/Mesh.h
+    src/resources/Material.h
+    src/resources/Scene.h
+)
+
+# Third Party Headers
+set(THIRD_PARTY_HEADERS
+    src/third_party/stb_image.h
+    src/third_party/tiny_obj_loader.h
+)
+
+# 合并所有源文件
+set(ALL_SOURCES
+    src/main.cpp
+    ${CORE_SOURCES}
+    ${PASSES_SOURCES}
+    ${RENDERER_SOURCES}
+    ${RESOURCES_SOURCES}
+)
+
+set(ALL_HEADERS
+    ${CORE_HEADERS}
+    ${PASSES_HEADERS}
+    ${RENDERER_HEADERS}
+    ${RESOURCES_HEADERS}
+    ${THIRD_PARTY_HEADERS}
 )
 
 # ============================================================
 # Create executable
 # ============================================================
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+add_executable(${PROJECT_NAME} ${ALL_SOURCES} ${ALL_HEADERS})
+
+# ============================================================
+# Source Groups for IDE (Visual Studio folder structure)
+# ============================================================
+source_group("Source Files/Core" FILES ${CORE_SOURCES})
+source_group("Source Files/Passes" FILES ${PASSES_SOURCES})
+source_group("Source Files/Renderer" FILES ${RENDERER_SOURCES})
+source_group("Source Files/Resources" FILES ${RESOURCES_SOURCES})
+source_group("Header Files/Core" FILES ${CORE_HEADERS})
+source_group("Header Files/Passes" FILES ${PASSES_HEADERS})
+source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
+source_group("Header Files/Resources" FILES ${RESOURCES_HEADERS})
+source_group("Header Files/Third Party" FILES ${THIRD_PARTY_HEADERS})
 
 # ============================================================
 # Link libraries
@@ -248,6 +320,12 @@ if(GLSLC)
         pbr.frag
         simple_mesh.vert
         simple_mesh.frag
+        gbuffer.vert
+        gbuffer.frag
+        ssr.vert
+        ssr.frag
+        water.vert
+        water.frag
     )
     
     foreach(SHADER_FILE ${SHADER_SOURCES})
@@ -289,5 +367,12 @@ message(STATUS "=== VulkanPBR Configuration ===")
 message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "")
+message(STATUS "Project Structure:")
+message(STATUS "  src/core/       - Vulkan core wrappers")
+message(STATUS "  src/passes/     - Render passes (GBuffer, SSR, etc.)")
+message(STATUS "  src/renderer/   - Main renderer and camera")
+message(STATUS "  src/resources/  - Mesh, Material, Scene")
+message(STATUS "  src/third_party/- Third party headers")
 message(STATUS "===============================")
 message(STATUS "")

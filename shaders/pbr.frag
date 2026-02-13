@@ -10,24 +10,31 @@ layout(location = 6) in vec3 fragLightPos;
 
 layout(location = 0) out vec4 outColor;
 
-// 使用 push constant 或默认材质参数（暂时不使用纹理）
-// layout(binding = 1) uniform sampler2D albedoMap;
-// layout(binding = 2) uniform sampler2D normalMap;
-// layout(binding = 3) uniform sampler2D metallicMap;
-// layout(binding = 4) uniform sampler2D roughnessMap;
-// layout(binding = 5) uniform sampler2D aoMap;
+// 纹理采样器
+layout(binding = 1) uniform sampler2D albedoMap;
+layout(binding = 2) uniform sampler2D normalMap;
+layout(binding = 3) uniform sampler2D specularMap;  // 用作金属度/粗糙度控制
 
 const float PI = 3.14159265359;
 
-// 默认材质参数
-const vec3 DEFAULT_ALBEDO = vec3(0.5, 0.0, 0.0);  // 红色
-const float DEFAULT_METALLIC = 1;   // 非金属
-const float DEFAULT_ROUGHNESS = 0.3;  // 中等粗糙度
+// 默认材质参数（当纹理不可用时的回退）
+const float DEFAULT_METALLIC = 0.0;   // 非金属
+const float DEFAULT_ROUGHNESS = 0.5;  // 中等粗糙度
 const float DEFAULT_AO = 1.0;         // 无遮蔽
 
-// 使用顶点法线（不使用法线贴图）
-vec3 getNormal() {
-    return normalize(fragNormal);
+// 从法线贴图获取法线（切线空间到世界空间）
+vec3 getNormalFromMap() {
+    // 采样法线贴图
+    vec3 tangentNormal = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
+    
+    // 构建 TBN 矩阵
+    vec3 N = normalize(fragNormal);
+    vec3 T = normalize(fragTangent);
+    vec3 B = normalize(fragBitangent);
+    mat3 TBN = mat3(T, B, N);
+    
+    // 转换到世界空间
+    return normalize(TBN * tangentNormal);
 }
 
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
@@ -67,18 +74,28 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 void main() {
-    // 使用默认材质参数（不使用纹理）
-    vec3 albedo = DEFAULT_ALBEDO;
-    float metallic = DEFAULT_METALLIC;
-    float roughness = DEFAULT_ROUGHNESS;
+    // 从纹理采样材质参数
+    vec3 albedo = pow(texture(albedoMap, fragTexCoord).rgb, vec3(2.2));  // sRGB 到线性空间
+    
+    // 从高光贴图获取金属度和粗糙度
+    // Spec Mask: 白色 = 高光/金属, 黑色 = 非高光/粗糙
+    vec3 specMask = texture(specularMap, fragTexCoord).rgb;
+    float specValue = (specMask.r + specMask.g + specMask.b) / 3.0;
+    
+    // 使用高光贴图控制粗糙度（反转：高光 = 低粗糙度）
+    float roughness = 1.0 - specValue * 0.8;  // 保留一些基础粗糙度
+    roughness = clamp(roughness, 0.05, 1.0);
+    
+    // 金属度：根据高光强度
+    float metallic = specValue * 0.3;  // 地球主要是非金属
+    
     float ao = DEFAULT_AO;
     
-    vec3 N = getNormal();
+    // 从法线贴图获取法线
+    vec3 N = getNormalFromMap();
     vec3 V = normalize(fragViewPos - fragWorldPos);
     
     // Calculate reflectance at normal incidence
-    // 对于非金属材质，F0 约为 0.04
-    // 对于金属材质，F0 为 albedo 颜色
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
     

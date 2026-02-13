@@ -10,8 +10,10 @@
 
 - **Vulkan API**: 使用现代的Vulkan图形API进行高性能渲染
 - **Cook-Torrance BRDF**: 实现了工业标准的物理渲染模型
+- **OBJ 模型加载**: 支持导入 Wavefront OBJ 格式的 3D 模型
 - **材质系统**: 支持albedo、normal、metallic、roughness和AO贴图
 - **相机控制**: 支持鼠标和键盘控制的第一人称相机
+- **拖拽加载**: 支持拖拽 OBJ 文件到窗口直接加载
 - **场景管理**: 简单的场景图系统，支持多个物体和变换
 
 ## 系统要求
@@ -90,8 +92,13 @@ make -j$(sysctl -n hw.ncpu)
 
 - **WASD**: 相机移动
 - **空格/Shift**: 相机上升/下降
-- **鼠标移动**: 相机旋转
+- **鼠标右键 + 移动**: 相机旋转
 - **鼠标滚轮**: 调整视野
+- **1**: 切换到球体模型
+- **2**: 切换到立方体模型
+- **3**: 切换到平面模型
+- **拖拽 OBJ 文件**: 加载自定义 3D 模型
+- **ESC**: 退出程序
 
 ## 项目结构
 
@@ -308,12 +315,17 @@ struct SwapChainSupportDetails {
 #### 7. Mesh（网格）
 **文件**: `Mesh.h/cpp`
 
-**职责**: 管理几何体数据（顶点和索引）。
+**职责**: 管理几何体数据（顶点和索引），支持多种几何体生成和 OBJ 文件加载。
 
 | 成员/方法 | 功能 |
 |-----------|------|
 | `createCube()` | 创建立方体网格 |
 | `createSphere()` | 创建 UV 球体网格 |
+| `createPlane()` | 创建平面网格 |
+| `loadFromOBJ()` | 从 OBJ 文件加载模型 |
+| `centerAndNormalize()` | 居中并归一化模型到单位大小 |
+| `calculateNormals()` | 计算顶点法线（如果 OBJ 没有提供） |
+| `calculateTangents()` | 计算切线空间（用于法线贴图） |
 | `getVertices()` | 获取顶点数组 |
 | `getIndices()` | 获取索引数组 |
 
@@ -326,6 +338,13 @@ struct Vertex {
     glm::vec3 tangent;   // 切线（用于法线贴图）
 };
 ```
+
+**OBJ 加载流程**:
+1. 使用 tinyobjloader 解析 OBJ 文件
+2. 使用 HashMap 进行顶点去重
+3. 如果缺少法线，自动计算面法线并累加到顶点
+4. 计算切线空间（Tangent Space）用于法线贴图
+5. 计算包围盒并可选择居中/归一化模型
 
 ---
 

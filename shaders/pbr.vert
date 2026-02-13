@@ -28,8 +28,8 @@ void main() {
     vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
     
-    // Transform normal to world space (取反以修正法线方向)
-    fragNormal = -normalize(mat3(ubo.normalMatrix) * inNormal);
+    // Transform normal to world space
+    fragNormal = normalize(mat3(ubo.normalMatrix) * inNormal);
     
     // Transform tangent to world space
     fragTangent = normalize(mat3(ubo.normalMatrix) * inTangent);
