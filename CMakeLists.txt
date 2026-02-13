@@ -135,6 +135,7 @@ set(PASSES_SOURCES
     src/passes/SSRPass.cpp
     src/passes/WaterPass.cpp
     src/passes/ForwardPass.cpp
+    src/passes/LightingPass.cpp
 )
 
 set(PASSES_HEADERS
@@ -144,6 +145,7 @@ set(PASSES_HEADERS
     src/passes/SSRPass.h
     src/passes/WaterPass.h
     src/passes/ForwardPass.h
+    src/passes/LightingPass.h
 )
 
 # Renderer - 渲染器
@@ -326,6 +328,8 @@ if(GLSLC)
         ssr.frag
         water.vert
         water.frag
+        deferred_lighting.vert
+        deferred_lighting.frag
     )
     
     foreach(SHADER_FILE ${SHADER_SOURCES})

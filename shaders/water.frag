@@ -42,7 +42,6 @@ void main() {
     
     // 计算屏幕坐标
     vec2 screenCoord = (fragClipPos.xy / fragClipPos.w) * 0.5 + 0.5;
-
     
     // 添加水面扰动
     float time = ubo.waterParams.z;
@@ -97,5 +96,5 @@ void main() {
     // 输出最终颜色
     float alpha = mix(ubo.waterColor.a, 1.0, fresnel);
     outColor = vec4(finalColor, alpha * edgeSoftness);
-    outColor = vec4(reflectionColor,1);
+
 }

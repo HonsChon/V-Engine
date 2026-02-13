@@ -22,6 +22,7 @@
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ForwardPass.h"
+#include "LightingPass.h"
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -150,6 +151,17 @@ private:
     
     // Forward Pass（前向渲染通道）
     std::unique_ptr<ForwardPass> forwardPass;
+    
+    // Lighting Pass（延迟渲染光照阶段）
+    std::unique_ptr<LightingPass> lightingPass;
+    
+    // 使用延迟渲染（默认 false 使用前向渲染）
+    bool useDeferredShading = false;
+    
+    // 延迟渲染相关方法
+    void initDeferredShading();
+    void cleanupDeferredShading();
+    void recordDeferredCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     
     // 场景颜色纹理 (用于 SSR 采样)
     VkImage sceneColorImage = VK_NULL_HANDLE;

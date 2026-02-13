@@ -743,7 +743,23 @@ void VulkanRenderer::initWaterScene() {
             }
         }
         
-        // 6. 更新 WaterPass 的描述符集（绑定 SSR 输出和深度纹理）
+        // 6. 创建 LightingPass（延迟渲染光照阶段）
+        lightingPass = std::make_unique<LightingPass>(devicePtr, width, height, swapChain->getRenderPass());
+        lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
+        std::cout << "  LightingPass created" << std::endl;
+        
+        // 7. 设置 LightingPass 的 G-Buffer 输入
+        if (gbuffer) {
+            lightingPass->setGBufferInputs(
+                gbuffer->getPositionView(),
+                gbuffer->getNormalView(),
+                gbuffer->getAlbedoView(),
+                gbuffer->getSampler()
+            );
+            std::cout << "  LightingPass G-Buffer inputs set" << std::endl;
+        }
+        
+        // 8. 更新 WaterPass 的描述符集（绑定 SSR 输出和深度纹理）
         if (ssrPass && gbuffer) {
             waterPass->updateDescriptorSets(
                 ssrPass->getOutputView(),       // SSR 反射纹理
@@ -754,7 +770,7 @@ void VulkanRenderer::initWaterScene() {
             std::cout << "  Water Pass descriptors updated" << std::endl;
         }
         
-        std::cout << "Water scene initialization complete!" << std::endl;
+        std::cout << "Water scene initialization complete! (Deferred Shading enabled)" << std::endl;
         
     } catch (const std::exception& e) {
         std::cerr << "Failed to initialize water scene: " << e.what() << std::endl;
@@ -787,6 +803,7 @@ void VulkanRenderer::cleanupWaterScene() {
     // 清理渲染通道
     waterPass.reset();
     ssrPass.reset();
+    lightingPass.reset();
     gbuffer.reset();
 }
 
@@ -1073,22 +1090,29 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // 使用 ForwardPass 进行渲染（每个 Pass 管理自己的 Pipeline 和 Descriptor）
-        if (forwardPass && vertexBuffer && indexBuffer && mesh) {
-            // 设置视口和裁剪
-            forwardPass->begin(commandBuffer);
+        // 使用 LightingPass 进行延迟光照渲染（从 G-Buffer 读取数据）
+        if (lightingPass && gbuffer) {
+            // 计算光源位置（与 ForwardPass 保持一致）
+            static auto startTime = std::chrono::high_resolution_clock::now();
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            float time = std::chrono::duration<float>(currentTime - startTime).count();
             
-            // 绑定前向渲染管线
-            forwardPass->bindPipeline(commandBuffer);
+            float lightRadius = 5.0f;
+            float lightSpeed = 0.5f;
+            float lightAngle = time * lightSpeed;
+            glm::vec3 lightPosition = glm::vec3(
+                lightRadius * cos(lightAngle),
+                3.0f,
+                lightRadius * sin(lightAngle)
+            );
             
-            // 绑定描述符集
-            forwardPass->bindDescriptorSet(commandBuffer, currentFrame);
+            // 更新 LightingPass 的 Uniform
+            glm::vec3 camPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
+            lightingPass->updateUniforms(currentFrame, camPos, lightPosition, 
+                                         glm::vec3(300.0f, 300.0f, 300.0f), 1.0f);
             
-            // 绘制网格
-            forwardPass->drawMesh(commandBuffer, 
-                                  vertexBuffer->getBuffer(), 
-                                  indexBuffer->getBuffer(), 
-                                  static_cast<uint32_t>(mesh->getIndices().size()));
+            // 渲染全屏光照四边形
+            lightingPass->render(commandBuffer, currentFrame);
         }
 
         // 渲染水面（使用 SSR 反射结果）
