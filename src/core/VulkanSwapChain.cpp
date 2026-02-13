@@ -50,15 +50,16 @@ VulkanSwapChain::~VulkanSwapChain() {
  * @param height 新的窗口高度
  * 
  * 当窗口大小改变时调用此函数。需要重建交换链及其依赖的所有资源。
- * 注意：RenderPass 不需要重建，因为它只定义了附件的格式和使用方式，与分辨率无关。
+ * 注意：RenderPass 也需要重建，因为 cleanup() 会销毁它。
  */
 void VulkanSwapChain::recreate(int width, int height) {
     this->width = width;
     this->height = height;
     
-    cleanup();               // 先清理旧资源
+    cleanup();               // 先清理旧资源（包括 RenderPass）
     createSwapChain();       // 重建交换链（新分辨率）
     createImageViews();      // 重建图像视图
+    createRenderPass();      // 重建渲染通道（cleanup 销毁了它）
     createDepthResources();  // 重建深度缓冲（需要匹配新分辨率）
     createFramebuffers();    // 重建帧缓冲
 }

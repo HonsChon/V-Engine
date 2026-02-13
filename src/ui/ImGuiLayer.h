@@ -73,9 +73,12 @@ public:
     void endFrame(VkCommandBuffer commandBuffer);
 
     /**
-     * 处理窗口大小改变
+     * 处理窗口大小改变（交换链重建时调用）
+     * @param width 新宽度
+     * @param height 新高度
+     * @param renderPass 新的 RenderPass（交换链重建后可能改变）
      */
-    void onResize(uint32_t width, uint32_t height);
+    void onResize(uint32_t width, uint32_t height, VkRenderPass renderPass = VK_NULL_HANDLE);
 
     /**
      * 检查是否已初始化

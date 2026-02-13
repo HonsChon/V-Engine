@@ -636,6 +636,13 @@ void VulkanRenderer::recreateSwapChain() {
     if (forwardPass) {
         forwardPass->recreate(swapChain->getRenderPass(), width, height);
     }
+    
+    // 通知 ImGui 窗口大小改变
+    if (imguiLayer) {
+        imguiLayer->onResize(static_cast<uint32_t>(width), 
+                             static_cast<uint32_t>(height), 
+                             swapChain->getRenderPass());
+    }
 }
 
 void VulkanRenderer::createVertexBuffer() {

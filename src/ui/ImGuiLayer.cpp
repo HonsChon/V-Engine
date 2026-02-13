@@ -244,9 +244,22 @@ void ImGuiLayer::endFrame(VkCommandBuffer commandBuffer) {
     }
 }
 
-void ImGuiLayer::onResize(uint32_t width, uint32_t height) {
-    // ImGui 会自动处理窗口大小改变
-    // 这里可以添加额外的逻辑
+void ImGuiLayer::onResize(uint32_t width, uint32_t height, VkRenderPass renderPass) {
+    if (!initialized) return;
+    
+    // 当窗口大小为 0 时（最小化），不做任何操作
+    if (width == 0 || height == 0) return;
+    
+    // 如果提供了新的 RenderPass，需要重新设置 ImGui 的渲染管线
+    // 新版本的 ImGui Vulkan 后端会在 NewFrame 时自动处理大部分情况
+    // 但为了安全起见，我们可以通知 ImGui 更新视口大小
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
+    
+    // 注意：如果 RenderPass 结构发生变化（attachments 不同），
+    // 可能需要重新初始化 ImGui Vulkan 后端
+    // 但通常交换链重建不会改变 RenderPass 的 attachment 结构
+    (void)renderPass;  // 目前未使用，保留参数以备将来扩展
 }
 
 bool ImGuiLayer::wantCaptureMouse() const {
