@@ -1,7 +1,7 @@
 #include "VulkanRenderer.h"
 #include "VulkanTexture.h"
 #include "Mesh.h"
-#include "GBuffer.h"
+#include "GBufferPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ForwardPass.h"
@@ -709,7 +709,7 @@ void VulkanRenderer::initWaterScene() {
     
     try {
         // 1. 创建 G-Buffer
-        gbuffer = std::make_unique<GBuffer>(devicePtr, width, height);
+        gbuffer = std::make_unique<GBufferPass>(devicePtr, width, height);
         std::cout << "  G-Buffer created" << std::endl;
         
         // 2. 创建 SSR Pass
@@ -945,7 +945,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
     // ========================================
     if (gbuffer && forwardPass) {
         // 更新 GBuffer 的 UBO（从 ForwardPass 拷贝数据）
-        GBuffer::UniformBufferObject gbufferUBO{};
+        GBufferPass::UniformBufferObject gbufferUBO{};
         
         // 从相机获取 View/Projection 矩阵
         if (camera) {

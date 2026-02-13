@@ -13,7 +13,7 @@ class VulkanDevice;
 class VulkanBuffer;
 
 /**
- * GBuffer - 几何缓冲区渲染通道
+ * GBufferPass - 几何缓冲区渲染通道
  * 
  * 用于延迟渲染的第一阶段，存储场景的几何信息：
  * - Position (RGB16F) - 世界空间位置
@@ -21,7 +21,7 @@ class VulkanBuffer;
  * - Albedo (RGBA8) - 反照率 + 金属度
  * - Depth (D32F) - 深度缓冲
  */
-class GBuffer : public RenderPassBase {
+class GBufferPass : public RenderPassBase {
 public:
     // G-Buffer 附件索引
     enum Attachment {
@@ -32,12 +32,12 @@ public:
         COUNT = 4
     };
 
-    GBuffer(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
-    ~GBuffer();
+    GBufferPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
+    ~GBufferPass();
 
     // 禁止拷贝
-    GBuffer(const GBuffer&) = delete;
-    GBuffer& operator=(const GBuffer&) = delete;
+    GBufferPass(const GBufferPass&) = delete;
+    GBufferPass& operator=(const GBufferPass&) = delete;
 
     // 重新创建 GBuffer（窗口大小改变时）
     void resize(uint32_t width, uint32_t height);
@@ -167,12 +167,6 @@ private:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets = {};
-    
-    // 缓存的纹理绑定
-    VkImageView cachedAlbedoView = VK_NULL_HANDLE;
-    VkImageView cachedNormalView = VK_NULL_HANDLE;
-    VkImageView cachedSpecularView = VK_NULL_HANDLE;
-    VkSampler cachedTextureSampler = VK_NULL_HANDLE;
     
     // Uniform Buffers
     std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniformBuffers = {};

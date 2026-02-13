@@ -1,10 +1,10 @@
-#include "GBuffer.h"
+#include "GBufferPass.h"
 #include "../core/VulkanDevice.h"
 #include <stdexcept>
 #include <iostream>
 #include <fstream>
 
-GBuffer::GBuffer(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height)
+GBufferPass::GBufferPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height)
     : RenderPassBase(device, width, height)
     , device(device)
     , width(width)
@@ -19,14 +19,14 @@ GBuffer::GBuffer(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t 
     createDescriptorSetLayout();
     createPipeline();
     
-    std::cout << "GBuffer created: " << width << "x" << height << std::endl;
+    std::cout << "GBufferPass created: " << width << "x" << height << std::endl;
 }
 
-GBuffer::~GBuffer() {
+GBufferPass::~GBufferPass() {
     cleanup();
 }
 
-void GBuffer::resize(uint32_t newWidth, uint32_t newHeight) {
+void GBufferPass::resize(uint32_t newWidth, uint32_t newHeight) {
     if (newWidth == width && newHeight == height) {
         return;
     }
@@ -43,13 +43,13 @@ void GBuffer::resize(uint32_t newWidth, uint32_t newHeight) {
     createFramebuffer();
     createSampler();
     
-    std::cout << "GBuffer resized: " << width << "x" << height << std::endl;
+    std::cout << "GBufferPass resized: " << width << "x" << height << std::endl;
 }
 
-void GBuffer::cleanup() {
+void GBufferPass::cleanup() {
     VkDevice dev = device->getDevice();
     
-    // 销毁 Uniform Buffers
+    // 销�?Uniform Buffers
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
             vkDestroyBuffer(dev, uniformBuffers[i], nullptr);
@@ -71,7 +71,7 @@ void GBuffer::cleanup() {
         }
     }
     
-    // 销毁 Pipeline
+    // 销�?Pipeline
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(dev, pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;
@@ -118,7 +118,7 @@ void GBuffer::cleanup() {
     }
 }
 
-void GBuffer::createAttachments() {
+void GBufferPass::createAttachments() {
     // Position - 世界空间位置
     createImage(attachmentFormats[POSITION], 
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -129,7 +129,7 @@ void GBuffer::createAttachments() {
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, NORMAL);
     
-    // Albedo - 反照率 + 金属度
+    // Albedo - 反照�?+ 金属�?
     createImage(attachmentFormats[ALBEDO],
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, ALBEDO);
@@ -140,7 +140,7 @@ void GBuffer::createAttachments() {
                 VK_IMAGE_ASPECT_DEPTH_BIT, DEPTH);
 }
 
-void GBuffer::createImage(VkFormat format, VkImageUsageFlags usage, 
+void GBufferPass::createImage(VkFormat format, VkImageUsageFlags usage, 
                           VkImageAspectFlags aspect, uint32_t index) {
     VkDevice dev = device->getDevice();
     
@@ -197,7 +197,7 @@ void GBuffer::createImage(VkFormat format, VkImageUsageFlags usage,
     }
 }
 
-void GBuffer::createRenderPass() {
+void GBufferPass::createRenderPass() {
     // 附件描述
     std::array<VkAttachmentDescription, COUNT> attachments{};
     
@@ -299,7 +299,7 @@ void GBuffer::createRenderPass() {
     }
 }
 
-void GBuffer::createFramebuffer() {
+void GBufferPass::createFramebuffer() {
     std::array<VkImageView, COUNT> attachmentViewsArray = {
         attachmentViews[POSITION],
         attachmentViews[NORMAL],
@@ -321,7 +321,7 @@ void GBuffer::createFramebuffer() {
     }
 }
 
-void GBuffer::createSampler() {
+void GBufferPass::createSampler() {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -345,7 +345,7 @@ void GBuffer::createSampler() {
     }
 }
 
-void GBuffer::beginRenderPass(VkCommandBuffer cmd) {
+void GBufferPass::beginRenderPass(VkCommandBuffer cmd) {
     auto clearValues = getClearValues();
     
     VkRenderPassBeginInfo renderPassInfo{};
@@ -359,7 +359,7 @@ void GBuffer::beginRenderPass(VkCommandBuffer cmd) {
     
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     
-    // 设置视口和裁剪
+    // 设置视口和裁�?
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -375,29 +375,29 @@ void GBuffer::beginRenderPass(VkCommandBuffer cmd) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
-void GBuffer::endRenderPass(VkCommandBuffer cmd) {
+void GBufferPass::endRenderPass(VkCommandBuffer cmd) {
     vkCmdEndRenderPass(cmd);
 }
 
-std::array<VkClearValue, 4> GBuffer::getClearValues() const {
+std::array<VkClearValue, 4> GBufferPass::getClearValues() const {
     std::array<VkClearValue, 4> clearValues{};
     
-    // Position - 清除为黑色（远处）
+    // Position - 清除为黑色（远处�?
     clearValues[0].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Normal - 清除为黑色
+    // Normal - 清除为黑�?
     clearValues[1].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Albedo - 清除为黑色
+    // Albedo - 清除为黑�?
     clearValues[2].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Depth - 清除为最远
+    // Depth - 清除为最�?
     clearValues[3].depthStencil = { 1.0f, 0 };
     
     return clearValues;
 }
 
-uint32_t GBuffer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+uint32_t GBufferPass::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(device->getPhysicalDevice(), &memProperties);
     
@@ -415,10 +415,10 @@ uint32_t GBuffer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags prop
 // G-Buffer Pipeline 创建
 // ============================================
 
-void GBuffer::createDescriptorSetLayout() {
+void GBufferPass::createDescriptorSetLayout() {
     std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
     
-    // binding 0: UBO (变换矩阵等)
+    // binding 0: UBO (变换矩阵�?
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
@@ -456,7 +456,7 @@ void GBuffer::createDescriptorSetLayout() {
     }
 }
 
-void GBuffer::createPipeline() {
+void GBufferPass::createPipeline() {
     VkDevice dev = device->getDevice();
     
     // 读取着色器
@@ -532,7 +532,7 @@ void GBuffer::createPipeline() {
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
     
-    // 光栅化
+    // 光栅�?
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -558,7 +558,7 @@ void GBuffer::createPipeline() {
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
     
-    // 颜色混合 - 3个颜色附件，无混合
+    // 颜色混合 - 3个颜色附件，无混�?
     std::array<VkPipelineColorBlendAttachmentState, 3> colorBlendAttachments{};
     for (auto& attachment : colorBlendAttachments) {
         attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
@@ -572,7 +572,7 @@ void GBuffer::createPipeline() {
     colorBlending.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
     colorBlending.pAttachments = colorBlendAttachments.data();
     
-    // 动态状态
+    // 动态状�?
     std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -622,7 +622,7 @@ void GBuffer::createPipeline() {
     std::cout << "GBuffer pipeline created successfully!" << std::endl;
 }
 
-VkShaderModule GBuffer::createShaderModule(const std::vector<char>& code) {
+VkShaderModule GBufferPass::createShaderModule(const std::vector<char>& code) {
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
@@ -636,7 +636,7 @@ VkShaderModule GBuffer::createShaderModule(const std::vector<char>& code) {
     return shaderModule;
 }
 
-std::vector<char> GBuffer::readFile(const std::string& filename) {
+std::vector<char> GBufferPass::readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     
     if (!file.is_open()) {
@@ -657,21 +657,21 @@ std::vector<char> GBuffer::readFile(const std::string& filename) {
 // recordCommands 实现
 // ============================================
 
-void GBuffer::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // 使用当前存储的 context 录制命令
+void GBufferPass::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // 使用当前存储�?context 录制命令
     recordCommands(cmd, currentContext);
 }
 
-void GBuffer::recordCommands(VkCommandBuffer cmd, const RenderContext& context) {
+void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& context) {
     if (!enabled) return;
     
-    // 开始 G-Buffer 渲染通道
+    // 开�?G-Buffer 渲染通道
     beginRenderPass(cmd);
     
     // 绑定 G-Buffer Pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     
-    // 绑定描述符集（如果已设置）
+    // 绑定描述符集（如果已设置�?
     if (currentDescriptorSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
                                pipelineLayout, 0, 1, 
@@ -695,10 +695,10 @@ void GBuffer::recordCommands(VkCommandBuffer cmd, const RenderContext& context) 
 }
 
 // ============================================
-// 描述符集创建和更新
+// 描述符集创建和更�?
 // ============================================
 
-void GBuffer::createUniformBuffers() {
+void GBufferPass::createUniformBuffers() {
     VkDevice dev = device->getDevice();
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
     
@@ -737,13 +737,13 @@ void GBuffer::createUniformBuffers() {
     std::cout << "GBuffer uniform buffers created" << std::endl;
 }
 
-void GBuffer::createDescriptorSets() {
+void GBufferPass::createDescriptorSets() {
     VkDevice dev = device->getDevice();
     
-    // 先创建 Uniform Buffers
+    // 先创�?Uniform Buffers
     createUniformBuffers();
     
-    // 如果已存在描述符池，先销毁
+    // 如果已存在描述符池，先销�?
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
@@ -801,24 +801,18 @@ void GBuffer::createDescriptorSets() {
     std::cout << "GBuffer descriptor sets created and UBO bound" << std::endl;
 }
 
-void GBuffer::updateUniformBuffer(uint32_t frameIndex, const UniformBufferObject& ubo) {
+void GBufferPass::updateUniformBuffer(uint32_t frameIndex, const UniformBufferObject& ubo) {
     if (frameIndex < MAX_FRAMES_IN_FLIGHT && uniformBuffersMapped[frameIndex] != nullptr) {
         memcpy(uniformBuffersMapped[frameIndex], &ubo, sizeof(ubo));
     }
 }
 
-void GBuffer::updateTextureBindings(VkImageView albedoView, VkImageView normalView, 
+void GBufferPass::updateTextureBindings(VkImageView albedoView, VkImageView normalView, 
                                      VkImageView specularView, VkSampler textureSampler) {
     if (descriptorPool == VK_NULL_HANDLE) {
         std::cerr << "GBuffer: Cannot update texture bindings - descriptor sets not created!" << std::endl;
         return;
     }
-    
-    // 缓存纹理绑定
-    cachedAlbedoView = albedoView;
-    cachedNormalView = normalView;
-    cachedSpecularView = specularView;
-    cachedTextureSampler = textureSampler;
     
     VkDevice dev = device->getDevice();
     
@@ -860,21 +854,21 @@ void GBuffer::updateTextureBindings(VkImageView albedoView, VkImageView normalVi
 }
 
 // ============================================
-// Pipeline 绑定和绘制方法
+// Pipeline 绑定和绘制方�?
 // ============================================
 
-void GBuffer::bindPipeline(VkCommandBuffer cmd) const {
+void GBufferPass::bindPipeline(VkCommandBuffer cmd) const {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 }
 
-void GBuffer::bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const {
+void GBufferPass::bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const {
     if (frameIndex < MAX_FRAMES_IN_FLIGHT && descriptorSets[frameIndex] != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
                                 pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
     }
 }
 
-void GBuffer::drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) const {
+void GBufferPass::drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) const {
     VkBuffer vertexBuffers[] = { vertexBuffer };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);

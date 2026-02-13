@@ -9,7 +9,7 @@
 #include <string>
 
 class VulkanDevice;
-class GBuffer;
+class GBufferPass;
 
 /**
  * LightingPass - 延迟渲染光照阶段

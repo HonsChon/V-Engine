@@ -18,7 +18,7 @@
 #include "Mesh.h"
 #include "Camera.h"
 #include "Scene.h"
-#include "GBuffer.h"
+#include "GBufferPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ForwardPass.h"
@@ -141,7 +141,7 @@ private:
     RenderMode renderMode = RenderMode::Normal;
     
     // G-Buffer (用于延迟渲染和 SSR)
-    std::unique_ptr<GBuffer> gbuffer;
+    std::unique_ptr<GBufferPass> gbuffer;
     
     // SSR Pass
     std::unique_ptr<SSRPass> ssrPass;

@@ -8,7 +8,7 @@
 
 class VulkanDevice;
 class VulkanBuffer;
-class GBuffer;
+class GBufferPass;
 
 /**
  * SSRPass - 屏幕空间反射渲染通道
@@ -50,8 +50,8 @@ public:
     void setThickness(float thickness) { params.thickness = thickness; }
     void setMaxSteps(float steps) { params.maxSteps = steps; }
 
-    // 执行 SSR Pass（需要 GBuffer 和场景颜色作为输入）
-    void execute(VkCommandBuffer cmd, GBuffer* gbuffer, 
+    // 执行 SSR Pass（需要 GBufferPass 和场景颜色作为输入）
+    void execute(VkCommandBuffer cmd, GBufferPass* gbuffer, 
                  VkImageView sceneColorView, uint32_t frameIndex);
 
     // 获取输出纹理

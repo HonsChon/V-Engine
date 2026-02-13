@@ -1,5 +1,5 @@
 #include "SSRPass.h"
-#include "GBuffer.h"
+#include "GBufferPass.h"
 #include "VulkanDevice.h"
 #include "VulkanBuffer.h"
 #include "VulkanPipeline.h"
@@ -486,7 +486,7 @@ void SSRPass::updateParams(const glm::mat4& projection, const glm::mat4& view,
     memcpy(uniformBuffersMapped[frameIndex], &params, sizeof(SSRParams));
 }
 
-void SSRPass::execute(VkCommandBuffer cmd, GBuffer* gbuffer, 
+void SSRPass::execute(VkCommandBuffer cmd, GBufferPass* gbuffer, 
                       VkImageView sceneColorView, uint32_t frameIndex) {
     // 更新描述符集
     std::array<VkDescriptorImageInfo, 5> imageInfos{};

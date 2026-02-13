@@ -131,7 +131,7 @@ set(CORE_HEADERS
 
 # Passes - 渲染通道
 set(PASSES_SOURCES
-    src/passes/GBuffer.cpp
+    src/passes/GBufferPass.cpp
     src/passes/SSRPass.cpp
     src/passes/WaterPass.cpp
     src/passes/ForwardPass.cpp
@@ -141,7 +141,7 @@ set(PASSES_SOURCES
 set(PASSES_HEADERS
     src/passes/RenderPassBase.h
     src/passes/RenderContext.h
-    src/passes/GBuffer.h
+    src/passes/GBufferPass.h
     src/passes/SSRPass.h
     src/passes/WaterPass.h
     src/passes/ForwardPass.h

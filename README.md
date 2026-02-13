@@ -46,7 +46,7 @@ VEngine/
 │   ├── passes/                  # 渲染通道 (模块化)
 │   │   ├── RenderPassBase.h     # 渲染通道基类
 │   │   ├── ForwardPass.*        # 前向渲染通道
-│   │   ├── GBuffer.*            # G-Buffer 通道 (延迟渲染第一阶段)
+│   │   ├── GBufferPass.*        # G-Buffer 通道 (延迟渲染第一阶段)
 │   │   ├── LightingPass.*       # 光照通道 (延迟渲染第二阶段)
 │   │   ├── SSRPass.*            # 屏幕空间反射通道
 │   │   └── WaterPass.*          # 水面渲染通道
@@ -262,8 +262,8 @@ glslc water.frag -o water_frag.spv
         ┌───────────────────────┼───────────────────────┐
         ▼                       ▼                       ▼
 ┌───────────────┐     ┌───────────────┐       ┌───────────────┐
-│  ForwardPass  │     │   GBuffer     │       │ LightingPass  │
-│  前向渲染     │     │  几何阶段     │       │  �光照阶段     │
+│  ForwardPass  │     │ GBufferPass   │       │ LightingPass  │
+│  前向渲染     │     │  几何阶段     │       │  光照阶段     │
 └───────────────┘     └───────────────┘       └───────────────┘
                                 │
         ┌───────────────────────┼───────────────────────┐
