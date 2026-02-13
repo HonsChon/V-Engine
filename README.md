@@ -1,6 +1,6 @@
-# 🎮 Horizon Engine
+# 🎮 V Engine
 
-**Horizon** 是一个基于 Vulkan 的轻量级游戏引擎，专注于现代图形渲染技术的学习与实践。
+**V Engine** 是一个基于 Vulkan 的轻量级游戏引擎，专注于现代图形渲染技术的学习与实践。
 
 > 🚧 **开发中** - 该项目正在积极开发，API 可能会发生变化。
 
@@ -32,7 +32,7 @@
 ## 📁 项目结构
 
 ```
-HorizonEngine/
+VEngine/
 ├── src/
 │   ├── core/                    # 核心系统
 │   │   ├── VulkanDevice.*       # Vulkan 设备管理
@@ -190,7 +190,7 @@ HorizonEngine/
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd HorizonEngine
+cd VEngine
 
 # 创建构建目录
 mkdir build && cd build
@@ -342,5 +342,5 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 ---
 
 <p align="center">
-  <b>Horizon Engine</b> - 构建你的游戏世界 🌅
+  <b>V Engine</b> - 构建你的游戏世界 �
 </p>
