@@ -430,6 +430,9 @@ void VulkanDevice::createLogicalDevice() {
 
     vkGetDeviceQueue(device_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
     vkGetDeviceQueue(device_, indices.presentFamily.value(), 0, &presentQueue_);
+    
+    // 保存 graphics queue family index 以供外部使用
+    graphicsQueueFamily_ = indices.graphicsFamily.value();
 }
 
 void VulkanDevice::createCommandPool() {

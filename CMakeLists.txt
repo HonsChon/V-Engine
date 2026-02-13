@@ -97,6 +97,9 @@ include_directories(src/passes)
 include_directories(src/renderer)
 include_directories(src/resources)
 include_directories(src/third_party)
+include_directories(src/third_party/imgui)
+include_directories(src/third_party/imgui/backends)
+include_directories(src/ui)
 
 if(DEFINED GLFW_INCLUDE_DIR)
     include_directories(${GLFW_INCLUDE_DIR})
@@ -178,6 +181,48 @@ set(THIRD_PARTY_HEADERS
     src/third_party/tiny_obj_loader.h
 )
 
+# ImGui - UI 库
+set(IMGUI_DIR src/third_party/imgui)
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+)
+
+set(IMGUI_HEADERS
+    ${IMGUI_DIR}/imgui.h
+    ${IMGUI_DIR}/imgui_internal.h
+    ${IMGUI_DIR}/imconfig.h
+    ${IMGUI_DIR}/imstb_rectpack.h
+    ${IMGUI_DIR}/imstb_textedit.h
+    ${IMGUI_DIR}/imstb_truetype.h
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.h
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.h
+)
+
+# UI - 编辑器界面
+set(UI_SOURCES
+    src/ui/ImGuiLayer.cpp
+    src/ui/UIManager.cpp
+    src/ui/panels/DebugPanel.cpp
+    src/ui/panels/SceneHierarchyPanel.cpp
+    src/ui/panels/InspectorPanel.cpp
+    src/ui/panels/AssetBrowserPanel.cpp
+)
+
+set(UI_HEADERS
+    src/ui/ImGuiLayer.h
+    src/ui/UIManager.h
+    src/ui/panels/DebugPanel.h
+    src/ui/panels/SceneHierarchyPanel.h
+    src/ui/panels/InspectorPanel.h
+    src/ui/panels/AssetBrowserPanel.h
+)
+
 # 合并所有源文件
 set(ALL_SOURCES
     src/main.cpp
@@ -185,6 +230,8 @@ set(ALL_SOURCES
     ${PASSES_SOURCES}
     ${RENDERER_SOURCES}
     ${RESOURCES_SOURCES}
+    ${IMGUI_SOURCES}
+    ${UI_SOURCES}
 )
 
 set(ALL_HEADERS
@@ -193,6 +240,8 @@ set(ALL_HEADERS
     ${RENDERER_HEADERS}
     ${RESOURCES_HEADERS}
     ${THIRD_PARTY_HEADERS}
+    ${IMGUI_HEADERS}
+    ${UI_HEADERS}
 )
 
 # ============================================================
@@ -212,6 +261,10 @@ source_group("Header Files/Passes" FILES ${PASSES_HEADERS})
 source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
 source_group("Header Files/Resources" FILES ${RESOURCES_HEADERS})
 source_group("Header Files/Third Party" FILES ${THIRD_PARTY_HEADERS})
+source_group("Source Files/ImGui" FILES ${IMGUI_SOURCES})
+source_group("Header Files/ImGui" FILES ${IMGUI_HEADERS})
+source_group("Source Files/UI" FILES ${UI_SOURCES})
+source_group("Header Files/UI" FILES ${UI_HEADERS})
 
 # ============================================================
 # Link libraries

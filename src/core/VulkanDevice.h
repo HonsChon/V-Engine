@@ -36,6 +36,8 @@ public:
     VkQueue getGraphicsQueue() const { return graphicsQueue_; }
     VkQueue getPresentQueue() const { return presentQueue_; }
     VkCommandPool getCommandPool() const { return commandPool; }
+    uint32_t getGraphicsQueueFamily() const { return graphicsQueueFamily_; }
+    uint32_t getGraphicsQueueFamilyIndex() const { return graphicsQueueFamily_; }  // 别名
 
     // Helper functions
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
@@ -85,6 +87,7 @@ private:
     VkQueue graphicsQueue_;
     VkQueue presentQueue_;
     VkCommandPool commandPool;
+    uint32_t graphicsQueueFamily_ = 0;
 
     const std::vector<const char*> validationLayers = {
         "VK_LAYER_KHRONOS_validation"

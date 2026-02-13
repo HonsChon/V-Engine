@@ -5,6 +5,10 @@
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ForwardPass.h"
+#include "../ui/panels/DebugPanel.h"
+#include "../ui/panels/SceneHierarchyPanel.h"
+#include "../ui/panels/InspectorPanel.h"
+#include "../ui/panels/AssetBrowserPanel.h"
 #include <iostream>
 #include <stdexcept>
 #include <array>
@@ -84,6 +88,11 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                     renderer->renderMode = RenderMode::Normal;
                     std::cout << "Switching to Normal render mode" << std::endl;
                 }
+                break;
+            case GLFW_KEY_F1:
+                // 切换 UI 显示
+                renderer->showUI = !renderer->showUI;
+                std::cout << "UI " << (renderer->showUI ? "enabled" : "disabled") << std::endl;
                 break;
         }
     }
@@ -180,6 +189,9 @@ void VulkanRenderer::initVulkan() {
     
     // 创建相机 - 位于 (0, 0, 5) 看向原点
     camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
+    
+    // 初始化 UI 系统
+    initUI();
     
     std::cout << "Vulkan initialization complete!" << std::endl;
 }
@@ -292,18 +304,32 @@ void VulkanRenderer::mainLoop() {
     std::cout << "  3 - Load Plane" << std::endl;
     std::cout << "  4 - Load OBJ model (after drag & drop)" << std::endl;
     std::cout << "  5 - Toggle Water Scene (SSR reflection)" << std::endl;
+    std::cout << "  F1 - Toggle UI" << std::endl;
     std::cout << "  Drag & Drop - Load OBJ file" << std::endl;
     std::cout << "  ESC - Exit" << std::endl;
     
     int frameCount = 0;
     auto startTime = std::chrono::high_resolution_clock::now();
-    auto lastFrameTime = startTime;
+    lastFrameTime = static_cast<float>(glfwGetTime());
+    
+    // FPS 计算
+    float fpsUpdateTimer = 0.0f;
+    int fpsFrameCount = 0;
     
     while (!glfwWindowShouldClose(window)) {
         // 计算帧时间（deltaTime）
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime).count();
+        float currentTime = static_cast<float>(glfwGetTime());
+        deltaTime = currentTime - lastFrameTime;
         lastFrameTime = currentTime;
+        
+        // 更新 FPS 统计
+        fpsUpdateTimer += deltaTime;
+        fpsFrameCount++;
+        if (fpsUpdateTimer >= 1.0f) {
+            fps = static_cast<float>(fpsFrameCount) / fpsUpdateTimer;
+            fpsFrameCount = 0;
+            fpsUpdateTimer = 0.0f;
+        }
         
         glfwPollEvents();
         
@@ -339,7 +365,8 @@ void VulkanRenderer::mainLoop() {
         
         frameCount++;
         if (frameCount % 60 == 0) {
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
+            auto nowTime = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - startTime).count();
             std::cout << "Rendered " << frameCount << " frames in " << duration << "ms" << std::endl;
         }
         
@@ -577,6 +604,10 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                               static_cast<uint32_t>(mesh->getIndices().size()));
     }
 
+    // 更新并渲染 UI（在场景渲染之后，RenderPass 结束之前）
+    updateUI();
+    renderUI(commandBuffer);
+
     vkCmdEndRenderPass(commandBuffer);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -639,6 +670,99 @@ void VulkanRenderer::createIndexBuffer() {
     indexBuffer->copyFrom(indices.data(), bufferSize);
 }
 
+// ============================================================
+// UI 系统相关方法实现
+// ============================================================
+
+void VulkanRenderer::initUI() {
+    std::cout << "Initializing UI system..." << std::endl;
+    
+    try {
+        // 创建 ImGui 层
+        imguiLayer = std::make_unique<ImGuiLayer>(
+            window,
+            device->getInstance(),
+            device->getPhysicalDevice(),
+            device->getDevice(),
+            device->getGraphicsQueueFamily(),
+            device->getGraphicsQueue(),
+            swapChain->getRenderPass(),
+            static_cast<uint32_t>(swapChain->getImageCount())
+        );
+        
+        // 创建 UI 管理器
+        uiManager = std::make_unique<UIManager>();
+        
+        // 设置资源浏览器的根目录
+        if (uiManager->getAssetBrowserPanel()) {
+            uiManager->getAssetBrowserPanel()->setRootPath("assets");
+        }
+        
+        std::cout << "UI system initialized!" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize UI: " << e.what() << std::endl;
+        imguiLayer.reset();
+        uiManager.reset();
+    }
+}
+
+void VulkanRenderer::cleanupUI() {
+    if (imguiLayer) {
+        imguiLayer->cleanup();
+        imguiLayer.reset();
+    }
+    uiManager.reset();
+}
+
+void VulkanRenderer::updateUI() {
+    if (!uiManager || !camera) return;
+    
+    // 更新调试面板信息
+    auto* debugPanel = uiManager->getDebugPanel();
+    if (debugPanel) {
+        debugPanel->setFPS(fps);
+        debugPanel->setFrameTime(deltaTime * 1000.0f); // 转换为毫秒
+        
+        // 更新相机信息
+        debugPanel->setCameraPosition(camera->getPosition());
+        debugPanel->setCameraFOV(camera->getZoom());
+        
+        // 更新渲染器信息
+        uint32_t vertexCount = mesh ? static_cast<uint32_t>(mesh->getVertices().size()) : 0;
+        uint32_t triangleCount = mesh ? static_cast<uint32_t>(mesh->getIndices().size() / 3) : 0;
+        uint32_t drawCalls = 1; // 简化版本
+        debugPanel->setVertices(vertexCount);
+        debugPanel->setTriangles(triangleCount);
+        debugPanel->setDrawCalls(drawCalls);
+    }
+    
+    // 更新场景层级（示例对象）
+    auto* hierarchy = uiManager->getSceneHierarchyPanel();
+    static bool sceneInitialized = false;
+    if (hierarchy && !sceneInitialized) {
+        hierarchy->clearObjects();
+        hierarchy->addObject(1, "Main Camera", "Camera");
+        hierarchy->addObject(2, "Scene Root", "Node");
+        hierarchy->addObject(3, "Mesh Object", "Mesh");
+        hierarchy->addObject(4, "Point Light", "Light");
+        sceneInitialized = true;
+    }
+}
+
+void VulkanRenderer::renderUI(VkCommandBuffer commandBuffer) {
+    if (!imguiLayer || !uiManager || !showUI) return;
+    
+    // 开始新的 ImGui 帧
+    imguiLayer->beginFrame();
+    
+    // 渲染所有 UI 面板
+    uiManager->render();
+    
+    // 结束 ImGui 帧并记录渲染命令
+    imguiLayer->endFrame(commandBuffer);
+}
+
 void VulkanRenderer::loadTextures() {
     std::cout << "Loading textures..." << std::endl;
     
@@ -680,6 +804,12 @@ void VulkanRenderer::loadTextures() {
 // createDescriptorPool 和 createDescriptorSets 已移至各个 Pass 类中管理
 
 void VulkanRenderer::cleanup() {
+    // 等待设备闲置
+    vkDeviceWaitIdle(device->getDevice());
+    
+    // 清理 UI 系统
+    cleanupUI();
+    
     // 清理水面场景资源
     cleanupWaterScene();
     
@@ -1119,6 +1249,10 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         if (waterPass) {
             waterPass->render(commandBuffer, currentFrame);
         }
+
+        // 更新并渲染 UI（在场景渲染之后，RenderPass 结束之前）
+        updateUI();
+        renderUI(commandBuffer);
 
         vkCmdEndRenderPass(commandBuffer);
     }

@@ -23,6 +23,8 @@
 #include "WaterPass.h"
 #include "ForwardPass.h"
 #include "LightingPass.h"
+#include "ImGuiLayer.h"
+#include "UIManager.h"
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -180,4 +182,22 @@ private:
     void updateWaterUniforms(uint32_t frameIndex);
     
     static const int MAX_FRAMES_IN_FLIGHT = 2;
+    
+    // ========== UI 系统 ==========
+    std::unique_ptr<ImGuiLayer> imguiLayer;
+    std::unique_ptr<UIManager> uiManager;
+    
+    // UI 相关方法
+    void initUI();
+    void cleanupUI();
+    void updateUI();
+    void renderUI(VkCommandBuffer commandBuffer);
+    
+    // 帧时间统计
+    float deltaTime = 0.0f;
+    float lastFrameTime = 0.0f;
+    float fps = 0.0f;
+    
+    // UI 是否显示
+    bool showUI = true;
 };
