@@ -255,12 +255,19 @@ void ForwardPass::createPipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
+    // Push Constants 范围定义
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstantData);  // 2 个 mat4 = 128 bytes
+    
     // Pipeline 布局
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     
     if (vkCreatePipelineLayout(dev, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create ForwardPass pipeline layout!");
@@ -455,6 +462,15 @@ void ForwardPass::bindPipeline(VkCommandBuffer cmd) {
 void ForwardPass::bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                             0, 1, &descriptorSets[frameIndex], 0, nullptr);
+}
+
+void ForwardPass::pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model) {
+    PushConstantData pushData{};
+    pushData.model = model;
+    pushData.normalMatrix = glm::transpose(glm::inverse(model));
+    
+    vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 
+                       0, sizeof(PushConstantData), &pushData);
 }
 
 void ForwardPass::drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) {

@@ -9,6 +9,12 @@
 #include "../ui/panels/SceneHierarchyPanel.h"
 #include "../ui/panels/InspectorPanel.h"
 #include "../ui/panels/AssetBrowserPanel.h"
+#include "../scene/RayPicker.h"
+#include "../scene/SelectionManager.h"
+#include "../scene/Scene.h"
+#include "../scene/Entity.h"
+#include "../scene/Components.h"
+#include <imgui.h>
 #include <iostream>
 #include <stdexcept>
 #include <array>
@@ -119,6 +125,50 @@ void VulkanRenderer::dropCallback(GLFWwindow* window, int count, const char** pa
     }
 }
 
+void VulkanRenderer::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+    auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
+    if (!renderer) return;
+    
+    // 检查 ImGui 是否正在捕获鼠标输入
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.WantCaptureMouse) {
+        return;  // ImGui 正在使用鼠标，不处理场景交互
+    }
+    
+    // ========================================
+    // 左键 - 射线拾取选择物体
+    // ========================================
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == GLFW_PRESS) {
+            renderer->handleMousePicking();
+        }
+    }
+    
+    // ========================================
+    // 右键 - 相机旋转控制
+    // ========================================
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS) {
+            renderer->mouseEnabled = true;
+            renderer->firstMouse = true;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        } else if (action == GLFW_RELEASE) {
+            renderer->mouseEnabled = false;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+    }
+    
+    // ========================================
+    // 中键 - 可扩展（如平移视图）
+    // ========================================
+    else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        // 预留给将来的中键功能（如平移视图）
+        if (action == GLFW_PRESS) {
+            // TODO: 实现中键平移
+        }
+    }
+}
+
 VulkanRenderer::VulkanRenderer() : window(nullptr), currentFrame(0), framebufferResized(false) {
     initWindow();
     initVulkan();
@@ -140,6 +190,7 @@ void VulkanRenderer::initWindow() {
     
     // 设置鼠标和滚轮回调
     glfwSetCursorPosCallback(window, mouseCallback);
+    glfwSetMouseButtonCallback(window, mouseButtonCallback);  // 统一处理鼠标按钮事件
     glfwSetScrollCallback(window, scrollCallback);
     glfwSetKeyCallback(window, keyCallback);
     glfwSetDropCallback(window, dropCallback);
@@ -189,6 +240,19 @@ void VulkanRenderer::initVulkan() {
     
     // 创建相机 - 位于 (0, 0, 5) 看向原点
     camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
+    
+    // 初始化 ECS 场景
+    scene = std::make_unique<VulkanEngine::Scene>();
+    
+    // 创建一个代表当前网格的实体
+    auto meshEntity = scene->createEntity("Mesh Object");
+    meshEntity.addComponent<VulkanEngine::MeshRendererComponent>("sphere", "default");
+    // TransformComponent 已由 Scene::createEntity 自动添加
+    
+    // 设置 SelectionManager 的场景引用
+    VulkanEngine::SelectionManager::getInstance().setScene(scene.get());
+    
+    std::cout << "ECS Scene initialized with Mesh Entity" << std::endl;
     
     // 初始化 UI 系统
     initUI();
@@ -347,19 +411,7 @@ void VulkanRenderer::mainLoop() {
             reloadMesh();
         }
         
-        // 处理鼠标模式切换（右键按下时启用鼠标控制）
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-            if (!mouseEnabled) {
-                mouseEnabled = true;
-                firstMouse = true;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            }
-        } else {
-            if (mouseEnabled) {
-                mouseEnabled = false;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            }
-        }
+        // 注意：鼠标按钮事件（左键选择、右键旋转）现在由 mouseButtonCallback 统一处理
         
         drawFrame(); // 现在启用真正的渲染！
         
@@ -367,7 +419,7 @@ void VulkanRenderer::mainLoop() {
         if (frameCount % 60 == 0) {
             auto nowTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - startTime).count();
-            std::cout << "Rendered " << frameCount << " frames in " << duration << "ms" << std::endl;
+            // std::cout << "Rendered " << frameCount << " frames in " << duration << "ms" << std::endl;
         }
         
         // 临时：按ESC键退出
@@ -424,6 +476,147 @@ void VulkanRenderer::handleMouseScroll(float yoffset) {
     if (camera) {
         camera->processMouseScroll(yoffset);
     }
+}
+
+void VulkanRenderer::handleMousePicking() {
+    if (!camera || !mesh || !scene) {
+        std::cout << "[Picking] Missing components: camera=" << (camera ? "OK" : "NULL")
+                  << ", mesh=" << (mesh ? "OK" : "NULL")
+                  << ", scene=" << (scene ? "OK" : "NULL") << std::endl;
+        return;
+    }
+    
+    // 1. 获取鼠标位置
+    double mouseX, mouseY;
+    glfwGetCursorPos(window, &mouseX, &mouseY);
+    
+    // 2. 获取窗口尺寸
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
+    
+    std::cout << "[Picking] Mouse: (" << mouseX << ", " << mouseY << "), Window: " << width << "x" << height << std::endl;
+    
+    // 3. 获取视图和投影矩阵
+    // 注意：这里不翻转 Y，因为 screenToWorldRay 已经处理了
+    glm::mat4 viewMatrix = camera->getViewMatrix();
+    float fov = glm::radians(camera->getZoom());
+    float aspect = static_cast<float>(width) / static_cast<float>(height);
+    glm::mat4 projMatrix = glm::perspective(fov, aspect, 0.1f, 100.0f);
+    // 不需要 projMatrix[1][1] *= -1; 因为 RayPicker 使用的是标准 OpenGL 坐标
+    
+    // 4. 创建射线
+    VulkanEngine::Ray ray = VulkanEngine::RayPicker::screenToWorldRay(
+        static_cast<float>(mouseX),
+        static_cast<float>(mouseY),
+        static_cast<float>(width),
+        static_cast<float>(height),
+        viewMatrix,
+        projMatrix
+    );
+    
+    std::cout << "[Picking] Ray origin: (" << ray.origin.x << ", " << ray.origin.y << ", " << ray.origin.z << ")" << std::endl;
+    std::cout << "[Picking] Ray direction: (" << ray.direction.x << ", " << ray.direction.y << ", " << ray.direction.z << ")" << std::endl;
+    
+    // 5. 遍历场景中所有有 MeshRendererComponent 的实体进行射线检测
+    entt::entity hitEntity = entt::null;
+    float closestT = std::numeric_limits<float>::max();
+    
+    auto& registry = scene->getRegistry();
+    auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+    
+    int entityCount = 0;
+    for (auto entity : view) {
+        entityCount++;
+        auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
+        
+        // 计算网格的包围盒（使用当前渲染的 mesh）
+        VulkanEngine::AABB meshAABB = calculateMeshAABB();
+        
+        // 变换包围盒到世界空间
+        glm::mat4 modelMatrix = transform.getTransform();
+        VulkanEngine::AABB worldAABB = meshAABB.transform(modelMatrix);
+        
+        std::cout << "[Picking] Entity " << static_cast<uint32_t>(entity) 
+                  << " AABB: min(" << worldAABB.min.x << ", " << worldAABB.min.y << ", " << worldAABB.min.z << ")"
+                  << " max(" << worldAABB.max.x << ", " << worldAABB.max.y << ", " << worldAABB.max.z << ")" << std::endl;
+        
+        // 射线-AABB 相交检测
+        float tMin, tMax;
+        if (VulkanEngine::RayPicker::rayIntersectsAABB(ray, worldAABB, tMin, tMax)) {
+            std::cout << "[Picking] HIT! tMin=" << tMin << ", tMax=" << tMax << std::endl;
+            if (tMin >= 0 && tMin < closestT) {
+                closestT = tMin;
+                hitEntity = entity;
+            }
+        }
+    }
+    
+    std::cout << "[Picking] Checked " << entityCount << " entities" << std::endl;
+    
+    if (hitEntity != entt::null) {
+        // 命中！选中这个实体
+        glm::vec3 hitPoint = ray.getPoint(closestT);
+        
+        // 获取实体名称
+        std::string entityName = "Unknown";
+        if (registry.all_of<VulkanEngine::TagComponent>(hitEntity)) {
+            entityName = registry.get<VulkanEngine::TagComponent>(hitEntity).tag;
+        }
+        
+        std::cout << "Entity selected: " << entityName << " Hit at (" 
+                  << hitPoint.x << ", " << hitPoint.y << ", " << hitPoint.z << ")" << std::endl;
+        
+        // 通过 SelectionManager 更新选择状态（使用 ECS 实体）
+        VulkanEngine::SelectionManager::getInstance().select(hitEntity);
+        
+        // 同步到 UI 面板
+        if (uiManager) {
+            // 更新 SceneHierarchyPanel
+            auto* hierarchy = uiManager->getSceneHierarchyPanel();
+            if (hierarchy) {
+                hierarchy->setSelectedEntity(hitEntity);
+            }
+            
+            // 更新 InspectorPanel
+            auto* inspector = uiManager->getInspectorPanel();
+            if (inspector) {
+                inspector->setScene(scene.get());  // 确保设置了场景引用
+                inspector->setSelectedEntity(hitEntity);
+            }
+        }
+    } else {
+        // 未命中，清除选择
+        std::cout << "No object selected" << std::endl;
+        VulkanEngine::SelectionManager::getInstance().clearSelection();
+        
+        // 同步到 UI 面板
+        if (uiManager) {
+            // 更新 SceneHierarchyPanel
+            auto* hierarchy = uiManager->getSceneHierarchyPanel();
+            if (hierarchy) {
+                hierarchy->setSelectedEntity(entt::null);
+            }
+            
+            // 更新 InspectorPanel
+            auto* inspector = uiManager->getInspectorPanel();
+            if (inspector) {
+                inspector->setSelectedEntity(entt::null);
+            }
+        }
+    }
+}
+
+VulkanEngine::AABB VulkanRenderer::calculateMeshAABB() {
+    VulkanEngine::AABB aabb;
+    
+    if (!mesh) return aabb;
+    
+    const auto& vertices = mesh->getVertices();
+    for (const auto& vertex : vertices) {
+        aabb.expand(vertex.pos);
+    }
+    
+    return aabb;
 }
 
 void VulkanRenderer::drawFrame() {
@@ -516,9 +709,6 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     
     ForwardPass::UniformBufferObject ubo{};
     
-    // Model 矩阵 - 球体保持静止（单位矩阵）
-    ubo.model = glm::mat4(1.0f);
-    
     // View 矩阵 - 从相机获取
     if (camera) {
         ubo.view = camera->getViewMatrix();
@@ -535,9 +725,6 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     
     // Vulkan 的 Y 轴是反的（与 OpenGL 相反）
     ubo.proj[1][1] *= -1;
-    
-    // Normal 矩阵（用于法线变换）
-    ubo.normalMatrix = glm::transpose(glm::inverse(ubo.model));
     
     // 相机位置（用于光照计算）- 使用 vec4，w 分量不使用
     glm::vec3 camPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
@@ -558,7 +745,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     
     ubo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f); // 高强度点光源
     
-    // 更新 ForwardPass 的 UBO
+    // 更新 ForwardPass 的 UBO（不再包含 model 和 normalMatrix，这些通过 Push Constants 传递）
     forwardPass->updateUniformBuffer(currentImage, ubo);
 }
 
@@ -587,21 +774,34 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // 使用 ForwardPass 进行渲染（每个 Pass 管理自己的 Pipeline 和 Descriptor）
-    if (forwardPass && vertexBuffer && indexBuffer && mesh) {
+    if (forwardPass && vertexBuffer && indexBuffer && mesh && scene) {
         // 设置视口和裁剪
         forwardPass->begin(commandBuffer);
         
         // 绑定前向渲染管线
         forwardPass->bindPipeline(commandBuffer);
         
-        // 绑定描述符集
+        // 绑定描述符集（UBO: view, proj, 光照等全局数据）
         forwardPass->bindDescriptorSet(commandBuffer, currentFrame);
         
-        // 绘制网格
-        forwardPass->drawMesh(commandBuffer, 
-                              vertexBuffer->getBuffer(), 
-                              indexBuffer->getBuffer(), 
-                              static_cast<uint32_t>(mesh->getIndices().size()));
+        // 遍历场景中所有具有 MeshRendererComponent 的实体
+        auto& registry = scene->getRegistry();
+        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+        
+        for (auto entity : view) {
+            auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
+            
+            // 推送该实体的 Model 矩阵（通过 Push Constants）
+            glm::mat4 modelMatrix = transform.getTransform();
+            forwardPass->pushModelMatrix(commandBuffer, modelMatrix);
+            
+            // 绘制网格
+            // TODO: 未来可根据 MeshRendererComponent 中的 meshId 选择不同的 mesh
+            forwardPass->drawMesh(commandBuffer, 
+                                  vertexBuffer->getBuffer(), 
+                                  indexBuffer->getBuffer(), 
+                                  static_cast<uint32_t>(mesh->getIndices().size()));
+        }
     }
 
     // 更新并渲染 UI（在场景渲染之后，RenderPass 结束之前）
@@ -703,6 +903,16 @@ void VulkanRenderer::initUI() {
         // 设置资源浏览器的根目录
         if (uiManager->getAssetBrowserPanel()) {
             uiManager->getAssetBrowserPanel()->setRootPath("assets");
+        }
+        
+        // 设置 InspectorPanel 的场景引用，启用 ECS 模式
+        if (uiManager->getInspectorPanel() && scene) {
+            uiManager->getInspectorPanel()->setScene(scene.get());
+        }
+        
+        // 设置 SceneHierarchyPanel 的场景引用
+        if (uiManager->getSceneHierarchyPanel() && scene) {
+            uiManager->getSceneHierarchyPanel()->setScene(scene.get());
         }
         
         std::cout << "UI system initialized!" << std::endl;
@@ -1080,8 +1290,8 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
     // ========================================
     // Pass 1: G-Buffer Pass - 使用 GBuffer 自己的 Pipeline 渲染场景
     // ========================================
-    if (gbuffer && forwardPass) {
-        // 更新 GBuffer 的 UBO（从 ForwardPass 拷贝数据）
+    if (gbuffer && scene) {
+        // 更新 GBuffer 的 UBO（全局数据，不包含 model 和 normalMatrix）
         GBufferPass::UniformBufferObject gbufferUBO{};
         
         // 从相机获取 View/Projection 矩阵
@@ -1102,10 +1312,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
             gbufferUBO.viewPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
         }
         
-        gbufferUBO.model = glm::mat4(1.0f);
-        gbufferUBO.normalMatrix = glm::transpose(glm::inverse(gbufferUBO.model));
-        
-        // 复制 ForwardPass 的光源参数
+        // 光源参数（与前向渲染保持一致）
         static auto startTime = std::chrono::high_resolution_clock::now();
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float>(currentTime - startTime).count();
@@ -1121,7 +1328,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         gbufferUBO.lightPos = glm::vec4(lightPosition, 1.0f);
         gbufferUBO.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
         
-        // 更新 GBuffer 的 UBO
+        // 更新 GBuffer 的 UBO（只包含全局数据）
         gbuffer->updateUniformBuffer(currentFrame, gbufferUBO);
         
         // 开始 GBuffer RenderPass
@@ -1134,12 +1341,25 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         gbuffer->bindPipeline(commandBuffer);
         gbuffer->bindDescriptorSet(commandBuffer, currentFrame);
         
-        if (vertexBuffer && indexBuffer && mesh) {
-            // 使用 GBuffer 的 drawMesh 方法
-            gbuffer->drawMesh(commandBuffer, 
-                              vertexBuffer->getBuffer(), 
-                              indexBuffer->getBuffer(), 
-                              static_cast<uint32_t>(mesh->getIndices().size()));
+        // 遍历场景中所有具有 MeshRendererComponent 的实体
+        auto& registry = scene->getRegistry();
+        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+        
+        for (auto entity : view) {
+            auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
+            
+            // 推送该实体的 Model 矩阵（通过 Push Constants）
+            glm::mat4 modelMatrix = transform.getTransform();
+            gbuffer->pushModelMatrix(commandBuffer, modelMatrix);
+            
+            // 绘制网格
+            // TODO: 未来可根据 MeshRendererComponent 中的 meshId 选择不同的 mesh
+            if (vertexBuffer && indexBuffer && mesh) {
+                gbuffer->drawMesh(commandBuffer, 
+                                  vertexBuffer->getBuffer(), 
+                                  indexBuffer->getBuffer(), 
+                                  static_cast<uint32_t>(mesh->getIndices().size()));
+            }
         }
         
         gbuffer->endRenderPass(commandBuffer);

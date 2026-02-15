@@ -32,6 +32,12 @@ public:
         COUNT = 4
     };
 
+    // Push Constants 结构体 - 每个物体独立的变换数据
+    struct PushConstantData {
+        alignas(16) glm::mat4 model;
+        alignas(16) glm::mat4 normalMatrix;
+    };
+
     GBufferPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
     ~GBufferPass();
 
@@ -94,6 +100,9 @@ public:
     // 绘制网格
     void drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) const;
     
+    // Push Constants - 推送每个物体的变换矩阵
+    void pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model);
+    
     // 创建描述符集和 Uniform Buffers
     void createDescriptorSets();
     
@@ -101,12 +110,10 @@ public:
     void updateTextureBindings(VkImageView albedoView, VkImageView normalView, 
                                VkImageView specularView, VkSampler textureSampler);
     
-    // UBO 结构体（与 ForwardPass 相同）
+    // UBO 结构体 - 全局共享的数据（相机、光照）
     struct UniformBufferObject {
-        alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
-        alignas(16) glm::mat4 normalMatrix;
         alignas(16) glm::vec4 viewPos;
         alignas(16) glm::vec4 lightPos;
         alignas(16) glm::vec4 lightColor;

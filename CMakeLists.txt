@@ -68,6 +68,12 @@ if(NOT glfw3_FOUND)
 endif()
 
 # ============================================================
+# EnTT 配置 (ECS库)
+# ============================================================
+find_package(EnTT CONFIG REQUIRED)
+message(STATUS "Found EnTT via vcpkg")
+
+# ============================================================
 # GLM 配置
 # ============================================================
 find_package(glm CONFIG QUIET)
@@ -166,13 +172,28 @@ set(RENDERER_HEADERS
 set(RESOURCES_SOURCES
     src/resources/Mesh.cpp
     src/resources/Material.cpp
-    src/resources/Scene.cpp
 )
 
 set(RESOURCES_HEADERS
     src/resources/Mesh.h
     src/resources/Material.h
-    src/resources/Scene.h
+)
+
+# Scene - ECS 场景管理系统
+set(SCENE_SOURCES
+    src/scene/Scene.cpp
+    src/scene/Entity.cpp
+    src/scene/SceneManager.cpp
+    src/scene/SelectionManager.cpp
+)
+
+set(SCENE_HEADERS
+    src/scene/Scene.h
+    src/scene/Entity.h
+    src/scene/SceneManager.h
+    src/scene/Components.h
+    src/scene/SelectionManager.h
+    src/scene/RayPicker.h
 )
 
 # Third Party Headers
@@ -230,6 +251,7 @@ set(ALL_SOURCES
     ${PASSES_SOURCES}
     ${RENDERER_SOURCES}
     ${RESOURCES_SOURCES}
+    ${SCENE_SOURCES}
     ${IMGUI_SOURCES}
     ${UI_SOURCES}
 )
@@ -239,6 +261,7 @@ set(ALL_HEADERS
     ${PASSES_HEADERS}
     ${RENDERER_HEADERS}
     ${RESOURCES_HEADERS}
+    ${SCENE_HEADERS}
     ${THIRD_PARTY_HEADERS}
     ${IMGUI_HEADERS}
     ${UI_HEADERS}
@@ -265,11 +288,14 @@ source_group("Source Files/ImGui" FILES ${IMGUI_SOURCES})
 source_group("Header Files/ImGui" FILES ${IMGUI_HEADERS})
 source_group("Source Files/UI" FILES ${UI_SOURCES})
 source_group("Header Files/UI" FILES ${UI_HEADERS})
+source_group("Source Files/Scene" FILES ${SCENE_SOURCES})
+source_group("Header Files/Scene" FILES ${SCENE_HEADERS})
 
 # ============================================================
 # Link libraries
 # ============================================================
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PRIVATE EnTT::EnTT)
 
 if(glfw3_FOUND)
     target_link_libraries(${PROJECT_NAME} PRIVATE glfw)

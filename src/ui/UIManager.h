@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <glm/glm.hpp>
+#include <entt/entt.hpp>
 
 // 前向声明
 class ImGuiLayer;
@@ -13,6 +14,10 @@ class SceneHierarchyPanel;
 class InspectorPanel;
 class AssetBrowserPanel;
 class Camera;
+
+namespace VulkanEngine {
+    class Scene;
+}
 
 /**
  * UIManager - UI 管理器
@@ -99,6 +104,30 @@ public:
     InspectorPanel* getInspectorPanel() { return inspectorPanel.get(); }
     AssetBrowserPanel* getAssetBrowserPanel() { return assetBrowserPanel.get(); }
 
+    // ============================================================
+    // ECS 集成
+    // ============================================================
+
+    /**
+     * 设置 ECS 场景（启用 ECS 模式）
+     */
+    void setScene(VulkanEngine::Scene* scene);
+
+    /**
+     * 获取当前场景
+     */
+    VulkanEngine::Scene* getScene() const { return m_scene; }
+
+    /**
+     * 设置选中的实体
+     */
+    void setSelectedEntity(entt::entity entity);
+
+    /**
+     * 获取选中的实体
+     */
+    entt::entity getSelectedEntity() const;
+
 private:
     void renderMainMenuBar();
 
@@ -115,4 +144,7 @@ private:
 
     // 显示 ImGui Demo（调试用）
     bool showImGuiDemo = false;
+
+    // ECS 数据
+    VulkanEngine::Scene* m_scene = nullptr;
 };

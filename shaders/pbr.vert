@@ -1,10 +1,15 @@
 #version 450
 
-layout(binding = 0) uniform UniformBufferObject {
+// Push Constants - 每个物体独立的变换数据
+layout(push_constant) uniform PushConstants {
     mat4 model;
+    mat4 normalMatrix;
+} push;
+
+// UBO - 全局共享的数据（相机、光照）
+layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    mat4 normalMatrix;
     vec4 viewPos;      // 使用 vec4 确保 std140 对齐
     vec4 lightPos;     // 使用 vec4 确保 std140 对齐
     vec4 lightColor;   // 使用 vec4 确保 std140 对齐
@@ -24,15 +29,15 @@ layout(location = 5) out vec3 fragViewPos;
 layout(location = 6) out vec3 fragLightPos;
 
 void main() {
-    // Transform position to world space
-    vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
+    // Transform position to world space (使用 Push Constants 的 model)
+    vec4 worldPos = push.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
     
-    // Transform normal to world space
-    fragNormal = normalize(mat3(ubo.normalMatrix) * inNormal);
+    // Transform normal to world space (使用 Push Constants 的 normalMatrix)
+    fragNormal = normalize(mat3(push.normalMatrix) * inNormal);
     
     // Transform tangent to world space
-    fragTangent = normalize(mat3(ubo.normalMatrix) * inTangent);
+    fragTangent = normalize(mat3(push.normalMatrix) * inTangent);
     
     // Calculate bitangent
     fragBitangent = cross(fragNormal, fragTangent);

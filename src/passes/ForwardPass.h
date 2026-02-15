@@ -22,12 +22,16 @@ class Material;
  */
 class ForwardPass : public RenderPassBase {
 public:
-    // UBO 结构体 - 使用 GLM 类型，内存布局与 float 数组兼容
-    struct UniformBufferObject {
+    // Push Constants 结构体 - 每个物体独立的变换数据
+    struct PushConstantData {
         alignas(16) glm::mat4 model;
+        alignas(16) glm::mat4 normalMatrix;
+    };
+    
+    // UBO 结构体 - 全局共享数据（相机、光照）
+    struct UniformBufferObject {
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
-        alignas(16) glm::mat4 normalMatrix;
         alignas(16) glm::vec4 viewPos;
         alignas(16) glm::vec4 lightPos;
         alignas(16) glm::vec4 lightColor;
@@ -69,6 +73,10 @@ public:
     void begin(VkCommandBuffer cmd);
     void bindPipeline(VkCommandBuffer cmd);
     void bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex);
+    
+    // Push Constants - 推送每个物体的变换矩阵
+    void pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model);
+    
     // 绘制网格 - 需要提供预创建的 Vulkan 缓冲区
     void drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount);
 

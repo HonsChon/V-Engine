@@ -134,3 +134,42 @@ void UIManager::toggleDebugPanel() { showDebugPanel = !showDebugPanel; }
 void UIManager::toggleSceneHierarchy() { showSceneHierarchy = !showSceneHierarchy; }
 void UIManager::toggleInspector() { showInspector = !showInspector; }
 void UIManager::toggleAssetBrowser() { showAssetBrowser = !showAssetBrowser; }
+
+// ============================================================
+// ECS 集成
+// ============================================================
+
+void UIManager::setScene(VulkanEngine::Scene* scene) {
+    m_scene = scene;
+    
+    if (sceneHierarchyPanel) {
+        sceneHierarchyPanel->setScene(scene);
+    }
+    
+    if (inspectorPanel) {
+        inspectorPanel->setScene(scene);
+    }
+
+    // 连接面板之间的回调
+    if (sceneHierarchyPanel && inspectorPanel) {
+        sceneHierarchyPanel->setOnEntitySelected([this](entt::entity entity) {
+            inspectorPanel->setSelectedEntity(entity);
+        });
+    }
+}
+
+void UIManager::setSelectedEntity(entt::entity entity) {
+    if (sceneHierarchyPanel) {
+        sceneHierarchyPanel->setSelectedEntity(entity);
+    }
+    if (inspectorPanel) {
+        inspectorPanel->setSelectedEntity(entity);
+    }
+}
+
+entt::entity UIManager::getSelectedEntity() const {
+    if (sceneHierarchyPanel) {
+        return sceneHierarchyPanel->getSelectedEntity();
+    }
+    return entt::null;
+}

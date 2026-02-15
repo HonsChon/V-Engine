@@ -17,7 +17,7 @@
 // VulkanPipeline.h 已不再需要，使用 ForwardPass 替代
 #include "Mesh.h"
 #include "Camera.h"
-#include "Scene.h"
+#include "../scene/Scene.h"
 #include "GBufferPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
@@ -25,6 +25,7 @@
 #include "LightingPass.h"
 #include "ImGuiLayer.h"
 #include "UIManager.h"
+#include "../scene/RayPicker.h"
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -81,11 +82,16 @@ private:
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
     static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
     static void dropCallback(GLFWwindow* window, int count, const char** paths);
+    static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
     void recreateSwapChain();
     void processKeyboardInput(float deltaTime);
     
     // 重新加载模型（用于拖拽加载）
     void reloadMesh();
+    
+    // 射线拾取（鼠标点击选择物体）
+    void handleMousePicking();
+    VulkanEngine::AABB calculateMeshAABB();
 
     // Window
     GLFWwindow* window;
@@ -115,7 +121,7 @@ private:
     
     // Scene
     std::unique_ptr<Camera> camera;
-    std::unique_ptr<Scene> scene;
+    std::unique_ptr<VulkanEngine::Scene> scene;
     
     // Rendering
     std::vector<VkCommandBuffer> commandBuffers;
