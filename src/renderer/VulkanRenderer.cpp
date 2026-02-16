@@ -57,30 +57,9 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
     auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
     if (!renderer) return;
     
-    // 按 1-4 数字键切换几何体类型
+    // 快捷键处理
     if (action == GLFW_PRESS) {
         switch (key) {
-            case GLFW_KEY_1:
-                renderer->meshType = MeshType::Sphere;
-                renderer->needReloadMesh = true;
-                std::cout << "Switching to Sphere mesh..." << std::endl;
-                break;
-            case GLFW_KEY_2:
-                renderer->meshType = MeshType::Cube;
-                renderer->needReloadMesh = true;
-                std::cout << "Switching to Cube mesh..." << std::endl;
-                break;
-            case GLFW_KEY_3:
-                renderer->meshType = MeshType::Plane;
-                renderer->needReloadMesh = true;
-                std::cout << "Switching to Plane mesh..." << std::endl;
-                break;
-            case GLFW_KEY_4:
-                // 加载默认OBJ模型
-                renderer->meshType = MeshType::OBJ;
-                renderer->needReloadMesh = true;
-                std::cout << "Switching to OBJ mesh: " << renderer->objPath << std::endl;
-                break;
             case GLFW_KEY_5:
                 // 切换水面场景模式
                 if (renderer->renderMode == RenderMode::Normal) {
@@ -106,7 +85,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
 
 void VulkanRenderer::dropCallback(GLFWwindow* window, int count, const char** paths) {
     auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
-    if (!renderer || count == 0) return;
+    if (!renderer || count == 0 || !renderer->scene) return;
     
     // 获取第一个拖入的文件
     std::string filePath = paths[0];
@@ -116,10 +95,11 @@ void VulkanRenderer::dropCallback(GLFWwindow* window, int count, const char** pa
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
     
     if (extension == ".obj") {
-        std::cout << "Loading OBJ file: " << filePath << std::endl;
-        renderer->objPath = filePath;
-        renderer->meshType = MeshType::OBJ;
-        renderer->needReloadMesh = true;
+        std::cout << "Loading OBJ file via drag & drop: " << filePath << std::endl;
+        // 通过 ECS 创建新实体来加载 OBJ
+        auto newEntity = renderer->scene->createEntity("Dropped Model");
+        newEntity.addComponent<VulkanEngine::MeshRendererComponent>(filePath, "default_material");
+        std::cout << "Created new entity for dropped OBJ file" << std::endl;
     } else {
         std::cout << "Unsupported file format: " << extension << " (only .obj files are supported)" << std::endl;
     }
@@ -205,16 +185,6 @@ void VulkanRenderer::initVulkan() {
     // 创建交换链
     swapChain = std::make_unique<VulkanSwapChain>(std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}), WIDTH, HEIGHT);
     
-    // 加载网格
-    loadMesh();
-    
-    // 加载纹理
-    loadTextures();
-    
-    // 创建顶点和索引缓冲区
-    createVertexBuffer();
-    createIndexBuffer();
-    
     // 创建命令缓冲
     createCommandBuffers();
     
@@ -227,16 +197,9 @@ void VulkanRenderer::initVulkan() {
         MAX_FRAMES_IN_FLIGHT
     );
     
-    // 初始化 ForwardPass 的材质描述符（绑定纹理）
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        forwardPass->updateMaterialDescriptor(
-            i,
-            albedoTexture->getImageView(), albedoTexture->getSampler(),
-            normalTexture->getImageView(), normalTexture->getSampler(),
-            specularTexture->getImageView(), specularTexture->getSampler()
-        );
-    }
-    std::cout << "ForwardPass initialized (Pipeline + Descriptors + UBO)" << std::endl;
+    // 注意：新架构中，材质描述符由 RenderSystem::updateRenderables 自动分配
+    // 每个实体/材质都会获得独立的描述符集
+    std::cout << "ForwardPass initialized (Pipeline + Dual Descriptor Sets + UBO)" << std::endl;
     
     // 创建相机 - 位于 (0, 0, 5) 看向原点
     camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
@@ -244,75 +207,57 @@ void VulkanRenderer::initVulkan() {
     // 初始化 ECS 场景
     scene = std::make_unique<VulkanEngine::Scene>();
     
-    // 创建一个代表当前网格的实体
-    auto meshEntity = scene->createEntity("Mesh Object");
-    meshEntity.addComponent<VulkanEngine::MeshRendererComponent>("sphere", "default");
+    // 初始化多物体渲染系统
+    auto deviceShared = std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){});
+    renderSystem = std::make_unique<VulkanEngine::RenderSystem>();
+    renderSystem->init(deviceShared);
+    std::cout << "RenderSystem initialized" << std::endl;
+    
+    // 创建一个代表当前网格的实体（球体）
+    auto sphereEntity = scene->createEntity("Sphere");
+    sphereEntity.addComponent<VulkanEngine::MeshRendererComponent>("sphere", "earth_material");
     // TransformComponent 已由 Scene::createEntity 自动添加
     
+    // 为球体添加 PBR 材质组件（使用地球纹理）
+    auto& sphereMaterial = sphereEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    sphereMaterial.albedoMap = "../../assets/Earth/Maps/Color Map.jpg";
+    sphereMaterial.normalMap = "../../assets/Earth/Maps/Bump.jpg";
+    sphereMaterial.metallicMap = "../../assets/Earth/Maps/Spec Mask.png";
+    
+    // 创建 UFO 实体
+    auto ufoEntity = scene->createEntity("UFO");
+    auto& ufoMesh = ufoEntity.addComponent<VulkanEngine::MeshRendererComponent>(
+        "../../assets/UFO/UFO_Empty.obj", "ufo_material");
+    // 设置 UFO 的位置和缩放
+    auto& ufoTransform = ufoEntity.getComponent<VulkanEngine::TransformComponent>();
+    ufoTransform.position = glm::vec3(3.0f, 0.0f, 0.0f);  // 放在球体右边
+    ufoTransform.scale = glm::vec3(1.0f);  // 可能需要调整
+    
+    // 添加 UFO 的 PBR 材质组件
+    auto& ufoMaterial = ufoEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    ufoMaterial.albedoMap = "../../assets/UFO/textures/UFO_color.jpg";
+    ufoMaterial.normalMap = "../../assets/UFO/textures/UFO_nmap.jpg";
+    ufoMaterial.metallicMap = "../../assets/UFO/textures/UFO_metalness.jpg";
+    
+    std::cout << "UFO entity created" << std::endl;
+
+    //创建一个蓝色平面
+    auto & planeEntity = scene->createEntity("Plane");
+    planeEntity.addComponent<VulkanEngine::MeshRendererComponent>("plane", "plane_material");
+
+    // 设置蓝色平面的位置和缩放
+    auto & planeTransform = planeEntity.getComponent<VulkanEngine::TransformComponent>();
+    planeTransform.position = glm::vec3(0.0f, -1.5f, 0.0f);  // 放在球体下方
+
     // 设置 SelectionManager 的场景引用
     VulkanEngine::SelectionManager::getInstance().setScene(scene.get());
     
-    std::cout << "ECS Scene initialized with Mesh Entity" << std::endl;
+    std::cout << "ECS Scene initialized with multiple entities" << std::endl;
     
     // 初始化 UI 系统
     initUI();
     
     std::cout << "Vulkan initialization complete!" << std::endl;
-}
-
-void VulkanRenderer::loadMesh() {
-    mesh = std::make_unique<Mesh>();
-
-    switch (meshType) {
-        case MeshType::Sphere:
-            mesh->createSphere(128);
-            std::cout << "Created sphere mesh" << std::endl;
-            break;
-        case MeshType::Cube:
-            mesh->createCube();
-            std::cout << "Created cube mesh" << std::endl;
-            break;
-        case MeshType::Plane:
-            mesh->createPlane(10.0f, 10);  // size=10.0f, subdivisions=10
-            std::cout << "Created plane mesh" << std::endl;
-            break;
-        case MeshType::OBJ:
-            // 如果没有设置路径，使用默认路径
-            if (objPath.empty()) {
-                objPath = "../../assets/Earth/earth.obj";
-            }
-            if (mesh->loadFromOBJ(objPath)) {
-                // 居中并归一化模型大小
-                mesh->centerAndNormalize();
-                std::cout << "Loaded OBJ file: " << objPath << std::endl;
-            } else {
-                std::cerr << "Failed to load OBJ file: " << objPath << ", falling back to sphere" << std::endl;
-                mesh->createSphere(128);
-            }
-            break;
-    }
-    
-    std::cout << "Mesh has " << mesh->getVertices().size() << " vertices and " 
-              << mesh->getIndices().size() << " indices" << std::endl;
-}
-
-void VulkanRenderer::reloadMesh() {
-    // 等待设备闲置
-    vkDeviceWaitIdle(device->getDevice());
-    
-    // 销毁旧的缓冲区
-    vertexBuffer.reset();
-    indexBuffer.reset();
-    
-    // 重新加载网格
-    loadMesh();
-    
-    // 重新创建缓冲区
-    createVertexBuffer();
-    createIndexBuffer();
-    
-    needReloadMesh = false;
-    std::cout << "Mesh reloaded successfully!" << std::endl;
 }
 
 void VulkanRenderer::createSyncObjects() {
@@ -363,13 +308,9 @@ void VulkanRenderer::mainLoop() {
     std::cout << "  Space/Shift - Move up/down" << std::endl;
     std::cout << "  Right mouse button - Enable mouse look" << std::endl;
     std::cout << "  Mouse scroll - Zoom in/out" << std::endl;
-    std::cout << "  1 - Load Sphere" << std::endl;
-    std::cout << "  2 - Load Cube" << std::endl;
-    std::cout << "  3 - Load Plane" << std::endl;
-    std::cout << "  4 - Load OBJ model (after drag & drop)" << std::endl;
     std::cout << "  5 - Toggle Water Scene (SSR reflection)" << std::endl;
     std::cout << "  F1 - Toggle UI" << std::endl;
-    std::cout << "  Drag & Drop - Load OBJ file" << std::endl;
+    std::cout << "  Drag & Drop - Load OBJ file as new entity" << std::endl;
     std::cout << "  ESC - Exit" << std::endl;
     
     int frameCount = 0;
@@ -406,14 +347,9 @@ void VulkanRenderer::mainLoop() {
         // 处理键盘输入
         processKeyboardInput(deltaTime);
         
-        // 检查是否需要重新加载网格
-        if (needReloadMesh) {
-            reloadMesh();
-        }
-        
         // 注意：鼠标按钮事件（左键选择、右键旋转）现在由 mouseButtonCallback 统一处理
         
-        drawFrame(); // 现在启用真正的渲染！
+        drawFrame();
         
         frameCount++;
         if (frameCount % 60 == 0) {
@@ -479,10 +415,10 @@ void VulkanRenderer::handleMouseScroll(float yoffset) {
 }
 
 void VulkanRenderer::handleMousePicking() {
-    if (!camera || !mesh || !scene) {
+    if (!camera || !scene || !renderSystem) {
         std::cout << "[Picking] Missing components: camera=" << (camera ? "OK" : "NULL")
-                  << ", mesh=" << (mesh ? "OK" : "NULL")
-                  << ", scene=" << (scene ? "OK" : "NULL") << std::endl;
+                  << ", scene=" << (scene ? "OK" : "NULL")
+                  << ", renderSystem=" << (renderSystem ? "OK" : "NULL") << std::endl;
         return;
     }
     
@@ -522,21 +458,33 @@ void VulkanRenderer::handleMousePicking() {
     float closestT = std::numeric_limits<float>::max();
     
     auto& registry = scene->getRegistry();
-    auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+    auto ecsView = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+    
+    // 获取 MeshManager 来查询 AABB
+    auto* meshManager = renderSystem->getMeshManager();
     
     int entityCount = 0;
-    for (auto entity : view) {
+    for (auto entity : ecsView) {
         entityCount++;
-        auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
+        auto& transform = ecsView.get<VulkanEngine::TransformComponent>(entity);
+        auto& meshRenderer = ecsView.get<VulkanEngine::MeshRendererComponent>(entity);
         
-        // 计算网格的包围盒（使用当前渲染的 mesh）
-        VulkanEngine::AABB meshAABB = calculateMeshAABB();
+        // 从 MeshManager 获取该实体网格的包围盒
+        VulkanEngine::AABB meshAABB;
+        if (meshManager) {
+            meshAABB = meshManager->getMeshAABB(meshRenderer.meshPath);
+        } else {
+            // 如果没有 MeshManager，使用默认的单位立方体 AABB
+            meshAABB.min = glm::vec3(-1.0f);
+            meshAABB.max = glm::vec3(1.0f);
+        }
         
         // 变换包围盒到世界空间
         glm::mat4 modelMatrix = transform.getTransform();
         VulkanEngine::AABB worldAABB = meshAABB.transform(modelMatrix);
         
         std::cout << "[Picking] Entity " << static_cast<uint32_t>(entity) 
+                  << " (" << meshRenderer.meshPath << ")"
                   << " AABB: min(" << worldAABB.min.x << ", " << worldAABB.min.y << ", " << worldAABB.min.z << ")"
                   << " max(" << worldAABB.max.x << ", " << worldAABB.max.y << ", " << worldAABB.max.z << ")" << std::endl;
         
@@ -606,18 +554,8 @@ void VulkanRenderer::handleMousePicking() {
     }
 }
 
-VulkanEngine::AABB VulkanRenderer::calculateMeshAABB() {
-    VulkanEngine::AABB aabb;
-    
-    if (!mesh) return aabb;
-    
-    const auto& vertices = mesh->getVertices();
-    for (const auto& vertex : vertices) {
-        aabb.expand(vertex.pos);
-    }
-    
-    return aabb;
-}
+// calculateMeshAABB 已移至 MeshManager::getMeshAABB()
+// 每个 GPUMesh 在加载时会自动计算其 AABB
 
 void VulkanRenderer::drawFrame() {
     // 更新时间（用于水面动画）
@@ -644,6 +582,22 @@ void VulkanRenderer::drawFrame() {
     // 如果是水面场景模式，更新水面相关的 uniform
     if (renderMode == RenderMode::WaterScene && waterPass) {
         updateWaterUniforms(currentFrame);
+    }
+    
+    // 统一更新 RenderSystem 的可渲染数据（使用 RTTI 多态接口）
+    if (renderSystem && scene) {
+        std::vector<RenderPassBase*> passes;
+        
+        if (renderMode == RenderMode::WaterScene) {
+            // 水面场景模式：同时需要 ForwardPass 和 GBufferPass 的材质描述符
+            if (forwardPass) passes.push_back(forwardPass.get());
+            if (gbuffer) passes.push_back(gbuffer.get());
+        } else {
+            // 普通模式：只需要 ForwardPass
+            if (forwardPass) passes.push_back(forwardPass.get());
+        }
+        
+        renderSystem->updateRenderables(scene.get(), passes);
     }
 
     vkResetFences(device->getDevice(), 1, &inFlightFences[currentFrame]);
@@ -774,34 +728,16 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // 使用 ForwardPass 进行渲染（每个 Pass 管理自己的 Pipeline 和 Descriptor）
-    if (forwardPass && vertexBuffer && indexBuffer && mesh && scene) {
+    if (forwardPass && scene && renderSystem) {
         // 设置视口和裁剪
         forwardPass->begin(commandBuffer);
         
         // 绑定前向渲染管线
         forwardPass->bindPipeline(commandBuffer);
         
-        // 绑定描述符集（UBO: view, proj, 光照等全局数据）
-        forwardPass->bindDescriptorSet(commandBuffer, currentFrame);
-        
-        // 遍历场景中所有具有 MeshRendererComponent 的实体
-        auto& registry = scene->getRegistry();
-        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
-        
-        for (auto entity : view) {
-            auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
-            
-            // 推送该实体的 Model 矩阵（通过 Push Constants）
-            glm::mat4 modelMatrix = transform.getTransform();
-            forwardPass->pushModelMatrix(commandBuffer, modelMatrix);
-            
-            // 绘制网格
-            // TODO: 未来可根据 MeshRendererComponent 中的 meshId 选择不同的 mesh
-            forwardPass->drawMesh(commandBuffer, 
-                                  vertexBuffer->getBuffer(), 
-                                  indexBuffer->getBuffer(), 
-                                  static_cast<uint32_t>(mesh->getIndices().size()));
-        }
+        // 使用统一的 RTTI 多态渲染接口
+        // 注意：updateRenderables 已经在 drawFrame 中统一调用
+        renderSystem->render(commandBuffer, forwardPass.get(), currentFrame);
     }
 
     // 更新并渲染 UI（在场景渲染之后，RenderPass 结束之前）
@@ -845,37 +781,8 @@ void VulkanRenderer::recreateSwapChain() {
     }
 }
 
-void VulkanRenderer::createVertexBuffer() {
-    const auto& vertices = mesh->getVertices();
-    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
-
-    // 为了简单测试，直接使用主机可见内存创建顶点缓冲区
-    vertexBuffer = std::make_unique<VulkanBuffer>(
-        std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}),
-        bufferSize,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-
-    // 将顶点数据复制到缓冲区
-    vertexBuffer->copyFrom(vertices.data(), bufferSize);
-}
-
-void VulkanRenderer::createIndexBuffer() {
-    const auto& indices = mesh->getIndices();
-    VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-
-    // 为了简单测试，直接使用主机可见内存创建索引缓冲区
-    indexBuffer = std::make_unique<VulkanBuffer>(
-        std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}),
-        bufferSize,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-
-    // 将索引数据复制到缓冲区
-    indexBuffer->copyFrom(indices.data(), bufferSize);
-}
+// createVertexBuffer 和 createIndexBuffer 已迁移到 MeshManager
+// 每个 GPUMesh 现在由 MeshManager 统一管理其顶点和索引缓冲区
 
 // ============================================================
 // UI 系统相关方法实现
@@ -945,26 +852,22 @@ void VulkanRenderer::updateUI() {
         debugPanel->setCameraPosition(camera->getPosition());
         debugPanel->setCameraFOV(camera->getZoom());
         
-        // 更新渲染器信息
-        uint32_t vertexCount = mesh ? static_cast<uint32_t>(mesh->getVertices().size()) : 0;
-        uint32_t triangleCount = mesh ? static_cast<uint32_t>(mesh->getIndices().size() / 3) : 0;
-        uint32_t drawCalls = 1; // 简化版本
+        // 从 RenderSystem 获取渲染器统计信息
+        uint32_t vertexCount = 0;
+        uint32_t triangleCount = 0;
+        uint32_t drawCalls = 0;
+        if (renderSystem) {
+            vertexCount = renderSystem->getTotalVertexCount();
+            triangleCount = renderSystem->getTotalTriangleCount();
+            drawCalls = renderSystem->getDrawCallCount();
+        }
         debugPanel->setVertices(vertexCount);
         debugPanel->setTriangles(triangleCount);
         debugPanel->setDrawCalls(drawCalls);
     }
     
-    // 更新场景层级（示例对象）
-    auto* hierarchy = uiManager->getSceneHierarchyPanel();
-    static bool sceneInitialized = false;
-    if (hierarchy && !sceneInitialized) {
-        hierarchy->clearObjects();
-        hierarchy->addObject(1, "Main Camera", "Camera");
-        hierarchy->addObject(2, "Scene Root", "Node");
-        hierarchy->addObject(3, "Mesh Object", "Mesh");
-        hierarchy->addObject(4, "Point Light", "Light");
-        sceneInitialized = true;
-    }
+    // SceneHierarchyPanel 现在会自动从 ECS 场景获取实体列表
+    // 不再需要手动添加示例对象
 }
 
 void VulkanRenderer::renderUI(VkCommandBuffer commandBuffer) {
@@ -980,45 +883,7 @@ void VulkanRenderer::renderUI(VkCommandBuffer commandBuffer) {
     imguiLayer->endFrame(commandBuffer);
 }
 
-void VulkanRenderer::loadTextures() {
-    std::cout << "Loading textures..." << std::endl;
-    
-    auto devicePtr = std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){});
-    
-    // 加载 Albedo 贴图 (Color Map)
-    std::string albedoPath = "../../assets/Earth/Maps/Color Map.jpg";
-    albedoTexture = std::make_unique<VulkanTexture>(devicePtr);
-    if (!albedoTexture->loadFromFile(albedoPath)) {
-        std::cerr << "Failed to load albedo texture, creating default white texture" << std::endl;
-        albedoTexture->createDefaultTexture();
-    } else {
-        std::cout << "Loaded albedo texture: " << albedoPath << std::endl;
-    }
-    
-    // 加载 Normal 贴图 (Bump Map)
-    std::string normalPath = "../../assets/Earth/Maps/Bump.jpg";
-    normalTexture = std::make_unique<VulkanTexture>(devicePtr);
-    if (!normalTexture->loadFromFile(normalPath)) {
-        std::cerr << "Failed to load normal texture, creating default normal texture" << std::endl;
-        normalTexture->createDefaultNormalTexture();
-    } else {
-        std::cout << "Loaded normal texture: " << normalPath << std::endl;
-    }
-    
-    // 加载 Specular 贴图 (Spec Mask)
-    std::string specularPath = "../../assets/Earth/Maps/Spec Mask.png";
-    specularTexture = std::make_unique<VulkanTexture>(devicePtr);
-    if (!specularTexture->loadFromFile(specularPath)) {
-        std::cerr << "Failed to load specular texture, creating default texture" << std::endl;
-        specularTexture->createDefaultTexture();
-    } else {
-        std::cout << "Loaded specular texture: " << specularPath << std::endl;
-    }
-    
-    std::cout << "Textures loaded successfully!" << std::endl;
-}
-
-// createDescriptorPool 和 createDescriptorSets 已移至各个 Pass 类中管理
+// createDescriptorPool、createDescriptorSets、loadTextures 已移至各个 Pass 类和 TextureManager 中管理
 
 void VulkanRenderer::cleanup() {
     // 等待设备闲置
@@ -1063,11 +928,11 @@ void VulkanRenderer::initWaterScene() {
         ssrPass = std::make_unique<SSRPass>(devicePtr, width, height);
         std::cout << "  SSR Pass created" << std::endl;
         
-        // 3. 创建 Water Pass
+        // 3. 创建 Water Pass（使用内置水面网格）
         waterPass = std::make_unique<WaterPass>(devicePtr, width, height, swapChain->getRenderPass());
         waterPass->setWaterHeight(-1.5f);  // 水面在 Y = -1.5 位置
         waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
-        std::cout << "  Water Pass created" << std::endl;
+        std::cout << "  Water Pass created (using built-in water mesh)" << std::endl;
         
         // 4. 创建场景颜色纹理（用于 SSR 采样）
         createSceneColorImage();
@@ -1078,16 +943,9 @@ void VulkanRenderer::initWaterScene() {
             gbuffer->createDescriptorSets();
             std::cout << "  GBuffer descriptor sets created" << std::endl;
             
-            // 更新 GBuffer 的纹理绑定（使用当前加载的材质纹理）
-            if (albedoTexture && normalTexture && specularTexture) {
-                gbuffer->updateTextureBindings(
-                    albedoTexture->getImageView(),
-                    normalTexture->getImageView(),
-                    specularTexture->getImageView(),
-                    albedoTexture->getSampler()
-                );
-                std::cout << "  GBuffer texture bindings updated" << std::endl;
-            }
+            // GBuffer 纹理绑定将在 recordWaterSceneCommandBuffer 中
+            // 根据每个实体的 PBRMaterialComponent 动态设置
+            std::cout << "  GBuffer texture bindings will be set per-entity" << std::endl;
         }
         
         // 6. 创建 LightingPass（延迟渲染光照阶段）
@@ -1106,15 +964,14 @@ void VulkanRenderer::initWaterScene() {
             std::cout << "  LightingPass G-Buffer inputs set" << std::endl;
         }
         
-        // 8. 更新 WaterPass 的描述符集（绑定 SSR 输出和深度纹理）
-        if (ssrPass && gbuffer) {
+        // 8. 更新 WaterPass 的描述符集（绑定 G-Buffer 用于内置 SSR）
+        if (gbuffer) {
             waterPass->updateDescriptorSets(
-                ssrPass->getOutputView(),       // SSR 反射纹理
-                gbuffer->getDepthView(),        // 场景深度
-                sceneColorView,                  // 场景颜色（用于折射）
-                sceneColorSampler               // 采样器
+                gbuffer.get(),                   // G-Buffer（Position, Normal, Depth）
+                sceneColorView,                  // 场景颜色（用于反射和折射）
+                sceneColorSampler                // 采样器
             );
-            std::cout << "  Water Pass descriptors updated" << std::endl;
+            std::cout << "  Water Pass descriptors updated (integrated SSR)" << std::endl;
         }
         
         std::cout << "Water scene initialization complete! (Deferred Shading enabled)" << std::endl;
@@ -1337,29 +1194,14 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
         
-        // 使用 GBuffer 自己的 Pipeline 和描述符集
+        // 绑定 Pipeline
         gbuffer->bindPipeline(commandBuffer);
-        gbuffer->bindDescriptorSet(commandBuffer, currentFrame);
         
-        // 遍历场景中所有具有 MeshRendererComponent 的实体
-        auto& registry = scene->getRegistry();
-        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
-        
-        for (auto entity : view) {
-            auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
-            
-            // 推送该实体的 Model 矩阵（通过 Push Constants）
-            glm::mat4 modelMatrix = transform.getTransform();
-            gbuffer->pushModelMatrix(commandBuffer, modelMatrix);
-            
-            // 绘制网格
-            // TODO: 未来可根据 MeshRendererComponent 中的 meshId 选择不同的 mesh
-            if (vertexBuffer && indexBuffer && mesh) {
-                gbuffer->drawMesh(commandBuffer, 
-                                  vertexBuffer->getBuffer(), 
-                                  indexBuffer->getBuffer(), 
-                                  static_cast<uint32_t>(mesh->getIndices().size()));
-            }
+        // 使用新的 RTTI 多态接口渲染
+        if (renderSystem) {
+            // 注意：updateRenderables 应该在主渲染循环中调用一次，包含所有需要的 Pass
+            // 这里直接使用统一的 render 接口
+            renderSystem->render(commandBuffer, gbuffer.get(), currentFrame);
         }
         
         gbuffer->endRenderPass(commandBuffer);

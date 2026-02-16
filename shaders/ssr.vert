@@ -12,5 +12,5 @@ void main() {
     gl_Position = vec4(fragTexCoord * 2.0 - 1.0, 0.0, 1.0);
     
     // 翻转 Y 坐标以匹配 Vulkan 坐标系
-    fragTexCoord.y = 1.0 - fragTexCoord.y;
+    //fragTexCoord.y = 1.0 - fragTexCoord.y;
 }

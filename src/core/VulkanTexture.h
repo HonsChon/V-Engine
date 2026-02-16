@@ -43,7 +43,9 @@ public:
 
 private:
     void createTextureImage(const std::string& filepath);
-    void createTextureImageFromMemory(const unsigned char* pixels, int width, int height, int channels);
+    // format 参数：默认 SRGB 用于颜色贴图，法线贴图应使用 UNORM
+    void createTextureImageFromMemory(const unsigned char* pixels, int width, int height, int channels,
+                                      VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
     void createImage(uint32_t width, uint32_t height, VkFormat format, 
                     VkImageTiling tiling, VkImageUsageFlags usage,
                     VkMemoryPropertyFlags properties, VkImage& image, 
@@ -51,7 +53,7 @@ private:
     void transitionImageLayout(VkImage image, VkFormat format, 
                               VkImageLayout oldLayout, VkImageLayout newLayout);
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-    void createTextureImageView();
+    void createTextureImageView(VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
     void createTextureSampler();
     
     VkCommandBuffer beginSingleTimeCommands();

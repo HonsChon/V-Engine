@@ -1,9 +1,13 @@
 #include "WaterPass.h"
+#include "GBufferPass.h"
 #include "VulkanDevice.h"
 #include "VulkanBuffer.h"
 #include "VulkanPipeline.h"
 #include "Mesh.h"
+#include "MeshManager.h"
 #include "Utils.h"
+#include "../scene/Entity.h"
+#include "../scene/Components.h"
 #include <stdexcept>
 #include <iostream>
 #include <array>
@@ -17,7 +21,7 @@ WaterPass::WaterPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint3
     , height(height)
     , renderPass(renderPass) {
     
-    passName = "Water Pass";
+    passName = "Water Pass (Integrated SSR)";
     
     createWaterMesh();
     createVertexBuffer();
@@ -28,7 +32,7 @@ WaterPass::WaterPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint3
     createDescriptorSets();
     createPipeline();
     
-    std::cout << "WaterPass created: " << width << "x" << height << std::endl;
+    std::cout << "WaterPass created with integrated SSR: " << width << "x" << height << std::endl;
 }
 
 WaterPass::~WaterPass() {
@@ -201,7 +205,14 @@ void WaterPass::createIndexBuffer() {
 }
 
 void WaterPass::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    // 新布局：5 个绑定点
+    // binding 0: Water UBO
+    // binding 1: G-Buffer Position (用于 SSR)
+    // binding 2: G-Buffer Normal (用于 SSR)
+    // binding 3: G-Buffer Depth (用于 SSR)
+    // binding 4: Scene Color (用于反射和折射)
+    
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
     
     // Binding 0: Water UBO
     bindings[0].binding = 0;
@@ -209,23 +220,29 @@ void WaterPass::createDescriptorSetLayout() {
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     
-    // Binding 1: Reflection texture (SSR result)
+    // Binding 1: G-Buffer Position
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     
-    // Binding 2: Scene depth
+    // Binding 2: G-Buffer Normal
     bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     
-    // Binding 3: Scene color (for refraction)
+    // Binding 3: G-Buffer Depth
     bindings[3].binding = 3;
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[3].descriptorCount = 1;
     bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    
+    // Binding 4: Scene Color
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -243,7 +260,7 @@ void WaterPass::createDescriptorPool() {
     poolSizes[0].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
     
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = 3 * MAX_FRAMES_IN_FLIGHT;  // 3 textures per frame
+    poolSizes[1].descriptorCount = 4 * MAX_FRAMES_IN_FLIGHT;  // 4 textures per frame
     
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -446,34 +463,44 @@ void WaterPass::updateUniforms(const glm::mat4& view, const glm::mat4& projectio
     ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, waterHeight, 0.0f));
     ubo.view = view;
     ubo.projection = projection;
+    ubo.invView = glm::inverse(view);
+    ubo.invProjection = glm::inverse(projection);
     ubo.cameraPos = glm::vec4(cameraPos, 1.0f);
     ubo.waterColor = glm::vec4(waterColor, waterAlpha);
     ubo.waterParams = glm::vec4(waveSpeed, waveStrength, time, refractionStrength);
     ubo.screenSize = glm::vec4(width, height, 0.0f, 0.0f);
+    ubo.ssrParams = glm::vec4(ssrMaxDistance, ssrMaxSteps, ssrThickness, 0.0f);
     
     memcpy(uniformBuffersMapped[frameIndex], &ubo, sizeof(WaterUBO));
 }
 
-void WaterPass::updateDescriptorSets(VkImageView reflectionView, VkImageView depthView,
-                                      VkImageView sceneColorView, VkSampler sampler) {
+void WaterPass::updateDescriptorSets(GBufferPass* gbuffer, VkImageView sceneColorView, VkSampler sampler) {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        std::array<VkDescriptorImageInfo, 3> imageInfos{};
+        std::array<VkDescriptorImageInfo, 4> imageInfos{};
         
+        // Binding 1: G-Buffer Position
         imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[0].imageView = reflectionView;
+        imageInfos[0].imageView = gbuffer->getPositionView();
         imageInfos[0].sampler = sampler;
         
-        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        imageInfos[1].imageView = depthView;
+        // Binding 2: G-Buffer Normal
+        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[1].imageView = gbuffer->getNormalView();
         imageInfos[1].sampler = sampler;
         
-        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[2].imageView = sceneColorView;
+        // Binding 3: G-Buffer Depth
+        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        imageInfos[2].imageView = gbuffer->getDepthView();
         imageInfos[2].sampler = sampler;
         
-        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        // Binding 4: Scene Color
+        imageInfos[3].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[3].imageView = sceneColorView;
+        imageInfos[3].sampler = sampler;
         
-        for (int j = 0; j < 3; j++) {
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        
+        for (int j = 0; j < 4; j++) {
             descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[j].dstSet = descriptorSets[i];
             descriptorWrites[j].dstBinding = j + 1;  // 从 binding 1 开始
@@ -491,13 +518,87 @@ void WaterPass::updateDescriptorSets(VkImageView reflectionView, VkImageView dep
 void WaterPass::render(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     
-    VkBuffer vertexBuffers[] = { vertexBuffer->getBuffer() };
+    VkBuffer vb;
+    VkBuffer ib;
+    uint32_t indexCount;
+    
+    if (useExternalMesh && externalMesh && externalMesh->isValid()) {
+        // 使用外部网格
+        vb = externalMesh->getVertexBufferHandle();
+        ib = externalMesh->getIndexBufferHandle();
+        indexCount = externalMesh->getIndexCount();
+    } else {
+        // 使用内置网格
+        vb = vertexBuffer->getBuffer();
+        ib = indexBuffer->getBuffer();
+        indexCount = static_cast<uint32_t>(waterMesh->getIndices().size());
+    }
+    
+    VkBuffer vertexBuffers[] = { vb };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, indexBuffer->getBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, ib, 0, VK_INDEX_TYPE_UINT32);
     
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
                             &descriptorSets[frameIndex], 0, nullptr);
     
-    vkCmdDrawIndexed(cmd, static_cast<uint32_t>(waterMesh->getIndices().size()), 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+}
+
+// ============================================================
+// 外部网格设置接口
+// ============================================================
+
+bool WaterPass::setWaterEntity(const VulkanEngine::Entity& entity) {
+    // 检查 Entity 是否有效
+    if (!entity) {
+        std::cerr << "[WaterPass] Invalid entity provided!" << std::endl;
+        return false;
+    }
+    
+    // 检查是否有 MeshRendererComponent
+    if (!entity.hasComponent<VulkanEngine::MeshRendererComponent>()) {
+        std::cerr << "[WaterPass] Entity does not have MeshRendererComponent!" << std::endl;
+        return false;
+    }
+    
+    // 获取 MeshRendererComponent
+    const auto& meshRenderer = entity.getComponent<VulkanEngine::MeshRendererComponent>();
+    
+    if (meshRenderer.meshPath.empty()) {
+        std::cerr << "[WaterPass] MeshRendererComponent has empty meshPath!" << std::endl;
+        return false;
+    }
+    
+    // 从 MeshManager 获取 GPUMesh
+    auto gpuMesh = VulkanEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
+    
+    if (!gpuMesh || !gpuMesh->isValid()) {
+        std::cerr << "[WaterPass] Failed to get mesh: " << meshRenderer.meshPath << std::endl;
+        return false;
+    }
+    
+    return setWaterMesh(gpuMesh);
+}
+
+bool WaterPass::setWaterMesh(std::shared_ptr<VulkanEngine::GPUMesh> gpuMesh) {
+    if (!gpuMesh || !gpuMesh->isValid()) {
+        std::cerr << "[WaterPass] Invalid GPUMesh provided!" << std::endl;
+        return false;
+    }
+    
+    externalMesh = gpuMesh;
+    useExternalMesh = true;
+    
+    std::cout << "[WaterPass] Using external mesh with " 
+              << gpuMesh->getVertexCount() << " vertices, "
+              << gpuMesh->getIndexCount() << " indices" << std::endl;
+    
+    return true;
+}
+
+void WaterPass::clearExternalMesh() {
+    externalMesh.reset();
+    useExternalMesh = false;
+    std::cout << "[WaterPass] Cleared external mesh, using built-in water mesh" << std::endl;
 }

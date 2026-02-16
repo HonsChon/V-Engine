@@ -177,6 +177,9 @@ set(RESOURCES_SOURCES
 set(RESOURCES_HEADERS
     src/resources/Mesh.h
     src/resources/Material.h
+    src/resources/MeshManager.h
+    src/resources/TextureManager.h
+    src/resources/RenderSystem.h
 )
 
 # Scene - ECS 场景管理系统

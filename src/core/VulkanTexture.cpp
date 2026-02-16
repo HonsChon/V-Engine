@@ -56,11 +56,13 @@ void VulkanTexture::createDefaultTexture(uint8_t r, uint8_t g, uint8_t b, uint8_
 }
 
 void VulkanTexture::createDefaultNormalTexture() {
-    // 默认法线：指向正Z方向 (0, 0, 1)
+    // 默认法线：切线空间中指向正Z方向 (0, 0, 1)，表示"垂直于表面向外"
+    // 经过 TBN 矩阵转换后会变成世界空间的表面法线
     // 在纹理空间中表示为 (0.5, 0.5, 1.0) 即 RGB = (128, 128, 255)
     unsigned char pixels[4] = {128, 128, 255, 255};
-    createTextureImageFromMemory(pixels, 1, 1, 4);
-    createTextureImageView();
+    // 法线贴图必须使用 UNORM 格式（线性），不能用 SRGB（会进行 gamma 解码导致值错误）
+    createTextureImageFromMemory(pixels, 1, 1, 4, VK_FORMAT_R8G8B8A8_UNORM);
+    createTextureImageView(VK_FORMAT_R8G8B8A8_UNORM);
     createTextureSampler();
 }
 
@@ -89,7 +91,7 @@ void VulkanTexture::createTextureImage(const std::string& filepath) {
     stbi_image_free(pixels);
 }
 
-void VulkanTexture::createTextureImageFromMemory(const unsigned char* pixels, int texWidth, int texHeight, int channels) {
+void VulkanTexture::createTextureImageFromMemory(const unsigned char* pixels, int texWidth, int texHeight, int channels, VkFormat format) {
     VkDeviceSize imageSize = texWidth * texHeight * 4;
     
     width = static_cast<uint32_t>(texWidth);
@@ -130,16 +132,16 @@ void VulkanTexture::createTextureImageFromMemory(const unsigned char* pixels, in
     memcpy(data, pixels, static_cast<size_t>(imageSize));
     vkUnmapMemory(device->getDevice(), stagingBufferMemory);
     
-    // 创建纹理图像
-    createImage(width, height, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+    // 创建纹理图像（使用传入的格式）
+    createImage(width, height, format, VK_IMAGE_TILING_OPTIMAL,
                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image, imageMemory);
     
     // 转换图像布局并复制数据
-    transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB, 
+    transitionImageLayout(image, format, 
                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     copyBufferToImage(stagingBuffer, image, width, height);
-    transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB,
+    transitionImageLayout(image, format,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     
     // 清理暂存缓冲区
@@ -244,12 +246,12 @@ void VulkanTexture::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t w
     endSingleTimeCommands(commandBuffer);
 }
 
-void VulkanTexture::createTextureImageView() {
+void VulkanTexture::createTextureImageView(VkFormat format) {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    viewInfo.format = format;  // 使用传入的格式
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;

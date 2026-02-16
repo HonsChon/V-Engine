@@ -8,17 +8,19 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <unordered_map>
 
 class VulkanDevice;
 class Mesh;
 class Material;
+class VulkanTexture;
 
 /**
  * ForwardPass - 前向渲染通道
  * 
- * 封装 PBR 前向渲染管线，用于：
- * - 直接渲染到交换链（不使用延迟渲染时）
- * - 或渲染到 G-Buffer 后的最终合成阶段
+ * 使用两个描述符集布局：
+ * - Set 0: 全局 UBO（view, proj, light）
+ * - Set 1: 材质纹理（albedo, normal, specular）- 每个材质独立
  */
 class ForwardPass : public RenderPassBase {
 public:
@@ -35,6 +37,12 @@ public:
         alignas(16) glm::vec4 viewPos;
         alignas(16) glm::vec4 lightPos;
         alignas(16) glm::vec4 lightColor;
+    };
+    
+    // 材质描述符数据 - 每个材质独立
+    struct MaterialDescriptor {
+        std::vector<VkDescriptorSet> sets;  // 每帧一个描述符集
+        bool valid = false;
     };
 
     ForwardPass(std::shared_ptr<VulkanDevice> device, 
@@ -53,40 +61,55 @@ public:
     // 获取器
     VkPipeline getPipeline() const { return pipeline; }
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
-    VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
+    VkDescriptorSetLayout getGlobalSetLayout() const { return globalSetLayout; }
+    VkDescriptorSetLayout getMaterialSetLayout() const { return materialSetLayout; }
     
     // 获取 Uniform Buffers（供 GBuffer 等其他 Pass 共享使用）
     const std::vector<VkBuffer>& getUniformBuffers() const { return uniformBuffers; }
     VkDeviceSize getUniformBufferSize() const { return sizeof(UniformBufferObject); }
 
-    // 更新 UBO
+    // 更新全局 UBO
     void updateUniformBuffer(uint32_t currentFrame, const UniformBufferObject& ubo);
 
-    // 绑定材质纹理到描述符集
-    void updateMaterialDescriptor(uint32_t frameIndex, 
-                                   VkImageView albedoView, VkSampler albedoSampler,
-                                   VkImageView normalView, VkSampler normalSampler,
-                                   VkImageView specularView, VkSampler specularSampler);
+    // ========== 材质描述符管理 ==========
+    
+    // 为材质分配独立的描述符集
+    MaterialDescriptor* allocateMaterialDescriptor(const std::string& materialId);
+    
+    // 更新材质的纹理绑定
+    void updateMaterialTextures(MaterialDescriptor* material,
+                                VkImageView albedoView, VkSampler albedoSampler,
+                                VkImageView normalView, VkSampler normalSampler,
+                                VkImageView specularView, VkSampler specularSampler);
+    
+    // 获取已分配的材质描述符
+    MaterialDescriptor* getMaterialDescriptor(const std::string& materialId);
 
-    // 渲染
+    // ========== 渲染命令 ==========
+    
     void begin(VkCommandBuffer cmd);
     void bindPipeline(VkCommandBuffer cmd);
-    void bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex);
+    
+    // 绑定全局描述符集 (Set 0)
+    void bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex);
+    
+    // 绑定材质描述符集 (Set 1)
+    void bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex, MaterialDescriptor* material);
     
     // Push Constants - 推送每个物体的变换矩阵
     void pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model);
     
-    // 绘制网格 - 需要提供预创建的 Vulkan 缓冲区
+    // 绘制网格
     void drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount);
 
 private:
-    void createDescriptorSetLayout();
+    void createDescriptorSetLayouts();
     void createPipeline();
     void createUniformBuffers();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    void createDescriptorPools();
+    void createGlobalDescriptorSets();
     void cleanup();
+    void ensureMaterialPoolCapacity();
 
     VkShaderModule createShaderModule(const std::vector<char>& code);
     std::vector<char> readFile(const std::string& filename);
@@ -102,11 +125,23 @@ private:
     // Pipeline
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    
+    // 两个描述符集布局
+    VkDescriptorSetLayout globalSetLayout = VK_NULL_HANDLE;    // Set 0: UBO
+    VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;  // Set 1: 纹理
 
-    // Descriptor
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptorSets;
+    // 全局描述符池和描述符集
+    VkDescriptorPool globalDescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> globalDescriptorSets;  // 每帧一个
+
+    // 材质描述符池（可动态增长）
+    std::vector<VkDescriptorPool> materialDescriptorPools;
+    uint32_t currentMaterialPoolIndex = 0;
+    uint32_t allocatedMaterialSets = 0;
+    static constexpr uint32_t MATERIALS_PER_POOL = 64;
+    
+    // 材质描述符缓存
+    std::unordered_map<std::string, MaterialDescriptor> materialDescriptorCache;
 
     // Uniform Buffers
     std::vector<VkBuffer> uniformBuffers;

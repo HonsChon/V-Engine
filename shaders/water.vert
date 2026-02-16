@@ -1,6 +1,6 @@
 #version 450
 
-// 水面顶点着色器
+// 水面顶点着色器 - 配合内置 SSR
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -15,10 +15,13 @@ layout(binding = 0) uniform WaterUBO {
     mat4 model;
     mat4 view;
     mat4 projection;
+    mat4 invView;
+    mat4 invProjection;
     vec4 cameraPos;
     vec4 waterColor;       // RGB: 水的颜色, A: 透明度
     vec4 waterParams;      // x: 波浪速度, y: 波浪强度, z: 时间, w: 折射强度
     vec4 screenSize;       // xy: 屏幕尺寸
+    vec4 ssrParams;        // x: maxDistance, y: maxSteps, z: thickness, w: reserved
 } ubo;
 
 void main() {

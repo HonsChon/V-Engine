@@ -16,10 +16,10 @@ layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outAlbedo;
 
-// 纹理采样器
-layout(binding = 1) uniform sampler2D albedoMap;
-layout(binding = 2) uniform sampler2D normalMap;
-layout(binding = 3) uniform sampler2D specularMap;  // R: 金属度, G: 粗糙度
+// 纹理采样器 (Set 1)
+layout(set = 1, binding = 0) uniform sampler2D albedoMap;
+layout(set = 1, binding = 1) uniform sampler2D normalMap;
+layout(set = 1, binding = 2) uniform sampler2D specularMap;  // R: 金属度, G: 粗糙度
 
 void main() {
     // ========================================
@@ -44,8 +44,8 @@ void main() {
         normal = normalize(fragNormal);
     }
     
-    // 编码法线到 [0, 1] 范围存储（可选，这里直接存储）
-    outNormal = vec4(normal * 0.5 + 0.5, 1.0);
+    // 直接存储世界空间法线（不编码，使用 RGB16F 格式可以存储负值）
+    outNormal = vec4(normal, 1.0);
     
     // ========================================
     // 输出 2: Albedo + 金属度

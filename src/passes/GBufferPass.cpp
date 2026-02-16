@@ -49,7 +49,7 @@ void GBufferPass::resize(uint32_t newWidth, uint32_t newHeight) {
 void GBufferPass::cleanup() {
     VkDevice dev = device->getDevice();
     
-    // 销�?Uniform Buffers
+    // 销毁 Uniform Buffers
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
             vkDestroyBuffer(dev, uniformBuffers[i], nullptr);
@@ -62,16 +62,19 @@ void GBufferPass::cleanup() {
         uniformBuffersMapped[i] = nullptr;
     }
     
+    // 清空材质描述符缓存
+    materialDescriptorCache.clear();
+    
     // 销毁描述符池（描述符集会自动释放）
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
-        for (auto& ds : descriptorSets) {
+        for (auto& ds : globalDescriptorSets) {
             ds = VK_NULL_HANDLE;
         }
     }
     
-    // 销�?Pipeline
+    // 销毁 Pipeline
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(dev, pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;
@@ -82,9 +85,14 @@ void GBufferPass::cleanup() {
         pipelineLayout = VK_NULL_HANDLE;
     }
     
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(dev, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
+    if (globalSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(dev, globalSetLayout, nullptr);
+        globalSetLayout = VK_NULL_HANDLE;
+    }
+    
+    if (materialSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(dev, materialSetLayout, nullptr);
+        materialSetLayout = VK_NULL_HANDLE;
     }
     
     if (sampler != VK_NULL_HANDLE) {
@@ -416,44 +424,63 @@ uint32_t GBufferPass::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags 
 // ============================================
 
 void GBufferPass::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    VkDevice dev = device->getDevice();
     
-    // binding 0: UBO (变换矩阵�?
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    bindings[0].pImmutableSamplers = nullptr;
-    
-    // binding 1: Albedo 贴图
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[1].pImmutableSamplers = nullptr;
-    
-    // binding 2: Normal 贴图
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[2].pImmutableSamplers = nullptr;
-    
-    // binding 3: Specular 贴图
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[3].pImmutableSamplers = nullptr;
-    
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-    
-    if (vkCreateDescriptorSetLayout(device->getDevice(), &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create GBuffer descriptor set layout!");
+    // ========== Set 0: 全局 UBO ==========
+    {
+        VkDescriptorSetLayoutBinding uboBinding{};
+        uboBinding.binding = 0;
+        uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboBinding.descriptorCount = 1;
+        uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        uboBinding.pImmutableSamplers = nullptr;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboBinding;
+        
+        if (vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &globalSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create GBuffer global descriptor set layout!");
+        }
     }
+    
+    // ========== Set 1: 材质纹理 ==========
+    {
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        
+        // binding 0: Albedo 贴图
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[0].pImmutableSamplers = nullptr;
+        
+        // binding 1: Normal 贴图
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[1].pImmutableSamplers = nullptr;
+        
+        // binding 2: Specular 贴图
+        bindings[2].binding = 2;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[2].descriptorCount = 1;
+        bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[2].pImmutableSamplers = nullptr;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+        
+        if (vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &materialSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create GBuffer material descriptor set layout!");
+        }
+    }
+    
+    std::cout << "GBuffer descriptor set layouts created (Set 0: UBO, Set 1: Material)" << std::endl;
 }
 
 void GBufferPass::createPipeline() {
@@ -589,11 +616,13 @@ void GBufferPass::createPipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstantData);  // 2 个 mat4 = 128 bytes
     
-    // Pipeline 布局
+    // Pipeline 布局 - 使用双描述符集
+    std::array<VkDescriptorSetLayout, 2> setLayouts = { globalSetLayout, materialSetLayout };
+    
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+    pipelineLayoutInfo.pSetLayouts = setLayouts.data();
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     
@@ -747,46 +776,52 @@ void GBufferPass::createUniformBuffers() {
 void GBufferPass::createDescriptorSets() {
     VkDevice dev = device->getDevice();
     
-    // 先创�?Uniform Buffers
+    // 先创建 Uniform Buffers
     createUniformBuffers();
     
-    // 如果已存在描述符池，先销�?
+    // 如果已存在描述符池，先销毁
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
+        for (auto& ds : globalDescriptorSets) {
+            ds = VK_NULL_HANDLE;
+        }
+        materialDescriptorCache.clear();
     }
     
     // 创建描述符池
+    // Set 0: MAX_FRAMES_IN_FLIGHT 个 UBO 描述符集
+    // Set 1: 每个材质需要 MAX_FRAMES_IN_FLIGHT 个描述符集，每个有 3 个纹理
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 3; // 3个纹理采样器
+    poolSizes[1].descriptorCount = MAX_MATERIALS * MAX_FRAMES_IN_FLIGHT * 3; // 每材质3个纹理
     
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT + MAX_MATERIALS * MAX_FRAMES_IN_FLIGHT;
     
     if (vkCreateDescriptorPool(dev, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create GBuffer descriptor pool!");
     }
     
-    // 分配描述符集
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+    // ========== 分配全局描述符集 (Set 0) ==========
+    std::vector<VkDescriptorSetLayout> globalLayouts(MAX_FRAMES_IN_FLIGHT, globalSetLayout);
     
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocInfo.pSetLayouts = layouts.data();
+    VkDescriptorSetAllocateInfo globalAllocInfo{};
+    globalAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    globalAllocInfo.descriptorPool = descriptorPool;
+    globalAllocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    globalAllocInfo.pSetLayouts = globalLayouts.data();
     
-    if (vkAllocateDescriptorSets(dev, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate GBuffer descriptor sets!");
+    if (vkAllocateDescriptorSets(dev, &globalAllocInfo, globalDescriptorSets.data()) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate GBuffer global descriptor sets!");
     }
     
-    // 更新描述符集 - 绑定 UBO
+    // 更新全局描述符集 - 绑定 UBO
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers[i];
@@ -795,7 +830,7 @@ void GBufferPass::createDescriptorSets() {
         
         VkWriteDescriptorSet descriptorWrite{};
         descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = descriptorSets[i];
+        descriptorWrite.dstSet = globalDescriptorSets[i];
         descriptorWrite.dstBinding = 0;
         descriptorWrite.dstArrayElement = 0;
         descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -805,7 +840,7 @@ void GBufferPass::createDescriptorSets() {
         vkUpdateDescriptorSets(dev, 1, &descriptorWrite, 0, nullptr);
     }
     
-    std::cout << "GBuffer descriptor sets created and UBO bound" << std::endl;
+    std::cout << "GBuffer global descriptor sets created and UBO bound" << std::endl;
 }
 
 void GBufferPass::updateUniformBuffer(uint32_t frameIndex, const UniformBufferObject& ubo) {
@@ -814,65 +849,12 @@ void GBufferPass::updateUniformBuffer(uint32_t frameIndex, const UniformBufferOb
     }
 }
 
-void GBufferPass::updateTextureBindings(VkImageView albedoView, VkImageView normalView, 
-                                     VkImageView specularView, VkSampler textureSampler) {
-    if (descriptorPool == VK_NULL_HANDLE) {
-        std::cerr << "GBuffer: Cannot update texture bindings - descriptor sets not created!" << std::endl;
-        return;
-    }
-    
-    VkDevice dev = device->getDevice();
-    
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        std::array<VkDescriptorImageInfo, 3> imageInfos{};
-        
-        // Albedo 贴图
-        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[0].imageView = albedoView;
-        imageInfos[0].sampler = textureSampler;
-        
-        // Normal 贴图
-        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[1].imageView = normalView;
-        imageInfos[1].sampler = textureSampler;
-        
-        // Specular 贴图
-        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[2].imageView = specularView;
-        imageInfos[2].sampler = textureSampler;
-        
-        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
-        
-        for (uint32_t j = 0; j < 3; j++) {
-            descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[j].dstSet = descriptorSets[i];
-            descriptorWrites[j].dstBinding = j + 1; // binding 1, 2, 3
-            descriptorWrites[j].dstArrayElement = 0;
-            descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[j].descriptorCount = 1;
-            descriptorWrites[j].pImageInfo = &imageInfos[j];
-        }
-        
-        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(descriptorWrites.size()), 
-                              descriptorWrites.data(), 0, nullptr);
-    }
-    
-    std::cout << "GBuffer texture bindings updated" << std::endl;
-}
-
 // ============================================
-// Pipeline 绑定和绘制方�?
+// Pipeline 绑定和绘制方法
 // ============================================
 
 void GBufferPass::bindPipeline(VkCommandBuffer cmd) const {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-}
-
-void GBufferPass::bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const {
-    if (frameIndex < MAX_FRAMES_IN_FLIGHT && descriptorSets[frameIndex] != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
-                                pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
-    }
 }
 
 void GBufferPass::drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) const {
@@ -890,4 +872,118 @@ void GBufferPass::pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model) {
     
     vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 
                        0, sizeof(PushConstantData), &pushData);
+}
+
+// ============================================
+// 材质描述符管理
+// ============================================
+
+GBufferPass::MaterialDescriptor* GBufferPass::allocateMaterialDescriptor(const std::string& materialId) {
+    // 检查是否已存在
+    auto it = materialDescriptorCache.find(materialId);
+    if (it != materialDescriptorCache.end()) {
+        return &it->second;
+    }
+    
+    if (descriptorPool == VK_NULL_HANDLE) {
+        std::cerr << "GBuffer: Cannot allocate material descriptor - descriptor pool not created!" << std::endl;
+        return nullptr;
+    }
+    
+    VkDevice dev = device->getDevice();
+    
+    // 分配新的描述符集
+    MaterialDescriptor material;
+    material.sets.resize(MAX_FRAMES_IN_FLIGHT);
+    
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, materialSetLayout);
+    
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    allocInfo.pSetLayouts = layouts.data();
+    
+    if (vkAllocateDescriptorSets(dev, &allocInfo, material.sets.data()) != VK_SUCCESS) {
+        std::cerr << "GBuffer: Failed to allocate material descriptor sets for: " << materialId << std::endl;
+        return nullptr;
+    }
+    
+    material.valid = true;
+    materialDescriptorCache[materialId] = std::move(material);
+    
+    std::cout << "GBuffer: Allocated material descriptor for: " << materialId << std::endl;
+    return &materialDescriptorCache[materialId];
+}
+
+GBufferPass::MaterialDescriptor* GBufferPass::getMaterialDescriptor(const std::string& materialId) {
+    auto it = materialDescriptorCache.find(materialId);
+    if (it != materialDescriptorCache.end() && it->second.valid) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+void GBufferPass::updateMaterialTextures(MaterialDescriptor* material,
+                                         VkImageView albedoView, VkSampler albedoSampler,
+                                         VkImageView normalView, VkSampler normalSampler,
+                                         VkImageView specularView, VkSampler specularSampler) {
+    if (!material || !material->valid) {
+        std::cerr << "GBuffer: Cannot update textures - invalid material descriptor!" << std::endl;
+        return;
+    }
+    
+    VkDevice dev = device->getDevice();
+    
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        std::array<VkDescriptorImageInfo, 3> imageInfos{};
+        
+        // Albedo 贴图 (binding 0)
+        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[0].imageView = albedoView;
+        imageInfos[0].sampler = albedoSampler;
+        
+        // Normal 贴图 (binding 1)
+        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[1].imageView = normalView;
+        imageInfos[1].sampler = normalSampler;
+        
+        // Specular 贴图 (binding 2)
+        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[2].imageView = specularView;
+        imageInfos[2].sampler = specularSampler;
+        
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        
+        for (uint32_t j = 0; j < 3; j++) {
+            descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[j].dstSet = material->sets[i];
+            descriptorWrites[j].dstBinding = j;  // binding 0, 1, 2
+            descriptorWrites[j].dstArrayElement = 0;
+            descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[j].descriptorCount = 1;
+            descriptorWrites[j].pImageInfo = &imageInfos[j];
+        }
+        
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(descriptorWrites.size()), 
+                              descriptorWrites.data(), 0, nullptr);
+    }
+}
+
+// ============================================
+// 新的绑定函数
+// ============================================
+
+void GBufferPass::bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const {
+    if (frameIndex < MAX_FRAMES_IN_FLIGHT && globalDescriptorSets[frameIndex] != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                                pipelineLayout, 0, 1, &globalDescriptorSets[frameIndex], 0, nullptr);
+    }
+}
+
+void GBufferPass::bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex, MaterialDescriptor* material) const {
+    if (material && material->valid && frameIndex < MAX_FRAMES_IN_FLIGHT) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                                pipelineLayout, 1, 1, &material->sets[frameIndex], 0, nullptr);
+    }
 }

@@ -10,10 +10,10 @@ layout(location = 6) in vec3 fragLightPos;
 
 layout(location = 0) out vec4 outColor;
 
-// 纹理采样器
-layout(binding = 1) uniform sampler2D albedoMap;
-layout(binding = 2) uniform sampler2D normalMap;
-layout(binding = 3) uniform sampler2D specularMap;  // 用作金属度/粗糙度控制
+// 纹理采样器 (Set 1)
+layout(set = 1, binding = 0) uniform sampler2D albedoMap;
+layout(set = 1, binding = 1) uniform sampler2D normalMap;
+layout(set = 1, binding = 2) uniform sampler2D specularMap;  // 用作金属度/粗糙度控制
 
 const float PI = 3.14159265359;
 

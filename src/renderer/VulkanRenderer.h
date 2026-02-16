@@ -13,11 +13,9 @@
 #include "VulkanDevice.h"
 #include "VulkanSwapChain.h"
 #include "VulkanBuffer.h"
-#include "VulkanTexture.h"
-// VulkanPipeline.h 已不再需要，使用 ForwardPass 替代
-#include "Mesh.h"
 #include "Camera.h"
 #include "../scene/Scene.h"
+#include "../resources/RenderSystem.h"
 #include "GBufferPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
@@ -27,34 +25,12 @@
 #include "UIManager.h"
 #include "../scene/RayPicker.h"
 
-struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-    alignas(16) glm::mat4 normalMatrix;
-    alignas(16) glm::vec4 viewPos;      // 使用 vec4 确保 std140 对齐
-    alignas(16) glm::vec4 lightPos;     // 使用 vec4 确保 std140 对齐
-    alignas(16) glm::vec4 lightColor;   // 使用 vec4 确保 std140 对齐
-};
-
-// 模型类型枚举
-enum class MeshType {
-    Sphere,
-    Cube,
-    Plane,
-    OBJ
-};
-
 class VulkanRenderer {
 public:
     VulkanRenderer();
     ~VulkanRenderer();
 
     void run();
-    
-    // 设置要加载的模型
-    void setMeshType(MeshType type) { meshType = type; }
-    void setOBJPath(const std::string& path) { objPath = path; meshType = MeshType::OBJ; }
     
     // 输入处理函数（供回调使用）
     void handleMouseMovement(float xoffset, float yoffset);
@@ -63,13 +39,9 @@ public:
 private:
     void initWindow();
     void initVulkan();
-    void loadMesh();
     void createSyncObjects();
     void createCommandBuffers();
-    void createVertexBuffer();
-    void createIndexBuffer();
-    void loadTextures();
-    // createUniformBuffers、createDescriptorPool、createDescriptorSets 已移至 ForwardPass 类
+    // loadMesh, createVertexBuffer, createIndexBuffer, loadTextures 已移至 MeshManager/TextureManager
     void mainLoop();
     void cleanup();
     
@@ -86,12 +58,8 @@ private:
     void recreateSwapChain();
     void processKeyboardInput(float deltaTime);
     
-    // 重新加载模型（用于拖拽加载）
-    void reloadMesh();
-    
     // 射线拾取（鼠标点击选择物体）
     void handleMousePicking();
-    VulkanEngine::AABB calculateMeshAABB();
 
     // Window
     GLFWwindow* window;
@@ -101,27 +69,14 @@ private:
     // Vulkan core
     std::unique_ptr<VulkanDevice> device;
     std::unique_ptr<VulkanSwapChain> swapChain;
-    // 注意：旧的 pbrPipeline 已移除，使用 ForwardPass 替代
-    
-    // Geometry
-    std::unique_ptr<Mesh> mesh;
-    std::unique_ptr<VulkanBuffer> vertexBuffer;
-    std::unique_ptr<VulkanBuffer> indexBuffer;
-    
-    // Textures
-    std::unique_ptr<VulkanTexture> albedoTexture;
-    std::unique_ptr<VulkanTexture> normalTexture;
-    std::unique_ptr<VulkanTexture> specularTexture;
-    
-    // 模型配置
-    MeshType meshType = MeshType::Sphere;
-    std::string objPath;
-    std::string textureBasePath;  // 纹理目录路径
-    bool needReloadMesh = false;
+    // Geometry/Textures 由 MeshManager/TextureManager 管理
     
     // Scene
     std::unique_ptr<Camera> camera;
     std::unique_ptr<VulkanEngine::Scene> scene;
+    
+    // 多物体渲染系统
+    std::unique_ptr<VulkanEngine::RenderSystem> renderSystem;
     
     // Rendering
     std::vector<VkCommandBuffer> commandBuffers;

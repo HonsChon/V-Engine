@@ -8,6 +8,7 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <unordered_map>
 
 class VulkanDevice;
 class VulkanBuffer;
@@ -20,32 +21,49 @@ class VulkanBuffer;
  * - Normal (RGB16F) - 世界空间法线
  * - Albedo (RGBA8) - 反照率 + 金属度
  * - Depth (D32F) - 深度缓冲
+ * 
+ * 描述符集架构：
+ * - Set 0: 全局 UBO（view, proj, 光照）
+ * - Set 1: 材质纹理（albedo, normal, specular）- 每个材质独立
  */
 class GBufferPass : public RenderPassBase {
 public:
     // G-Buffer 附件索引
     enum Attachment {
-        POSITION = 0,   // RGB16F - 世界空间位置
-        NORMAL = 1,     // RGB16F - 世界空间法线  
-        ALBEDO = 2,     // RGBA8 - 反照率(RGB) + 金属度(A)
-        DEPTH = 3,      // D32F - 深度
+        POSITION = 0,
+        NORMAL = 1,
+        ALBEDO = 2,
+        DEPTH = 3,
         COUNT = 4
     };
 
-    // Push Constants 结构体 - 每个物体独立的变换数据
+    // Push Constants 结构体
     struct PushConstantData {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 normalMatrix;
+    };
+    
+    // 材质描述符结构体
+    struct MaterialDescriptor {
+        std::vector<VkDescriptorSet> sets;  // 每帧一个
+        bool valid = false;
+    };
+
+    // UBO 结构体
+    struct UniformBufferObject {
+        alignas(16) glm::mat4 view;
+        alignas(16) glm::mat4 proj;
+        alignas(16) glm::vec4 viewPos;
+        alignas(16) glm::vec4 lightPos;
+        alignas(16) glm::vec4 lightColor;
     };
 
     GBufferPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
     ~GBufferPass();
 
-    // 禁止拷贝
     GBufferPass(const GBufferPass&) = delete;
     GBufferPass& operator=(const GBufferPass&) = delete;
 
-    // 重新创建 GBuffer（窗口大小改变时）
     void resize(uint32_t width, uint32_t height);
 
     // 获取器
@@ -63,64 +81,44 @@ public:
     VkImage getDepthImage() const { return attachmentImages[DEPTH]; }
     
     VkSampler getSampler() const { return sampler; }
-    
     uint32_t getWidth() const { return width; }
     uint32_t getHeight() const { return height; }
 
-    // 实现基类的录制命令方法
-    void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) override;
-    
-    // 使用 RenderContext 录制命令（推荐方式）
-    void recordCommands(VkCommandBuffer cmd, const RenderContext& context);
-    
-    // 设置描述符集（包含纹理等）
-    void setDescriptorSet(VkDescriptorSet descriptorSet) { currentDescriptorSet = descriptorSet; }
-
-    // 开始/结束 G-Buffer 渲染（供外部更细粒度控制使用）
+    // RenderPass 控制
     void beginRenderPass(VkCommandBuffer cmd);
     void endRenderPass(VkCommandBuffer cmd);
-    
-    // 获取清除值
     std::array<VkClearValue, 4> getClearValues() const;
 
-    // G-Buffer Pipeline 相关
+    // Pipeline 相关
     VkPipeline getPipeline() const { return pipeline; }
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
-    
-    // 描述符集相关
-    VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { 
-        return descriptorSets[frameIndex]; 
-    }
-    
-    // 绑定 Pipeline 和描述符集
     void bindPipeline(VkCommandBuffer cmd) const;
-    void bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const;
     
-    // 绘制网格
+    // 描述符绑定
+    void bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const;
+    void bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex, MaterialDescriptor* material) const;
+    
+    // 绘制
     void drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer, uint32_t indexCount) const;
-    
-    // Push Constants - 推送每个物体的变换矩阵
     void pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model);
     
-    // 创建描述符集和 Uniform Buffers
+    // 初始化描述符
     void createDescriptorSets();
     
-    // 更新纹理绑定
-    void updateTextureBindings(VkImageView albedoView, VkImageView normalView, 
-                               VkImageView specularView, VkSampler textureSampler);
+    // 材质描述符管理
+    MaterialDescriptor* allocateMaterialDescriptor(const std::string& materialId);
+    MaterialDescriptor* getMaterialDescriptor(const std::string& materialId);
+    void updateMaterialTextures(MaterialDescriptor* material,
+                                VkImageView albedoView, VkSampler albedoSampler,
+                                VkImageView normalView, VkSampler normalSampler,
+                                VkImageView specularView, VkSampler specularSampler);
     
-    // UBO 结构体 - 全局共享的数据（相机、光照）
-    struct UniformBufferObject {
-        alignas(16) glm::mat4 view;
-        alignas(16) glm::mat4 proj;
-        alignas(16) glm::vec4 viewPos;
-        alignas(16) glm::vec4 lightPos;
-        alignas(16) glm::vec4 lightColor;
-    };
-    
-    // 更新 UBO 数据
+    // UBO 更新
     void updateUniformBuffer(uint32_t frameIndex, const UniformBufferObject& ubo);
+
+    // 基类接口实现
+    void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) override;
+    void recordCommands(VkCommandBuffer cmd, const RenderContext& context);
 
 private:
     void createAttachments();
@@ -128,19 +126,16 @@ private:
     void createFramebuffer();
     void createSampler();
     void cleanup();
-
-    void createImage(VkFormat format, VkImageUsageFlags usage, 
-                     VkImageAspectFlags aspect, uint32_t index);
+    void createImage(VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect, uint32_t index);
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     
-    // Pipeline 创建
     void createDescriptorSetLayout();
     void createPipeline();
+    void createUniformBuffers();
     VkShaderModule createShaderModule(const std::vector<char>& code);
     std::vector<char> readFile(const std::string& filename);
 
     std::shared_ptr<VulkanDevice> device;
-    
     uint32_t width;
     uint32_t height;
 
@@ -148,38 +143,41 @@ private:
     std::array<VkImage, COUNT> attachmentImages = {};
     std::array<VkDeviceMemory, COUNT> attachmentMemories = {};
     std::array<VkImageView, COUNT> attachmentViews = {};
-    
-    // 附件格式
     std::array<VkFormat, COUNT> attachmentFormats = {
-        VK_FORMAT_R16G16B16A16_SFLOAT,  // Position
-        VK_FORMAT_R16G16B16A16_SFLOAT,  // Normal
-        VK_FORMAT_R8G8B8A8_UNORM,       // Albedo
-        VK_FORMAT_D32_SFLOAT            // Depth
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_D32_SFLOAT
     };
 
     VkRenderPass renderPass = VK_NULL_HANDLE;
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
     
-    // G-Buffer Pipeline
+    // Pipeline
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     
-    // 当前渲染状态
-    VkDescriptorSet currentDescriptorSet = VK_NULL_HANDLE;
-    RenderContext currentContext;
+    // 描述符集布局
+    VkDescriptorSetLayout globalSetLayout = VK_NULL_HANDLE;    // Set 0: UBO
+    VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;  // Set 1: 纹理
     
     // 描述符资源
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr uint32_t MAX_MATERIALS = 100;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets = {};
+    
+    // 全局描述符集 (Set 0)
+    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> globalDescriptorSets = {};
+    
+    // 材质描述符缓存 (Set 1)
+    std::unordered_map<std::string, MaterialDescriptor> materialDescriptorCache;
     
     // Uniform Buffers
     std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniformBuffers = {};
     std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniformBuffersMemory = {};
     std::array<void*, MAX_FRAMES_IN_FLIGHT> uniformBuffersMapped = {};
     
-    // 创建 Uniform Buffers
-    void createUniformBuffers();
+    VkDescriptorSet currentDescriptorSet = VK_NULL_HANDLE;
+    RenderContext currentContext;
 };

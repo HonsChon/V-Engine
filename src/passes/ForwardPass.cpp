@@ -19,11 +19,11 @@ ForwardPass::ForwardPass(std::shared_ptr<VulkanDevice> device,
     
     passName = "Forward Pass";
     
-    createDescriptorSetLayout();
+    createDescriptorSetLayouts();
     createPipeline();
     createUniformBuffers();
-    createDescriptorPool();
-    createDescriptorSets();
+    createDescriptorPools();
+    createGlobalDescriptorSets();
     
     std::cout << "ForwardPass created: " << width << "x" << height << std::endl;
 }
@@ -68,9 +68,21 @@ void ForwardPass::cleanup() {
     uniformBuffersMemory.clear();
     uniformBuffersMapped.clear();
     
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
+    // 清除材质描述符缓存
+    materialDescriptorCache.clear();
+    
+    // 销毁材质描述符池
+    for (auto pool : materialDescriptorPools) {
+        if (pool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(dev, pool, nullptr);
+        }
+    }
+    materialDescriptorPools.clear();
+    
+    // 销毁全局描述符池
+    if (globalDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(dev, globalDescriptorPool, nullptr);
+        globalDescriptorPool = VK_NULL_HANDLE;
     }
     
     if (pipeline != VK_NULL_HANDLE) {
@@ -83,51 +95,73 @@ void ForwardPass::cleanup() {
         pipelineLayout = VK_NULL_HANDLE;
     }
     
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(dev, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
+    if (globalSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(dev, globalSetLayout, nullptr);
+        globalSetLayout = VK_NULL_HANDLE;
+    }
+    
+    if (materialSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(dev, materialSetLayout, nullptr);
+        materialSetLayout = VK_NULL_HANDLE;
     }
 }
 
-void ForwardPass::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
-    
-    // binding 0: UBO
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[0].pImmutableSamplers = nullptr;
-    
-    // binding 1: Albedo 贴图
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[1].pImmutableSamplers = nullptr;
-    
-    // binding 2: Normal 贴图
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[2].pImmutableSamplers = nullptr;
-    
-    // binding 3: Specular 贴图
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[3].pImmutableSamplers = nullptr;
-    
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-    
-    if (vkCreateDescriptorSetLayout(device->getDevice(), &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create ForwardPass descriptor set layout!");
+void ForwardPass::createDescriptorSetLayouts() {
+    // ========== Set 0: 全局 UBO ==========
+    {
+        VkDescriptorSetLayoutBinding uboBinding{};
+        uboBinding.binding = 0;
+        uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboBinding.descriptorCount = 1;
+        uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        uboBinding.pImmutableSamplers = nullptr;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboBinding;
+        
+        if (vkCreateDescriptorSetLayout(device->getDevice(), &layoutInfo, nullptr, &globalSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create global descriptor set layout!");
+        }
     }
+    
+    // ========== Set 1: 材质纹理 ==========
+    {
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        
+        // binding 0: Albedo 贴图
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[0].pImmutableSamplers = nullptr;
+        
+        // binding 1: Normal 贴图
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[1].pImmutableSamplers = nullptr;
+        
+        // binding 2: Specular 贴图
+        bindings[2].binding = 2;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[2].descriptorCount = 1;
+        bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[2].pImmutableSamplers = nullptr;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+        
+        if (vkCreateDescriptorSetLayout(device->getDevice(), &layoutInfo, nullptr, &materialSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create material descriptor set layout!");
+        }
+    }
+    
+    std::cout << "ForwardPass descriptor set layouts created (Set 0: Global UBO, Set 1: Material)" << std::endl;
 }
 
 void ForwardPass::createPipeline() {
@@ -261,11 +295,13 @@ void ForwardPass::createPipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstantData);  // 2 个 mat4 = 128 bytes
     
-    // Pipeline 布局
+    // Pipeline 布局 - 使用两个描述符集
+    std::array<VkDescriptorSetLayout, 2> setLayouts = { globalSetLayout, materialSetLayout };
+    
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+    pipelineLayoutInfo.pSetLayouts = setLayouts.data();
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     
@@ -298,7 +334,7 @@ void ForwardPass::createPipeline() {
     vkDestroyShaderModule(dev, fragShaderModule, nullptr);
     vkDestroyShaderModule(dev, vertShaderModule, nullptr);
     
-    std::cout << "ForwardPass pipeline created successfully!" << std::endl;
+    std::cout << "ForwardPass pipeline created (2 descriptor sets: Global + Material)" << std::endl;
 }
 
 void ForwardPass::createUniformBuffers() {
@@ -341,39 +377,69 @@ void ForwardPass::createUniformBuffers() {
     }
 }
 
-void ForwardPass::createDescriptorPool() {
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+void ForwardPass::createDescriptorPools() {
+    // ========== 全局描述符池 (UBO) ==========
+    {
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = maxFramesInFlight;
+        
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = maxFramesInFlight;
+        
+        if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &globalDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create global descriptor pool!");
+        }
+    }
     
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(maxFramesInFlight);
-    
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(maxFramesInFlight * 3); // 3 textures per frame
-    
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(maxFramesInFlight);
-    
-    if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create ForwardPass descriptor pool!");
+    // ========== 材质描述符池 (纹理) ==========
+    ensureMaterialPoolCapacity();
+}
+
+void ForwardPass::ensureMaterialPoolCapacity() {
+    // 检查是否需要创建新的材质描述符池
+    if (materialDescriptorPools.empty() || 
+        allocatedMaterialSets >= MATERIALS_PER_POOL * maxFramesInFlight) {
+        
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSize.descriptorCount = MATERIALS_PER_POOL * 3 * maxFramesInFlight;  // 每个材质 3 个纹理
+        
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = MATERIALS_PER_POOL * maxFramesInFlight;
+        
+        VkDescriptorPool newPool;
+        if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &newPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create material descriptor pool!");
+        }
+        
+        materialDescriptorPools.push_back(newPool);
+        currentMaterialPoolIndex = static_cast<uint32_t>(materialDescriptorPools.size() - 1);
+        allocatedMaterialSets = 0;
+        
+        std::cout << "Created material descriptor pool #" << materialDescriptorPools.size() << std::endl;
     }
 }
 
-void ForwardPass::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, descriptorSetLayout);
+void ForwardPass::createGlobalDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, globalSetLayout);
     
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(maxFramesInFlight);
+    allocInfo.descriptorPool = globalDescriptorPool;
+    allocInfo.descriptorSetCount = maxFramesInFlight;
     allocInfo.pSetLayouts = layouts.data();
     
-    descriptorSets.resize(maxFramesInFlight);
-    if (vkAllocateDescriptorSets(device->getDevice(), &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate ForwardPass descriptor sets!");
+    globalDescriptorSets.resize(maxFramesInFlight);
+    if (vkAllocateDescriptorSets(device->getDevice(), &allocInfo, globalDescriptorSets.data()) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate global descriptor sets!");
     }
     
     // 更新 UBO 绑定
@@ -385,7 +451,7 @@ void ForwardPass::createDescriptorSets() {
         
         VkWriteDescriptorSet descriptorWrite{};
         descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = descriptorSets[i];
+        descriptorWrite.dstSet = globalDescriptorSets[i];
         descriptorWrite.dstBinding = 0;
         descriptorWrite.dstArrayElement = 0;
         descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -394,49 +460,104 @@ void ForwardPass::createDescriptorSets() {
         
         vkUpdateDescriptorSets(device->getDevice(), 1, &descriptorWrite, 0, nullptr);
     }
+    
+    std::cout << "Global descriptor sets created and bound to UBO" << std::endl;
 }
 
 void ForwardPass::updateUniformBuffer(uint32_t currentFrame, const UniformBufferObject& ubo) {
     memcpy(uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 }
 
-void ForwardPass::updateMaterialDescriptor(uint32_t frameIndex,
-                                            VkImageView albedoView, VkSampler albedoSampler,
-                                            VkImageView normalView, VkSampler normalSampler,
-                                            VkImageView specularView, VkSampler specularSampler) {
-    std::array<VkDescriptorImageInfo, 3> imageInfos{};
-    
-    // Albedo
-    imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfos[0].imageView = albedoView;
-    imageInfos[0].sampler = albedoSampler;
-    
-    // Normal
-    imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfos[1].imageView = normalView;
-    imageInfos[1].sampler = normalSampler;
-    
-    // Specular
-    imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfos[2].imageView = specularView;
-    imageInfos[2].sampler = specularSampler;
-    
-    std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
-    
-    for (int i = 0; i < 3; i++) {
-        descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[i].dstSet = descriptorSets[frameIndex];
-        descriptorWrites[i].dstBinding = i + 1; // binding 1, 2, 3
-        descriptorWrites[i].dstArrayElement = 0;
-        descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[i].descriptorCount = 1;
-        descriptorWrites[i].pImageInfo = &imageInfos[i];
+// ========== 材质描述符管理 ==========
+
+ForwardPass::MaterialDescriptor* ForwardPass::allocateMaterialDescriptor(const std::string& materialId) {
+    // 检查是否已存在
+    auto it = materialDescriptorCache.find(materialId);
+    if (it != materialDescriptorCache.end()) {
+        return &it->second;
     }
     
-    vkUpdateDescriptorSets(device->getDevice(), 
-                           static_cast<uint32_t>(descriptorWrites.size()), 
-                           descriptorWrites.data(), 0, nullptr);
+    // 确保池有容量
+    ensureMaterialPoolCapacity();
+    
+    // 创建新的材质描述符
+    MaterialDescriptor descriptor;
+    descriptor.sets.resize(maxFramesInFlight);
+    
+    std::vector<VkDescriptorSetLayout> layouts(maxFramesInFlight, materialSetLayout);
+    
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = materialDescriptorPools[currentMaterialPoolIndex];
+    allocInfo.descriptorSetCount = maxFramesInFlight;
+    allocInfo.pSetLayouts = layouts.data();
+    
+    if (vkAllocateDescriptorSets(device->getDevice(), &allocInfo, descriptor.sets.data()) != VK_SUCCESS) {
+        std::cerr << "Failed to allocate material descriptor sets for: " << materialId << std::endl;
+        return nullptr;
+    }
+    
+    allocatedMaterialSets += maxFramesInFlight;
+    descriptor.valid = true;
+    
+    materialDescriptorCache[materialId] = std::move(descriptor);
+    
+    std::cout << "Allocated material descriptor: " << materialId << std::endl;
+    
+    return &materialDescriptorCache[materialId];
 }
+
+void ForwardPass::updateMaterialTextures(MaterialDescriptor* material,
+                                          VkImageView albedoView, VkSampler albedoSampler,
+                                          VkImageView normalView, VkSampler normalSampler,
+                                          VkImageView specularView, VkSampler specularSampler) {
+    if (!material || !material->valid) return;
+    
+    for (uint32_t i = 0; i < maxFramesInFlight; i++) {
+        std::array<VkDescriptorImageInfo, 3> imageInfos{};
+        
+        // Albedo (binding 0)
+        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[0].imageView = albedoView;
+        imageInfos[0].sampler = albedoSampler;
+        
+        // Normal (binding 1)
+        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[1].imageView = normalView;
+        imageInfos[1].sampler = normalSampler;
+        
+        // Specular (binding 2)
+        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[2].imageView = specularView;
+        imageInfos[2].sampler = specularSampler;
+        
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        
+        for (int j = 0; j < 3; j++) {
+            descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[j].dstSet = material->sets[i];
+            descriptorWrites[j].dstBinding = j;
+            descriptorWrites[j].dstArrayElement = 0;
+            descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[j].descriptorCount = 1;
+            descriptorWrites[j].pImageInfo = &imageInfos[j];
+        }
+        
+        vkUpdateDescriptorSets(device->getDevice(), 
+                               static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(), 0, nullptr);
+    }
+}
+
+ForwardPass::MaterialDescriptor* ForwardPass::getMaterialDescriptor(const std::string& materialId) {
+    auto it = materialDescriptorCache.find(materialId);
+    if (it != materialDescriptorCache.end() && it->second.valid) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+// ========== 渲染命令 ==========
 
 void ForwardPass::begin(VkCommandBuffer cmd) {
     // 设置视口和裁剪
@@ -459,9 +580,16 @@ void ForwardPass::bindPipeline(VkCommandBuffer cmd) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 }
 
-void ForwardPass::bindDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) {
+void ForwardPass::bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                            0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            0, 1, &globalDescriptorSets[frameIndex], 0, nullptr);
+}
+
+void ForwardPass::bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex, MaterialDescriptor* material) {
+    if (!material || !material->valid || frameIndex >= material->sets.size()) return;
+    
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+                            1, 1, &material->sets[frameIndex], 0, nullptr);
 }
 
 void ForwardPass::pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model) {

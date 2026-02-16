@@ -142,6 +142,7 @@ vec4 rayMarch(vec3 rayOrigin, vec3 rayDir) {
 void main() {
     // 采样 G-Buffer
     vec3 worldPos = texture(gPosition, fragTexCoord).rgb;
+    // 直接读取世界空间法线（gbuffer.frag 已直接存储，无需逆映射）
     vec3 normal = normalize(texture(gNormal, fragTexCoord).rgb);
     vec4 albedo = texture(gAlbedo, fragTexCoord);
     float depth = texture(gDepth, fragTexCoord).r;
@@ -170,4 +171,5 @@ void main() {
     vec3 finalColor = mix(sceneCol, reflection.rgb, reflection.a * reflectivity);
     
     outColor = vec4(finalColor, 1.0);
+    outColor = reflection;
 }
