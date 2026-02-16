@@ -249,6 +249,11 @@ void VulkanRenderer::initVulkan() {
     auto & planeTransform = planeEntity.getComponent<VulkanEngine::TransformComponent>();
     planeTransform.position = glm::vec3(0.0f, -1.5f, 0.0f);  // 放在球体下方
 
+    // 添加蓝色平面的 PBR 材质组件（使用默认纹理，通过 baseColor 控制颜色）
+    auto& planeMaterial = planeEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    // 使用默认白色纹理，通过着色器中的 baseColor 设置蓝色
+    // 如果没有指定纹理路径，RenderSystem 会自动使用默认纹理
+
     // 设置 SelectionManager 的场景引用
     VulkanEngine::SelectionManager::getInstance().setScene(scene.get());
     

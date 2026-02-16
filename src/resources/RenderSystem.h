@@ -111,13 +111,32 @@ public:
                 normalPath = material.normalMap;
                 metallicPath = material.metallicMap;
                 
-                renderable.albedoTexture = TextureManager::getInstance().getTexture(albedoPath);
-                renderable.normalTexture = TextureManager::getInstance().getTexture(normalPath);
+                // Albedo 纹理：空路径使用默认白色
+                if (!albedoPath.empty()) {
+                    renderable.albedoTexture = TextureManager::getInstance().getTexture(albedoPath);
+                } else {
+                    renderable.albedoTexture = TextureManager::getInstance().getDefaultWhiteTexture();
+                    albedoPath = "__default_white__";
+                }
                 
+                // Normal 纹理：空路径使用默认法线 (0, 0, 1) 而不是白色 (1, 1, 1)
+                if (!normalPath.empty()) {
+                    renderable.normalTexture = TextureManager::getInstance().getTexture(normalPath);
+                } else {
+                    renderable.normalTexture = TextureManager::getInstance().getDefaultNormalTexture();
+                    normalPath = "__default_normal__";
+                }
+                
+                // Metallic/Specular 纹理：空路径使用默认白色
                 if (!metallicPath.empty()) {
                     renderable.specularTexture = TextureManager::getInstance().getTexture(metallicPath);
                 } else {
+                    // 使用默认纹理
+                    renderable.albedoTexture = TextureManager::getInstance().getDefaultWhiteTexture();
+                    renderable.normalTexture = TextureManager::getInstance().getDefaultNormalTexture();
                     renderable.specularTexture = TextureManager::getInstance().getDefaultWhiteTexture();
+                    albedoPath = "__default_white__";
+                    normalPath = "__default_normal__";
                     metallicPath = "__default_white__";
                 }
             } else {
