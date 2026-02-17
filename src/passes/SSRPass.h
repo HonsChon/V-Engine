@@ -27,8 +27,11 @@ public:
         alignas(16) glm::vec4 screenSize;     // xy: 屏幕尺寸, zw: 1/屏幕尺寸
         alignas(4)  float maxDistance;        // 最大光线步进距离
         alignas(4)  float resolution;         // 分辨率因子
-        alignas(4)  float thickness;          // 厚度阈值
+        alignas(4)  float thickness;          // 厚度阈值（线性深度空间）
         alignas(4)  float maxSteps;           // 最大步进次数
+        alignas(4)  float nearPlane;          // 近平面距离（用于线性深度计算）
+        alignas(4)  float farPlane;           // 远平面距离（用于线性深度计算）
+        alignas(8)  float padding[2];         // 对齐填充
     };
 
     SSRPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);

@@ -23,7 +23,7 @@ VulkanTexture::VulkanTexture(std::shared_ptr<VulkanDevice> device, const std::st
 
 VulkanTexture::~VulkanTexture() {
     if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device->getDevice(), sampler, nullptr);
+         vkDestroySampler(device->getDevice(), sampler, nullptr);
     }
     if (imageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device->getDevice(), imageView, nullptr);

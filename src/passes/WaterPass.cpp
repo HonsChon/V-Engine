@@ -384,11 +384,12 @@ void WaterPass::createPipeline() {
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     
-    // 深度测试
+    // 深度测试 - 禁用，使用边缘软化（edgeSoftness）逻辑基于 G-Buffer 深度处理遮挡
+    // 因为 Final Pass 的深度缓冲在开始时被清除为 1.0，无法与场景进行正确的深度比较
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthTestEnable = VK_FALSE;  // 禁用深度测试
+    depthStencil.depthWriteEnable = VK_FALSE; // 禁用深度写入
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
@@ -468,7 +469,9 @@ void WaterPass::updateUniforms(const glm::mat4& view, const glm::mat4& projectio
     ubo.cameraPos = glm::vec4(cameraPos, 1.0f);
     ubo.waterColor = glm::vec4(waterColor, waterAlpha);
     ubo.waterParams = glm::vec4(waveSpeed, waveStrength, time, refractionStrength);
-    ubo.screenSize = glm::vec4(width, height, 0.0f, 0.0f);
+    // screenSize: xy=屏幕尺寸, zw=近平面/远平面（用于线性深度计算）
+    ubo.screenSize = glm::vec4(width, height, 0.1f, 100.0f);
+    // ssrParams: x=maxDistance, y=maxSteps, z=thickness（线性深度空间，单位：世界空间距离）
     ubo.ssrParams = glm::vec4(ssrMaxDistance, ssrMaxSteps, ssrThickness, 0.0f);
     
     memcpy(uniformBuffersMapped[frameIndex], &ubo, sizeof(WaterUBO));

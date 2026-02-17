@@ -35,8 +35,8 @@ public:
         alignas(16) glm::vec4 cameraPos;
         alignas(16) glm::vec4 waterColor;     // RGB: 水的颜色, A: 透明度
         alignas(16) glm::vec4 waterParams;    // x: 波浪速度, y: 波浪强度, z: 时间, w: 折射强度
-        alignas(16) glm::vec4 screenSize;     // xy: 屏幕尺寸
-        alignas(16) glm::vec4 ssrParams;      // x: maxDistance, y: maxSteps, z: thickness, w: reserved
+        alignas(16) glm::vec4 screenSize;     // xy: 屏幕尺寸, zw: nearPlane, farPlane
+        alignas(16) glm::vec4 ssrParams;      // x: maxDistance, y: maxSteps, z: thickness（线性深度空间）, w: reserved
     };
 
     WaterPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height,
@@ -130,9 +130,9 @@ private:
     float waterHeight = 0.0f;
     
     // SSR 参数
-    float ssrMaxDistance = 30.0f;   // 减小最大距离
-    float ssrMaxSteps = 256.0f;     // 增加步数（64 -> 256）
-    float ssrThickness = 0.001f;      // 减小厚度阈值，提高精度
+    float ssrMaxDistance = 30.0f;   // 最大光线步进距离（世界单位）
+    float ssrMaxSteps = 256.0f;     // 最大步进次数
+    float ssrThickness = 0.05f;     // 厚度阈值（线性深度空间，世界单位）
 
     // 水面网格 (内置)
     std::unique_ptr<Mesh> waterMesh;

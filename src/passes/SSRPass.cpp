@@ -20,9 +20,11 @@ SSRPass::SSRPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t 
     // 初始化默认参数
     params.maxDistance = 50.0f;
     params.resolution = 1.0f;
-    params.thickness = 0.1f;
+    params.thickness = 0.01f;     // 线性深度空间的厚度阈值（世界单位）
     params.maxSteps = 64.0f;
     params.screenSize = glm::vec4(width, height, 1.0f / width, 1.0f / height);
+    params.nearPlane = 0.1f;      // 默认近平面
+    params.farPlane = 100.0f;     // 默认远平面
     
     createOutputImage();
     createRenderPass();
