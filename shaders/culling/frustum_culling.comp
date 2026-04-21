@@ -1,0 +1,203 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+
+/**
+ * Frustum Culling Compute Shader
+ * 
+ * 在 GPU 上执行视锥剔除，输出可见物体的间接绘制命令。
+ * 这是 Nanite 风格 GPU-Driven Rendering 的基础。
+ */
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// ============== 数据结构 ==============
+
+struct InstanceData {
+    mat4 modelMatrix;
+    vec4 boundingSphere;    // xyz: center, w: radius
+    vec4 aabbMin;
+    vec4 aabbMax;
+    uint meshIndex;
+    uint materialIndex;
+    uint flags;
+    uint padding;
+};
+
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+// ============== Uniform 数据 ==============
+
+layout(set = 0, binding = 0) uniform CullingUniforms {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 viewProjMatrix;
+    vec4 frustumPlanes[6];
+    vec4 cameraPosition;
+    uvec4 instanceCountPacked;  // x=instanceCount, yzw=padding (避免 std140 数组对齐问题)
+} uniforms;
+
+// 便捷访问总实例数量
+#define TOTAL_INSTANCE_COUNT uniforms.instanceCountPacked.x
+
+// ============== 缓冲区 ==============
+
+// 输入：所有实例数据
+layout(set = 0, binding = 1) readonly buffer InstanceBuffer {
+    InstanceData instances[];
+};
+
+// 输出：可见实例索引
+layout(set = 0, binding = 2) writeonly buffer VisibleBuffer {
+    uint visibleIndices[];
+};
+
+// 原子计数器
+layout(set = 0, binding = 3) buffer CounterBuffer {
+    uint visibleCount;
+};
+
+// 输出：间接绘制命令
+layout(set = 0, binding = 4) writeonly buffer IndirectBuffer {
+    DrawIndexedIndirectCommand drawCommands[];
+};
+
+// ============== 辅助函数 ==============
+
+/**
+ * 测试点是否在平面的正半空间
+ * plane: (a, b, c, d) 表示 ax + by + cz + d = 0
+ * 返回：有符号距离
+ */
+float signedDistanceToPlane(vec4 plane, vec3 point) {
+    return dot(plane.xyz, point) + plane.w;
+}
+
+/**
+ * 使用包围球进行视锥剔除测试
+ * 返回：true 表示可见（在视锥内或相交）
+ */
+bool frustumCullSphere(vec3 center, float radius) {
+    for (int i = 0; i < 6; ++i) {
+        float distance = signedDistanceToPlane(uniforms.frustumPlanes[i], center);
+        // 如果球完全在某个平面的外侧，则被剔除
+        if (distance < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * 使用 AABB 进行更精确的视锥剔除测试
+ * 返回：true 表示可见
+ */
+bool frustumCullAABB(vec3 aabbMin, vec3 aabbMax) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = uniforms.frustumPlanes[i];
+        
+        // 找到 AABB 相对于平面的 "最正" 和 "最负" 顶点
+        vec3 positiveVertex = aabbMin;
+        vec3 negativeVertex = aabbMax;
+        
+        if (plane.x >= 0.0) {
+            positiveVertex.x = aabbMax.x;
+            negativeVertex.x = aabbMin.x;
+        }
+        if (plane.y >= 0.0) {
+            positiveVertex.y = aabbMax.y;
+            negativeVertex.y = aabbMin.y;
+        }
+        if (plane.z >= 0.0) {
+            positiveVertex.z = aabbMax.z;
+            negativeVertex.z = aabbMin.z;
+        }
+        
+        // 如果最正顶点在平面外侧，整个 AABB 被剔除
+        if (signedDistanceToPlane(plane, positiveVertex) < 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * 将本地空间的 AABB 变换到世界空间
+ */
+void transformAABB(mat4 modelMatrix, vec3 localMin, vec3 localMax, 
+                   out vec3 worldMin, out vec3 worldMax) {
+    vec3 corners[8];
+    corners[0] = vec3(localMin.x, localMin.y, localMin.z);
+    corners[1] = vec3(localMax.x, localMin.y, localMin.z);
+    corners[2] = vec3(localMin.x, localMax.y, localMin.z);
+    corners[3] = vec3(localMax.x, localMax.y, localMin.z);
+    corners[4] = vec3(localMin.x, localMin.y, localMax.z);
+    corners[5] = vec3(localMax.x, localMin.y, localMax.z);
+    corners[6] = vec3(localMin.x, localMax.y, localMax.z);
+    corners[7] = vec3(localMax.x, localMax.y, localMax.z);
+    
+    worldMin = vec3(1e30);
+    worldMax = vec3(-1e30);
+    
+    for (int i = 0; i < 8; ++i) {
+        vec3 worldCorner = (modelMatrix * vec4(corners[i], 1.0)).xyz;
+        worldMin = min(worldMin, worldCorner);
+        worldMax = max(worldMax, worldCorner);
+    }
+}
+
+// ============== 主函数 ==============
+
+void main() {
+    uint instanceIndex = gl_GlobalInvocationID.x;
+    
+    // 边界检查 - 使用 instanceCountPacked.x 获取实例数量
+    if (instanceIndex >= TOTAL_INSTANCE_COUNT) {
+        return;
+    }
+    
+    InstanceData instance = instances[instanceIndex];
+    
+    // 检查实例是否启用
+    if ((instance.flags & 1u) == 0u) {
+        return; // 实例被禁用
+    }
+    
+    // 变换包围球中心到世界空间
+    vec3 worldCenter = (instance.modelMatrix * vec4(instance.boundingSphere.xyz, 1.0)).xyz;
+    
+    // 计算世界空间的包围球半径（考虑缩放）
+    // 简化处理：取模型矩阵的最大缩放值
+    float scaleX = length(instance.modelMatrix[0].xyz);
+    float scaleY = length(instance.modelMatrix[1].xyz);
+    float scaleZ = length(instance.modelMatrix[2].xyz);
+    float maxScale = max(max(scaleX, scaleY), scaleZ);
+    float worldRadius = instance.boundingSphere.w * maxScale;
+    
+    // 先用包围球做快速剔除
+    bool visible = frustumCullSphere(worldCenter, worldRadius);
+    
+    // 如果包围球测试通过，可以选择进行更精确的 AABB 测试
+    // 这里为了性能，只使用包围球测试
+    // 如果需要更高精度，可以启用 AABB 测试：
+    /*
+    if (visible) {
+        vec3 worldMin, worldMax;
+        transformAABB(instance.modelMatrix, instance.aabbMin.xyz, instance.aabbMax.xyz, worldMin, worldMax);
+        visible = frustumCullAABB(worldMin, worldMax);
+    }
+    */
+    
+    if (visible) {
+        // 使用原子操作获取输出索引
+        uint outputIndex = atomicAdd(visibleCount, 1);
+        
+        // 写入可见实例索引（方案B：CPU 读取此列表后手动绘制）
+        visibleIndices[outputIndex] = instanceIndex;
+    }
+}

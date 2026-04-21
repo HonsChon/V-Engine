@@ -3,7 +3,7 @@
 #include "Mesh.h"
 #include "VulkanBuffer.h"
 #include "VulkanDevice.h"
-#include "../scene/RayPicker.h"  // for AABB
+#include "RayPicker.h"  // for AABB
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -13,7 +13,7 @@ namespace VulkanEngine {
 
 /**
  * @brief GPU Mesh 数据结构
- * 包含 Mesh 几何数据以及 Vulkan 顶点/索引缓冲区
+ * 包含 Mesh 几何数据以及 Vulkan 顶点/索引缓冲�?
  */
 struct GPUMesh {
     std::shared_ptr<Mesh> mesh;
@@ -41,7 +41,7 @@ struct GPUMesh {
     }
     
     /**
-     * @brief 计算网格的局部空间 AABB
+     * @brief 计算网格的局部空�?AABB
      */
     AABB calculateAABB() const {
         AABB aabb;
@@ -56,8 +56,8 @@ struct GPUMesh {
 };
 
 /**
- * @brief 网格资源管理器
- * 负责加载、缓存和管理所有网格资源
+ * @brief 网格资源管理�?
+ * 负责加载、缓存和管理所有网格资�?
  * 单例模式，全局访问
  */
 class MeshManager {
@@ -67,12 +67,12 @@ public:
         return instance;
     }
     
-    // 禁止拷贝和移动
+    // 禁止拷贝和移�?
     MeshManager(const MeshManager&) = delete;
     MeshManager& operator=(const MeshManager&) = delete;
     
     /**
-     * @brief 初始化 MeshManager
+     * @brief 初始�?MeshManager
      * @param device Vulkan 设备指针
      */
     void init(std::shared_ptr<VulkanDevice> device) {
@@ -81,13 +81,13 @@ public:
     }
     
     /**
-     * @brief 加载或获取网格
+     * @brief 加载或获取网�?
      * 如果网格已缓存，直接返回；否则加载并缓存
-     * @param meshId 网格标识符（路径或预设名称如 "sphere", "cube", "plane"）
+     * @param meshId 网格标识符（路径或预设名称如 "sphere", "cube", "plane"�?
      * @return 指向 GPUMesh 的共享指针，失败返回 nullptr
      */
     std::shared_ptr<GPUMesh> getMesh(const std::string& meshId) {
-        // 检查缓存
+        // 检查缓�?
         auto it = m_meshCache.find(meshId);
         if (it != m_meshCache.end()) {
             return it->second;
@@ -127,7 +127,7 @@ public:
     }
     
     /**
-     * @brief 卸载所有网格资源
+     * @brief 卸载所有网格资�?
      */
     void cleanup() {
         std::cout << "[MeshManager] Cleaning up " << m_meshCache.size() << " meshes..." << std::endl;
@@ -143,9 +143,9 @@ public:
     }
     
     /**
-     * @brief 获取指定网格的 AABB 包围盒
-     * @param meshId 网格标识符
-     * @return 网格的局部空间 AABB，如果网格不存在则返回默认 AABB
+     * @brief 获取指定网格�?AABB 包围�?
+     * @param meshId 网格标识�?
+     * @return 网格的局部空�?AABB，如果网格不存在则返回默�?AABB
      */
     AABB getMeshAABB(const std::string& meshId) {
         auto gpuMesh = getMesh(meshId);
@@ -164,7 +164,7 @@ private:
     ~MeshManager() { cleanup(); }
     
     /**
-     * @brief 实际加载网格的内部方法
+     * @brief 实际加载网格的内部方�?
      */
     std::shared_ptr<GPUMesh> loadMesh(const std::string& meshId) {
         if (!m_device) {
@@ -208,7 +208,7 @@ private:
             return nullptr;
         }
         
-        // 创建 GPU 缓冲区
+        // 创建 GPU 缓冲�?
         if (!createGPUBuffers(gpuMesh)) {
             return nullptr;
         }
@@ -221,7 +221,7 @@ private:
     }
     
     /**
-     * @brief 为网格创建 GPU 缓冲区
+     * @brief 为网格创�?GPU 缓冲�?
      */
     bool createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh) {
         if (!gpuMesh || !gpuMesh->mesh) return false;
@@ -234,7 +234,7 @@ private:
             return false;
         }
         
-        // 创建顶点缓冲区
+        // 创建顶点缓冲�?
         VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
         gpuMesh->vertexBuffer = std::make_shared<VulkanBuffer>(
             m_device,
@@ -244,7 +244,7 @@ private:
         );
         gpuMesh->vertexBuffer->copyFrom(vertices.data(), vertexBufferSize);
         
-        // 创建索引缓冲区
+        // 创建索引缓冲�?
         VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
         gpuMesh->indexBuffer = std::make_shared<VulkanBuffer>(
             m_device,

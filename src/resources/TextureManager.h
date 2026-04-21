@@ -10,8 +10,8 @@
 namespace VulkanEngine {
 
 /**
- * @brief 纹理资源管理器
- * 负责加载、缓存和管理所有纹理资源
+ * @brief 纹理资源管理�?
+ * 负责加载、缓存和管理所有纹理资�?
  * 单例模式，全局访问
  */
 class TextureManager {
@@ -21,12 +21,12 @@ public:
         return instance;
     }
     
-    // 禁止拷贝和移动
+    // 禁止拷贝和移�?
     TextureManager(const TextureManager&) = delete;
     TextureManager& operator=(const TextureManager&) = delete;
     
     /**
-     * @brief 初始化 TextureManager
+     * @brief 初始�?TextureManager
      * @param device Vulkan 设备指针
      */
     void init(std::shared_ptr<VulkanDevice> device) {
@@ -36,7 +36,7 @@ public:
     }
     
     /**
-     * @brief 加载或获取纹理
+     * @brief 加载或获取纹�?
      * 如果纹理已缓存，直接返回；否则加载并缓存
      * @param texturePath 纹理文件路径
      * @return 指向 VulkanTexture 的共享指针，失败返回默认白色纹理
@@ -46,7 +46,7 @@ public:
             return m_defaultWhiteTexture;
         }
         
-        // 检查缓存
+        // 检查缓�?
         auto it = m_textureCache.find(texturePath);
         if (it != m_textureCache.end()) {
             return it->second;
@@ -71,7 +71,7 @@ public:
     }
     
     /**
-     * @brief 获取默认法线纹理（指向 +Z 的蓝色）
+     * @brief 获取默认法线纹理（指�?+Z 的蓝色）
      */
     std::shared_ptr<VulkanTexture> getDefaultNormalTexture() const {
         return m_defaultNormalTexture;
@@ -110,7 +110,7 @@ public:
     }
     
     /**
-     * @brief 卸载所有纹理资源
+     * @brief 卸载所有纹理资�?
      */
     void cleanup() {
         std::cout << "[TextureManager] Cleaning up " << m_textureCache.size() << " textures..." << std::endl;
@@ -154,7 +154,7 @@ private:
     }
     
     /**
-     * @brief 实际加载纹理的内部方法
+     * @brief 实际加载纹理的内部方�?
      */
     std::shared_ptr<VulkanTexture> loadTexture(const std::string& texturePath) {
         if (!m_device) {

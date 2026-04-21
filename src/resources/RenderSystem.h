@@ -2,11 +2,11 @@
 
 #include "MeshManager.h"
 #include "TextureManager.h"
-#include "../scene/Scene.h"
-#include "../scene/Components.h"
-#include "../passes/RenderPassBase.h"
-#include "../passes/ForwardPass.h"
-#include "../passes/GBufferPass.h"
+#include "Scene.h"
+#include "Components.h"
+#include "RenderPassBase.h"
+#include "ForwardPass.h"
+#include "GBufferPass.h"
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
@@ -18,8 +18,8 @@
 namespace VulkanEngine {
 
 /**
- * @brief 可渲染实体数据
- * 缓存实体渲染所需的 GPU 资源引用
+ * @brief 可渲染实体数�?
+ * 缓存实体渲染所需�?GPU 资源引用
  */
 struct RenderableEntity {
     entt::entity entityHandle = entt::null;
@@ -31,13 +31,13 @@ struct RenderableEntity {
     bool visible = true;
     bool valid = false;
     
-    // ForwardPass 材质描述符引用
+    // ForwardPass 材质描述符引�?
     ForwardPass::MaterialDescriptor* materialDescriptor = nullptr;
     
-    // GBufferPass 材质描述符引用
+    // GBufferPass 材质描述符引�?
     GBufferPass::MaterialDescriptor* gbufferMaterialDescriptor = nullptr;
     
-    std::string materialId;  // 用于查找/创建材质描述符
+    std::string materialId;  // 用于查找/创建材质描述�?
 };
 
 /**
@@ -50,7 +50,7 @@ public:
     ~RenderSystem() = default;
     
     /**
-     * @brief 初始化渲染系统
+     * @brief 初始化渲染系�?
      * @param device Vulkan 设备
      */
     void init(std::shared_ptr<VulkanDevice> device) {
@@ -71,10 +71,10 @@ public:
     }
     
     /**
-     * @brief 更新渲染数据（使用 RTTI 多态版本）
+     * @brief 更新渲染数据（使�?RTTI 多态版本）
      * 从场景中收集所有可渲染实体，根据传入的 RenderPass 类型分配相应的材质描述符
      * @param scene 要渲染的场景
-     * @param renderPasses 渲染通道列表（支持 ForwardPass、GBufferPass 等）
+     * @param renderPasses 渲染通道列表（支�?ForwardPass、GBufferPass 等）
      */
     void updateRenderables(VulkanEngine::Scene* scene, const std::vector<RenderPassBase*>& renderPasses) {
         if (!scene) return;
@@ -119,7 +119,7 @@ public:
                     albedoPath = "__default_white__";
                 }
                 
-                // Normal 纹理：空路径使用默认法线 (0, 0, 1) 而不是白色 (1, 1, 1)
+                // Normal 纹理：空路径使用默认法线 (0, 0, 1) 而不是白�?(1, 1, 1)
                 if (!normalPath.empty()) {
                     renderable.normalTexture = TextureManager::getInstance().getTexture(normalPath);
                 } else {
@@ -152,11 +152,11 @@ public:
             // 生成材质ID
             renderable.materialId = generateMaterialId(albedoPath, normalPath, metallicPath);
             
-            // 遍历所有 RenderPass，使用 RTTI 判断类型并分配对应的材质描述符
+            // 遍历所�?RenderPass，使�?RTTI 判断类型并分配对应的材质描述�?
             for (RenderPassBase* pass : renderPasses) {
                 if (!pass) continue;
                 
-                // 检查纹理是否有效
+                // 检查纹理是否有�?
                 bool texturesValid = renderable.albedoTexture && renderable.normalTexture && renderable.specularTexture;
                 if (!texturesValid) continue;
                 
@@ -167,7 +167,7 @@ public:
                 else if (GBufferPass* gbufferPass = dynamic_cast<GBufferPass*>(pass)) {
                     allocateGBufferPassDescriptor(renderable, gbufferPass);
                 }
-                // 可扩展其他 Pass 类型...
+                // 可扩展其�?Pass 类型...
             }
             
             renderable.valid = true;
@@ -185,7 +185,7 @@ public:
     /**
      * @brief 更新渲染数据（旧版兼容接口）
      * @param scene 要渲染的场景
-     * @param forwardPass 用于分配材质描述符
+     * @param forwardPass 用于分配材质描述�?
      */
     void updateRenderables(VulkanEngine::Scene* scene, ForwardPass* forwardPass) {
         std::vector<RenderPassBase*> passes;
@@ -195,7 +195,7 @@ public:
     
 private:
     /**
-     * @brief 为 ForwardPass 分配材质描述符
+     * @brief �?ForwardPass 分配材质描述�?
      */
     void allocateForwardPassDescriptor(RenderableEntity& renderable, ForwardPass* forwardPass) {
         // 尝试获取已有的材质描述符
@@ -221,7 +221,7 @@ private:
     }
     
     /**
-     * @brief 为 GBufferPass 分配材质描述符
+     * @brief �?GBufferPass 分配材质描述�?
      */
     void allocateGBufferPassDescriptor(RenderableEntity& renderable, GBufferPass* gbufferPass) {
         // 尝试获取已有的材质描述符
@@ -249,11 +249,11 @@ private:
 public:
     
     /**
-     * @brief 统一渲染接口（使用 RTTI 多态）
-     * 根据传入的 RenderPass 类型自动调用对应的渲染逻辑
+     * @brief 统一渲染接口（使�?RTTI 多态）
+     * 根据传入�?RenderPass 类型自动调用对应的渲染逻辑
      * @param commandBuffer 命令缓冲
-     * @param renderPass RenderPassBase 基类指针（支持 ForwardPass、GBufferPass 等）
-     * @param frameIndex 当前帧索引
+     * @param renderPass RenderPassBase 基类指针（支�?ForwardPass、GBufferPass 等）
+     * @param frameIndex 当前帧索�?
      */
     void render(VkCommandBuffer commandBuffer, RenderPassBase* renderPass, uint32_t frameIndex) {
         if (!renderPass) return;
@@ -265,7 +265,7 @@ public:
         else if (GBufferPass* gbufferPass = dynamic_cast<GBufferPass*>(renderPass)) {
             renderGBufferPass(commandBuffer, gbufferPass, frameIndex);
         }
-        // 可扩展其他 Pass 类型...
+        // 可扩展其�?Pass 类型...
     }
     
 private:
@@ -273,18 +273,18 @@ private:
      * @brief ForwardPass 渲染实现
      */
     void renderForwardPass(VkCommandBuffer commandBuffer, ForwardPass* forwardPass, uint32_t frameIndex) {
-        // 绑定全局描述符集（Set 0: UBO）- 只需绑定一次
+        // 绑定全局描述符集（Set 0: UBO�? 只需绑定一�?
         forwardPass->bindGlobalDescriptorSet(commandBuffer, frameIndex);
         
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
             
-            // 绑定材质描述符集（Set 1: 纹理）- 每个实体独立的描述符
+            // 绑定材质描述符集（Set 1: 纹理�? 每个实体独立的描述符
             if (renderable.materialDescriptor) {
                 forwardPass->bindMaterialDescriptorSet(commandBuffer, frameIndex, renderable.materialDescriptor);
             }
             
-            // 推送模型矩阵（Push Constants）
+            // 推送模型矩阵（Push Constants�?
             forwardPass->pushModelMatrix(commandBuffer, renderable.modelMatrix);
             
             // 绘制网格
@@ -301,18 +301,18 @@ private:
      * @brief GBufferPass 渲染实现
      */
     void renderGBufferPass(VkCommandBuffer commandBuffer, GBufferPass* gbufferPass, uint32_t frameIndex) {
-        // 绑定全局描述符集（Set 0: UBO）- 只需绑定一次
+        // 绑定全局描述符集（Set 0: UBO�? 只需绑定一�?
         gbufferPass->bindGlobalDescriptorSet(commandBuffer, frameIndex);
         
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
             
-            // 绑定材质描述符集（Set 1: 纹理）- 每个实体独立的描述符
+            // 绑定材质描述符集（Set 1: 纹理�? 每个实体独立的描述符
             if (renderable.gbufferMaterialDescriptor) {
                 gbufferPass->bindMaterialDescriptorSet(commandBuffer, frameIndex, renderable.gbufferMaterialDescriptor);
             }
             
-            // 推送模型矩阵（Push Constants）
+            // 推送模型矩阵（Push Constants�?
             gbufferPass->pushModelMatrix(commandBuffer, renderable.modelMatrix);
             
             // 绘制网格
@@ -328,14 +328,14 @@ private:
 public:
     
     /**
-     * @brief 获取可渲染实体列表（用于射线检测等）
+     * @brief 获取可渲染实体列表（用于射线检测等�?
      */
     const std::vector<RenderableEntity>& getRenderables() const {
         return m_renderables;
     }
     
     /**
-     * @brief 获取可渲染实体数量
+     * @brief 获取可渲染实体数�?
      */
     size_t getRenderableCount() const {
         return m_renderables.size();
@@ -355,7 +355,7 @@ public:
     }
     
     /**
-     * @brief 获取所有可渲染实体的总三角形数
+     * @brief 获取所有可渲染实体的总三角形�?
      */
     uint32_t getTotalTriangleCount() const {
         uint32_t total = 0;
@@ -381,14 +381,14 @@ public:
     }
     
     /**
-     * @brief 获取 MeshManager（用于查询 AABB 等）
+     * @brief 获取 MeshManager（用于查�?AABB 等）
      */
     MeshManager* getMeshManager() {
         return &MeshManager::getInstance();
     }
     
     /**
-     * @brief 获取指定实体的 GPUMesh（用于射线检测）
+     * @brief 获取指定实体�?GPUMesh（用于射线检测）
      */
     std::shared_ptr<GPUMesh> getEntityMesh(entt::entity entity) const {
         for (const auto& renderable : m_renderables) {

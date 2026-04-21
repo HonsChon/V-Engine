@@ -3,7 +3,7 @@
 #include "imgui.h"
 
 DebugPanel::DebugPanel() {
-    // 初始化 FPS 历史记录
+    // 初始�?FPS 历史记录
     for (int i = 0; i < FPS_HISTORY_SIZE; ++i) {
         fpsHistory[i] = 0.0f;
     }

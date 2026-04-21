@@ -37,7 +37,7 @@ void UIManager::render() {
         assetBrowserPanel->render();
     }
 
-    // ImGui Demo 窗口（调试用）
+    // ImGui Demo 窗口（调试用�?
     if (showImGuiDemo) {
         ImGui::ShowDemoWindow(&showImGuiDemo);
     }
@@ -57,7 +57,7 @@ void UIManager::renderMainMenuBar() {
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
-                // TODO: 退出程序
+                // TODO: 退出程�?
             }
             ImGui::EndMenu();
         }
@@ -84,7 +84,7 @@ void UIManager::renderMainMenuBar() {
 
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About V Engine")) {
-                // TODO: 显示关于对话框
+                // TODO: 显示关于对话�?
             }
             ImGui::EndMenu();
         }
@@ -150,7 +150,7 @@ void UIManager::setScene(VulkanEngine::Scene* scene) {
         inspectorPanel->setScene(scene);
     }
 
-    // 连接面板之间的回调
+    // 连接面板之间的回�?
     if (sceneHierarchyPanel && inspectorPanel) {
         sceneHierarchyPanel->setOnEntitySelected([this](entt::entity entity) {
             inspectorPanel->setSelectedEntity(entity);

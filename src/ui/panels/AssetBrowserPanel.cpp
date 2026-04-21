@@ -9,13 +9,13 @@ AssetBrowserPanel::AssetBrowserPanel() {
 void AssetBrowserPanel::render() {
     ImGui::Begin("Asset Browser", nullptr, ImGuiWindowFlags_NoCollapse);
 
-    // 工具栏
+    // 工具�?
     if (ImGui::Button("Refresh")) {
         refresh();
     }
     ImGui::SameLine();
 
-    // 返回上一级
+    // 返回上一�?
     if (currentPath != rootPath) {
         if (ImGui::Button("Back")) {
             std::filesystem::path p(currentPath);
@@ -27,7 +27,7 @@ void AssetBrowserPanel::render() {
     // 当前路径显示
     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", currentPath.c_str());
 
-    // 搜索框
+    // 搜索�?
     ImGui::SetNextItemWidth(200);
     ImGui::InputTextWithHint("##Search", "Search assets...", searchFilter, sizeof(searchFilter));
     ImGui::Separator();
@@ -79,7 +79,7 @@ void AssetBrowserPanel::render() {
 
         ImGui::PopStyleColor(3);
 
-        // 文件名（截断显示）
+        // 文件名（截断显示�?
         std::string displayName = item.name;
         if (displayName.length() > 12) {
             displayName = displayName.substr(0, 10) + "...";

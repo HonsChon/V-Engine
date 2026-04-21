@@ -1,10 +1,10 @@
 
 #include "InspectorPanel.h"
 #include "imgui.h"
-#include "../../scene/Scene.h"
-#include "../../scene/Entity.h"
-#include "../../scene/Components.h"
-#include "../../scene/SelectionManager.h"
+#include "Scene.h"
+#include "Entity.h"
+#include "Components.h"
+#include "SelectionManager.h"
 
 using namespace VulkanEngine;
 
@@ -17,14 +17,14 @@ void InspectorPanel::render() {
     if (m_useECSMode && m_scene) {
         renderECSInspector();
     } else {
-        // 旧系统
+        // 旧系�?
         if (selectedId == -1) {
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No object selected");
             ImGui::End();
             return;
         }
 
-        // 对象名称和类型
+        // 对象名称和类�?
         ImGui::Text("%s", selectedName.c_str());
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(%s)", selectedType.c_str());
@@ -33,7 +33,7 @@ void InspectorPanel::render() {
         // 变换组件（所有对象都有）
         renderTransformSection();
 
-        // 根据类型显示不同的组件
+        // 根据类型显示不同的组�?
         if (selectedType == "Mesh") {
             renderMaterialSection();
         } else if (selectedType == "Light") {
@@ -58,6 +58,9 @@ void InspectorPanel::setSelectedEntity(entt::entity entity) {
 // ============================================================
 
 void InspectorPanel::renderECSInspector() {
+    // �� SelectionManager ��ȡ��ǰѡ�е�ʵ��
+    m_selectedEntity = VulkanEngine::SelectionManager::getInstance().getSelectedEntity();
+
     if (m_selectedEntity == entt::null) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No entity selected");
         return;
@@ -65,7 +68,7 @@ void InspectorPanel::renderECSInspector() {
 
     auto& registry = m_scene->getRegistry();
     
-    // 检查实体是否仍然有效
+    // 检查实体是否仍然有�?
     if (!registry.valid(m_selectedEntity)) {
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Invalid entity");
         m_selectedEntity = entt::null;
@@ -80,7 +83,7 @@ void InspectorPanel::renderECSInspector() {
     // 渲染变换组件
     renderTransformComponent();
 
-    // 渲染网格渲染器组件
+    // 渲染网格渲染器组�?
     renderMeshRendererComponent();
 
     // 渲染光源组件
@@ -134,7 +137,7 @@ void InspectorPanel::renderTransformComponent() {
         ImGui::SetNextItemWidth(-1);
         ImGui::DragFloat3("##Position", &transform.position.x, 0.1f);
 
-        // Rotation (欧拉角)
+        // Rotation (欧拉�?
         ImGui::Text("Rotation");
         ImGui::SameLine(80);
         ImGui::SetNextItemWidth(-1);
@@ -175,12 +178,12 @@ void InspectorPanel::renderMeshRendererComponent() {
     if (componentOpen) {
         auto& meshRenderer = registry.get<MeshRendererComponent>(m_selectedEntity);
         
-        // 可见性
+        // 可见�?
         ImGui::Checkbox("Visible", &meshRenderer.visible);
         ImGui::Checkbox("Cast Shadows", &meshRenderer.castShadows);
         ImGui::Checkbox("Receive Shadows", &meshRenderer.receiveShadows);
 
-        // 显示网格和材质路径
+        // 显示网格和材质路�?
         char meshBuffer[256] = {0};
         strncpy(meshBuffer, meshRenderer.meshPath.c_str(), sizeof(meshBuffer) - 1);
         ImGui::Text("Mesh Path");
@@ -200,7 +203,7 @@ void InspectorPanel::renderMeshRendererComponent() {
         }
     }
 
-    // 如果有 PBR 材质组件，显示其属性
+    // 如果�?PBR 材质组件，显示其属�?
     if (registry.all_of<PBRMaterialComponent>(m_selectedEntity)) {
         if (ImGui::CollapsingHeader("PBR Material", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto& material = registry.get<PBRMaterialComponent>(m_selectedEntity);
@@ -282,7 +285,7 @@ void InspectorPanel::renderLightComponent() {
         ImGui::SetNextItemWidth(-1);
         ImGui::SliderFloat("##Intensity", &light.intensity, 0.0f, 100.0f);
 
-        // 范围（仅对点光源和聚光灯）
+        // 范围（仅对点光源和聚光灯�?
         if (light.type != LightType::Directional) {
             ImGui::Text("Range");
             ImGui::SameLine(100);
@@ -290,7 +293,7 @@ void InspectorPanel::renderLightComponent() {
             ImGui::SliderFloat("##Range", &light.range, 0.1f, 100.0f);
         }
 
-        // 聚光灯特有属性
+        // 聚光灯特有属�?
         if (light.type == LightType::Spot) {
             ImGui::Text("Inner Angle");
             ImGui::SameLine(100);
@@ -478,7 +481,7 @@ void InspectorPanel::renderMaterialSection() {
 
         ImGui::Separator();
 
-        // 纹理贴图状态
+        // 纹理贴图状�?
         ImGui::Text("Texture Maps:");
         ImGui::BulletText("Albedo Map: %s", currentMaterial.hasAlbedoMap ? "Yes" : "No");
         ImGui::BulletText("Normal Map: %s", currentMaterial.hasNormalMap ? "Yes" : "No");
@@ -511,7 +514,7 @@ void InspectorPanel::renderLightSection() {
         ImGui::SetNextItemWidth(-1);
         ImGui::SliderFloat("##Intensity", &currentLight.intensity, 0.0f, 10.0f);
 
-        // 范围（仅对点光源和聚光灯）
+        // 范围（仅对点光源和聚光灯�?
         if (currentLight.type != 0) {
             ImGui::Text("Range");
             ImGui::SameLine(100);
