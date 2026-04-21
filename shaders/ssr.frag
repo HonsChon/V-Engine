@@ -2,7 +2,7 @@
 
 // SSR 片段着色器 - 屏幕空间反射
 // 基于 G-Buffer 进行屏幕空间光线步进
-// 改进版：使用 UV 空间步进、抖动、背面剔除
+// 改进版：使用线性深度进行深度比较，提高远距离精度
 
 layout(location = 0) in vec2 fragTexCoord;
 
@@ -12,7 +12,7 @@ layout(location = 0) out vec4 outColor;
 layout(binding = 0) uniform sampler2D gPosition;   // 世界空间位置
 layout(binding = 1) uniform sampler2D gNormal;     // 世界空间法线
 layout(binding = 2) uniform sampler2D gAlbedo;     // 反照率
-layout(binding = 3) uniform sampler2D gDepth;      // 深度
+layout(binding = 3) uniform sampler2D gDepth;      // 深度（非线性）
 
 // 场景颜色（光照后）
 layout(binding = 4) uniform sampler2D sceneColor;
@@ -27,8 +27,10 @@ layout(binding = 5) uniform SSRParams {
     vec4 screenSize;       // xy: 屏幕尺寸, zw: 1/屏幕尺寸
     float maxDistance;     // 最大光线步进距离
     float resolution;      // 分辨率因子
-    float thickness;       // 厚度阈值
+    float thickness;       // 厚度阈值（线性深度空间，世界单位）
     float maxSteps;        // 最大步进次数
+    float nearPlane;       // 近平面距离
+    float farPlane;        // 远平面距离
 } ssr;
 
 // ============================================================
@@ -40,44 +42,60 @@ float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// 将世界坐标转换为屏幕坐标 (UV + NDC深度)
+// 将非线性深度（NDC）转换为线性深度（视图空间）
+// 对于 Vulkan 反向 Z: depth 范围 [0, 1]，0 为远平面，1 为近平面（实际是正向Z时）
+// 标准 Vulkan: depth 范围 [0, 1]，0 为近平面，1 为远平面
+float linearizeDepth(float depth) {
+    float near = ssr.nearPlane;
+    float far = ssr.farPlane;
+    // 标准透视投影的深度线性化公式
+    // z_linear = near * far / (far - depth * (far - near))
+    return near * far / (far - depth * (far - near));
+}
+
+// 将世界坐标转换为屏幕坐标 (UV + NDC depth)
+// 步进在屏幕空间 (UV, NDC depth) 进行以保持透视正确性
 vec3 worldToScreen(vec3 worldPos) {
     vec4 clipPos = ssr.projection * ssr.view * vec4(worldPos, 1.0);
     vec3 ndc = clipPos.xyz / clipPos.w;
     
     vec3 screenPos;
     screenPos.xy = ndc.xy * 0.5 + 0.5;  // UV [0,1]
-    screenPos.z = ndc.z;                 // NDC 深度 [0,1] in Vulkan
+    screenPos.z = ndc.z;  // NDC depth [0,1] for Vulkan
     
     return screenPos;
 }
 
 // ============================================================
-// 屏幕空间二分搜索细化
+// 屏幕空间二分搜索细化（在 NDC 深度空间步进，用线性深度比较）
 // ============================================================
-vec2 binarySearchScreen(vec2 startUV, vec2 endUV, float startDepth, float endDepth, float thickness) {
+vec2 binarySearchScreen(vec2 startUV, vec2 endUV, float startNDCDepth, float endNDCDepth, float thickness) {
     vec2 midUV = startUV;
-    float midDepth = startDepth;
+    float midNDCDepth = startNDCDepth;
     
     for (int i = 0; i < 8; i++) {
         midUV = (startUV + endUV) * 0.5;
-        midDepth = (startDepth + endDepth) * 0.5;
+        midNDCDepth = (startNDCDepth + endNDCDepth) * 0.5;
         
         if (midUV.x < 0.0 || midUV.x > 1.0 || midUV.y < 0.0 || midUV.y > 1.0) {
             break;
         }
         
-        float sampledDepth = texture(gDepth, midUV).r;
-        float delta = midDepth - sampledDepth;
+        // 采样深度并转换为线性深度
+        float sampledNDCDepth = texture(gDepth, midUV).r;
+        float sampledLinearDepth = linearizeDepth(sampledNDCDepth);
+        float rayLinearDepth = linearizeDepth(midNDCDepth);
+        
+        float delta = rayLinearDepth - sampledLinearDepth;
         
         if (delta > 0.0 && delta < thickness) {
             return midUV;
         } else if (delta > 0.0) {
             endUV = midUV;
-            endDepth = midDepth;
+            endNDCDepth = midNDCDepth;
         } else {
             startUV = midUV;
-            startDepth = midDepth;
+            startNDCDepth = midNDCDepth;
         }
     }
     
@@ -86,33 +104,41 @@ vec2 binarySearchScreen(vec2 startUV, vec2 endUV, float startDepth, float endDep
 
 // ============================================================
 // 屏幕空间光线步进
+// 在屏幕空间 (UV, NDC depth) 步进以保持透视正确性
+// 深度比较时转换为线性深度以使用世界空间单位的厚度阈值
 // ============================================================
 vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
     float maxSteps = ssr.maxSteps;
-    float thickness = ssr.thickness;
+    float thickness = ssr.thickness;  // 线性深度空间的厚度阈值
     
-    // 计算光线起点在屏幕空间的位置
+    // 计算光线起点和终点在屏幕空间的位置（UV + NDC depth）
     vec3 startScreen = worldToScreen(rayOrigin);
     
     // 在世界空间沿光线方向走一段距离作为终点
     vec3 endWorld = rayOrigin + rayDir * ssr.maxDistance;
     vec3 endScreen = worldToScreen(endWorld);
     
-    // 处理光线指向相机后方的情况
-    if (endScreen.z < 0.0 || endScreen.z > 1.0) {
-        if (endScreen.z < 0.0) {
-            float t = (0.001 - startScreen.z) / (endScreen.z - startScreen.z);
-            if (t > 0.0 && t < 1.0) {
-                endScreen = mix(startScreen, endScreen, t);
-            } else {
-                return vec4(0.0);
-            }
+    // 处理光线指向相机后方的情况（NDC depth < 0 或 > 1）
+    if (endScreen.z < 0.0) {
+        float t = (0.0 - startScreen.z) / (endScreen.z - startScreen.z);
+        if (t > 0.0 && t < 1.0) {
+            endScreen = mix(startScreen, endScreen, t);
+        } else {
+            return vec4(0.0);
+        }
+    }
+    
+    // 裁剪到远平面
+    if (endScreen.z > 1.0) {
+        float t = (1.0 - startScreen.z) / (endScreen.z - startScreen.z);
+        if (t > 0.0 && t < 1.0) {
+            endScreen = mix(startScreen, endScreen, t);
         }
     }
     
     // 在屏幕空间计算步进方向和距离
-    vec2 screenDelta = endScreen.xy - startScreen.xy;
-    float screenDistance = length(screenDelta);
+    vec3 screenDelta = endScreen - startScreen;
+    float screenDistance = length(screenDelta.xy);
     
     // 如果屏幕空间距离太短，跳过
     if (screenDistance < 0.001) {
@@ -126,40 +152,41 @@ vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
     // 添加抖动来打破规律性条纹
     float jitter = hash(gl_FragCoord.xy);
     
-    vec2 stepUV = screenDelta / numSteps;
-    float stepDepth = (endScreen.z - startScreen.z) / numSteps;
+    vec3 stepScreen = screenDelta / numSteps;
     
     // 开始步进（加入起始抖动）
-    vec2 currentUV = startScreen.xy + stepUV * jitter;
-    float currentDepth = startScreen.z + stepDepth * jitter;
-    vec2 prevUV = startScreen.xy;
-    float prevDepth = startScreen.z;
+    vec3 currentScreen = startScreen + stepScreen * jitter;
+    vec3 prevScreen = startScreen;
     
     for (int i = 0; i < int(numSteps); i++) {
         // 检查边界
-        if (currentUV.x < 0.0 || currentUV.x > 1.0 || 
-            currentUV.y < 0.0 || currentUV.y > 1.0 ||
-            currentDepth < 0.0 || currentDepth > 1.0) {
+        if (currentScreen.x < 0.0 || currentScreen.x > 1.0 || 
+            currentScreen.y < 0.0 || currentScreen.y > 1.0 ||
+            currentScreen.z < 0.0 || currentScreen.z > 1.0) {
             break;
         }
         
         // 采样深度缓冲
-        float sampledDepth = texture(gDepth, currentUV).r;
-        float deltaDepth = currentDepth - sampledDepth;
+        float sampledNDCDepth = texture(gDepth, currentScreen.xy).r;
         
-        // 检测命中（使用较小的阈值以提高精度）
-        if (deltaDepth > 0.0 && deltaDepth < 0.0005) {
+        // 转换为线性深度进行比较
+        float sampledLinearDepth = linearizeDepth(sampledNDCDepth);
+        float rayLinearDepth = linearizeDepth(currentScreen.z);
+        
+        float deltaDepth = rayLinearDepth - sampledLinearDepth;
+        
+        // 检测命中（使用线性深度空间的厚度阈值）
+        if (deltaDepth > 0.0 && deltaDepth < thickness) {
             // 二分搜索细化命中点
-            vec2 hitUV = binarySearchScreen(prevUV, currentUV, prevDepth, currentDepth, thickness);
+            vec2 hitUV = binarySearchScreen(prevScreen.xy, currentScreen.xy, 
+                                            prevScreen.z, currentScreen.z, thickness);
             
             // 背面剔除：检查命中点的法线是否背对光线
             vec3 hitNormal = texture(gNormal, hitUV).rgb;
             if (dot(hitNormal, rayDir) > 0.0) {
                 // 命中背面，跳过继续搜索
-                prevUV = currentUV;
-                prevDepth = currentDepth;
-                currentUV += stepUV;
-                currentDepth += stepDepth;
+                prevScreen = currentScreen;
+                currentScreen += stepScreen;
                 continue;
             }
             
@@ -182,10 +209,8 @@ vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
             return vec4(reflectionColor, fade);
         }
         
-        prevUV = currentUV;
-        prevDepth = currentDepth;
-        currentUV += stepUV;
-        currentDepth += stepDepth;
+        prevScreen = currentScreen;
+        currentScreen += stepScreen;
     }
     
     // 未找到交点

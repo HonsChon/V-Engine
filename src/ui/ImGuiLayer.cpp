@@ -27,10 +27,10 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
         return;
     }
 
-    // 创建 ImGui 专用的描述符池
+    // 创建 ImGui 专用的描述符�?
     createDescriptorPoolDirect();
 
-    // 初始化 ImGui 上下文
+    // 初始�?ImGui 上下�?
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     
@@ -53,7 +53,7 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
-    // 初始化 Vulkan 后端 (适配 2025/09+ 版本的新 API)
+    // 初始�?Vulkan 后端 (适配 2025/09+ 版本的新 API)
     ImGui_ImplVulkan_InitInfo initInfo = {};
     initInfo.ApiVersion = VK_API_VERSION_1_0;
     initInfo.Instance = instance;
@@ -68,12 +68,12 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
     initInfo.Allocator = nullptr;
     initInfo.CheckVkResultFn = nullptr;
     
-    // 新 API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain 中
+    // �?API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain �?
     initInfo.PipelineInfoMain.RenderPass = renderPass;
     initInfo.PipelineInfoMain.Subpass = 0;
     initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     
-    // 多视口配置
+    // 多视口配�?
     initInfo.PipelineInfoForViewports.Subpass = 0;
     initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
@@ -98,10 +98,10 @@ void ImGuiLayer::init(GLFWwindow* window,
 
     device = deviceIn;
 
-    // 创建 ImGui 专用的描述符池
+    // 创建 ImGui 专用的描述符�?
     createDescriptorPool();
 
-    // 初始化 ImGui 上下文
+    // 初始�?ImGui 上下�?
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     
@@ -111,25 +111,25 @@ void ImGuiLayer::init(GLFWwindow* window,
     
     if (dockingEnabled) {
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // 启用 Docking
-        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // 启用多视口
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // 启用多视�?
     }
 
     // 设置样式
     setupStyle();
 
-    // 如果启用了多视口，调整样式
+    // 如果启用了多视口，调整样�?
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
-    // 初始化 GLFW 后端
+    // 初始�?GLFW 后端
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
-    // 初始化 Vulkan 后端 (适配 2025/09+ 版本的新 API)
+    // 初始�?Vulkan 后端 (适配 2025/09+ 版本的新 API)
     ImGui_ImplVulkan_InitInfo initInfo = {};
-    initInfo.ApiVersion = VK_API_VERSION_1_0;  // 或你的 Vulkan API 版本
+    initInfo.ApiVersion = VK_API_VERSION_1_0;  // 或你�?Vulkan API 版本
     initInfo.Instance = device->getInstance();
     initInfo.PhysicalDevice = device->getPhysicalDevice();
     initInfo.Device = device->getDevice();
@@ -142,19 +142,19 @@ void ImGuiLayer::init(GLFWwindow* window,
     initInfo.Allocator = nullptr;
     initInfo.CheckVkResultFn = nullptr;
     
-    // 新 API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain 中
+    // �?API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain �?
     initInfo.PipelineInfoMain.RenderPass = renderPass;
     initInfo.PipelineInfoMain.Subpass = 0;
     initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     
-    // 多视口配置
+    // 多视口配�?
     initInfo.PipelineInfoForViewports.Subpass = 0;
     initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
     ImGui_ImplVulkan_Init(&initInfo);
 
-    // 注意：新版本的 ImGui Vulkan 后端会自动创建字体纹理
-    // 不再需要手动调用 ImGui_ImplVulkan_CreateFontsTexture()
+    // 注意：新版本�?ImGui Vulkan 后端会自动创建字体纹�?
+    // 不再需要手动调�?ImGui_ImplVulkan_CreateFontsTexture()
 
     initialized = true;
     std::cout << "ImGui initialized successfully" << std::endl;
@@ -197,7 +197,7 @@ void ImGuiLayer::beginFrame() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // 如果启用了 Docking，创建全屏 DockSpace
+    // 如果启用�?Docking，创建全�?DockSpace
     if (dockingEnabled) {
         ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDocking;
         
@@ -224,7 +224,7 @@ void ImGuiLayer::beginFrame() {
         ImGui::End();
     }
 
-    // 显示 Demo 窗口（调试用）
+    // 显示 Demo 窗口（调试用�?
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
@@ -236,7 +236,7 @@ void ImGuiLayer::endFrame(VkCommandBuffer commandBuffer) {
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
-    // 处理多视口
+    // 处理多视�?
     ImGuiIO& io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         ImGui::UpdatePlatformWindows();
@@ -250,15 +250,15 @@ void ImGuiLayer::onResize(uint32_t width, uint32_t height, VkRenderPass renderPa
     // 当窗口大小为 0 时（最小化），不做任何操作
     if (width == 0 || height == 0) return;
     
-    // 如果提供了新的 RenderPass，需要重新设置 ImGui 的渲染管线
+    // 如果提供了新�?RenderPass，需要重新设�?ImGui 的渲染管�?
     // 新版本的 ImGui Vulkan 后端会在 NewFrame 时自动处理大部分情况
     // 但为了安全起见，我们可以通知 ImGui 更新视口大小
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
     
-    // 注意：如果 RenderPass 结构发生变化（attachments 不同），
+    // 注意：如�?RenderPass 结构发生变化（attachments 不同），
     // 可能需要重新初始化 ImGui Vulkan 后端
-    // 但通常交换链重建不会改变 RenderPass 的 attachment 结构
+    // 但通常交换链重建不会改�?RenderPass �?attachment 结构
     (void)renderPass;  // 目前未使用，保留参数以备将来扩展
 }
 
@@ -334,7 +334,7 @@ void ImGuiLayer::setupStyle() {
     // V Engine 主题 - 深色现代风格
     ImVec4* colors = style.Colors;
     
-    // 背景色
+    // 背景�?
     colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.12f, 0.94f);
     colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.10f, 0.12f, 0.00f);
     colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.12f, 0.14f, 0.94f);
@@ -343,20 +343,20 @@ void ImGuiLayer::setupStyle() {
     colors[ImGuiCol_Border] = ImVec4(0.30f, 0.30f, 0.35f, 0.50f);
     colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     
-    // 帧背景
+    // 帧背�?
     colors[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.22f, 0.54f);
     colors[ImGuiCol_FrameBgHovered] = ImVec4(0.30f, 0.30f, 0.35f, 0.40f);
     colors[ImGuiCol_FrameBgActive] = ImVec4(0.40f, 0.40f, 0.45f, 0.67f);
     
-    // 标题栏
+    // 标题�?
     colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
     colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
     colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
     
-    // 菜单栏
+    // 菜单�?
     colors[ImGuiCol_MenuBarBg] = ImVec4(0.14f, 0.14f, 0.16f, 1.00f);
     
-    // 滚动条
+    // 滚动�?
     colors[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
     colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
@@ -374,12 +374,12 @@ void ImGuiLayer::setupStyle() {
     colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.50f, 0.80f, 1.00f);
     colors[ImGuiCol_ButtonActive] = ImVec4(0.20f, 0.40f, 0.90f, 1.00f);
     
-    // 头部（如 TreeNode, CollapsingHeader）
+    // 头部（如 TreeNode, CollapsingHeader�?
     colors[ImGuiCol_Header] = ImVec4(0.20f, 0.40f, 0.70f, 0.31f);
     colors[ImGuiCol_HeaderHovered] = ImVec4(0.30f, 0.50f, 0.80f, 0.80f);
     colors[ImGuiCol_HeaderActive] = ImVec4(0.30f, 0.50f, 0.90f, 1.00f);
     
-    // 分隔符
+    // 分隔�?
     colors[ImGuiCol_Separator] = ImVec4(0.30f, 0.30f, 0.35f, 0.50f);
     colors[ImGuiCol_SeparatorHovered] = ImVec4(0.40f, 0.55f, 0.80f, 0.78f);
     colors[ImGuiCol_SeparatorActive] = ImVec4(0.40f, 0.55f, 0.90f, 1.00f);

@@ -10,10 +10,10 @@ namespace VulkanEngine {
 class Scene;
 
 /**
- * @brief 场景管理器 - 管理多个场景的创建、切换和销毁
+ * @brief 场景管理�?- 管理多个场景的创建、切换和销�?
  * 
  * SceneManager 是一个单例类，负责：
- * - 创建和销毁场景
+ * - 创建和销毁场�?
  * - 管理活动场景
  * - 场景切换
  * - 场景生命周期管理
@@ -25,7 +25,7 @@ public:
      */
     static SceneManager& getInstance();
 
-    // 禁止复制和移动
+    // 禁止复制和移�?
     SceneManager(const SceneManager&) = delete;
     SceneManager& operator=(const SceneManager&) = delete;
     SceneManager(SceneManager&&) = delete;
@@ -36,7 +36,7 @@ public:
     // ============================================================
 
     /**
-     * @brief 创建新场景
+     * @brief 创建新场�?
      * @param name 场景名称
      * @return 新创建的场景指针
      */
@@ -68,12 +68,12 @@ public:
     void unloadScene(const std::string& name);
 
     /**
-     * @brief 卸载所有场景
+     * @brief 卸载所有场�?
      */
     void unloadAllScenes();
 
     /**
-     * @brief 检查场景是否存在
+     * @brief 检查场景是否存�?
      * @param name 场景名称
      * @return 是否存在
      */
@@ -84,16 +84,16 @@ public:
     // ============================================================
 
     /**
-     * @brief 切换到指定场景
+     * @brief 切换到指定场�?
      * @param name 场景名称
      * @param async 是否异步加载
      */
     void switchToScene(const std::string& name, bool async = false);
 
     /**
-     * @brief 加载场景（从文件）
+     * @brief 加载场景（从文件�?
      * @param filepath 场景文件路径
-     * @return 加载的场景指针
+     * @return 加载的场景指�?
      */
     std::shared_ptr<Scene> loadScene(const std::string& filepath);
 
@@ -123,14 +123,14 @@ public:
 
     /**
      * @brief 更新活动场景
-     * @param deltaTime 帧间隔时间
+     * @param deltaTime 帧间隔时�?
      */
     void update(float deltaTime);
 
     /**
      * @brief 窗口大小变化
-     * @param width 新宽度
-     * @param height 新高度
+     * @param width 新宽�?
+     * @param height 新高�?
      */
     void onViewportResize(uint32_t width, uint32_t height);
 
@@ -139,7 +139,7 @@ private:
     ~SceneManager() = default;
 
     /**
-     * @brief 通知所有监听器场景已变更
+     * @brief 通知所有监听器场景已变�?
      */
     void notifySceneChange();
 

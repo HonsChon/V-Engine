@@ -1,0 +1,24 @@
+V Engine - AI Context Entry Point  
+  
+Welcome! This is a Vulkan-based game engine learning project.  
+  
+=== Quick Start ===  
+  
+1. Read project status document first:  
+   .ai/PROJECT_STATUS.md  
+  
+2. Full project README:  
+   README.md  
+  
+3. Core shader files:  
+   - shaders/ssr.frag (Screen Space Reflections)  
+   - shaders/water.frag (Water rendering with SSR)  
+   - shaders/deferred_lighting.frag (Deferred lighting)  
+  
+4. Core C++ files:  
+   - src/renderer/VulkanRenderer.cpp  
+   - src/passes/SSRPass.cpp  
+   - src/passes/WaterPass.cpp  
+  
+=== Current Version ===  
+v0.9.1 - SSR linear depth and water smart occlusion completed 

@@ -14,8 +14,8 @@
 #include "VulkanSwapChain.h"
 #include "VulkanBuffer.h"
 #include "Camera.h"
-#include "../scene/Scene.h"
-#include "../resources/RenderSystem.h"
+#include "Scene.h"
+#include "RenderSystem.h"
 #include "GBufferPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
@@ -23,7 +23,11 @@
 #include "LightingPass.h"
 #include "ImGuiLayer.h"
 #include "UIManager.h"
-#include "../scene/RayPicker.h"
+#include "RayPicker.h"
+#include "GPUDrivenRenderer.h"
+#include "NaniteDebugPass.h"
+#include "nanite/Nanite.h"
+#include "nanite/NaniteManager.h"
 
 class VulkanRenderer {
 public:
@@ -32,7 +36,7 @@ public:
 
     void run();
     
-    // 输入处理函数（供回调使用）
+    // 输入处理函数（供回调使用�?
     void handleMouseMovement(float xoffset, float yoffset);
     void handleMouseScroll(float yoffset);
 
@@ -41,7 +45,7 @@ private:
     void initVulkan();
     void createSyncObjects();
     void createCommandBuffers();
-    // loadMesh, createVertexBuffer, createIndexBuffer, loadTextures 已移至 MeshManager/TextureManager
+    // loadMesh, createVertexBuffer, createIndexBuffer, loadTextures 已移�?MeshManager/TextureManager
     void mainLoop();
     void cleanup();
     
@@ -58,7 +62,7 @@ private:
     void recreateSwapChain();
     void processKeyboardInput(float deltaTime);
     
-    // 射线拾取（鼠标点击选择物体）
+    // 射线拾取（鼠标点击选择物体�?
     void handleMousePicking();
 
     // Window
@@ -69,27 +73,28 @@ private:
     // Vulkan core
     std::unique_ptr<VulkanDevice> device;
     std::unique_ptr<VulkanSwapChain> swapChain;
-    // Geometry/Textures 由 MeshManager/TextureManager 管理
+    // Geometry/Textures �?MeshManager/TextureManager 管理
     
     // Scene
     std::unique_ptr<Camera> camera;
     std::unique_ptr<VulkanEngine::Scene> scene;
     
-    // 多物体渲染系统
+    // 多物体渲染系�?
     std::unique_ptr<VulkanEngine::RenderSystem> renderSystem;
     
     // Rendering
     std::vector<VkCommandBuffer> commandBuffers;
     
     // Synchronization
-    std::vector<VkSemaphore> imageAvailableSemaphores;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> inFlightFences;
+    std::vector<VkSemaphore> imageAvailableSemaphores;  // Per frame-in-flight
+    std::vector<VkSemaphore> renderFinishedSemaphores;  // Per frame-in-flight
+    std::vector<VkFence> inFlightFences;                // Per frame-in-flight
+    std::vector<VkFence> imagesInFlight;                // Per swapchain image - 跟踪每个 image 正在使用�?fence
     
     uint32_t currentFrame = 0;
     bool framebufferResized = false;
     
-    // 鼠标状态
+    // 鼠标状�?
     float lastMouseX = 640.0f;
     float lastMouseY = 360.0f;
     bool firstMouse = true;
@@ -98,12 +103,12 @@ private:
     // ========== SSR 水面反射相关 ==========
     // 渲染模式
     enum class RenderMode {
-        Normal,      // 普通 PBR 渲染
+        Normal,      // 普�?PBR 渲染
         WaterScene   // 水面反射场景
     };
     RenderMode renderMode = RenderMode::Normal;
     
-    // G-Buffer (用于延迟渲染和 SSR)
+    // G-Buffer (用于延迟渲染�?SSR)
     std::unique_ptr<GBufferPass> gbuffer;
     
     // SSR Pass
@@ -112,13 +117,13 @@ private:
     // Water Pass
     std::unique_ptr<WaterPass> waterPass;
     
-    // Forward Pass（前向渲染通道）
+    // Forward Pass（前向渲染通道�?
     std::unique_ptr<ForwardPass> forwardPass;
     
     // Lighting Pass（延迟渲染光照阶段）
     std::unique_ptr<LightingPass> lightingPass;
     
-    // 使用延迟渲染（默认 false 使用前向渲染）
+    // 使用延迟渲染（默�?false 使用前向渲染�?
     bool useDeferredShading = false;
     
     // 延迟渲染相关方法
@@ -154,11 +159,36 @@ private:
     void updateUI();
     void renderUI(VkCommandBuffer commandBuffer);
     
-    // 帧时间统计
+    // 帧时间统�?
     float deltaTime = 0.0f;
     float lastFrameTime = 0.0f;
     float fps = 0.0f;
     
     // UI 是否显示
     bool showUI = true;
+    
+    // ========== GPU-Driven Rendering (Nanite-like) ==========
+    std::unique_ptr<GPUDrivenRenderer> gpuDrivenRenderer;
+    bool enableGPUCulling = false;  // �?6 键切�?
+    
+    // GPU-Driven Rendering 相关方法
+    void initGPUDrivenRendering();
+    void cleanupGPUDrivenRendering();
+    void prepareGPUCullingData();
+    
+    // ========== Nanite 系统 ==========
+    std::unique_ptr<Nanite::NaniteManager> naniteManager;
+    std::unique_ptr<NaniteDebugPass> naniteDebugPass;
+    bool enableNanite = false;      // �?7 键切�?
+    bool naniteInitialized = false;
+    bool showClusterVisualization = false;  // �?9 键切�?Cluster 可视�?
+    std::string lastClusterizedMeshPath;    // 最后处理的网格路径
+    
+    // Nanite 相关方法
+    void initNanite();
+    void cleanupNanite();
+    void testNaniteClustering();    // 测试 Cluster 化功�?
+    void initNaniteDebugPass();     // 初始化调试渲染通道
+    void prepareNaniteCulling(VkCommandBuffer commandBuffer, uint32_t imageIndex);  // �?RenderPass 之前执行 GPU 剔除
+    void recordNaniteDebugCommands(VkCommandBuffer commandBuffer, uint32_t imageIndex);  // �?RenderPass 内录制绘制命�?
 };

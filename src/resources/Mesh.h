@@ -56,7 +56,7 @@ struct Vertex {
     }
 };
 
-// Vertex 的哈希函数（用于 unordered_map）
+// Vertex 的哈希函数（用于 unordered_map�?
 namespace std {
     template<> struct hash<Vertex> {
         size_t operator()(Vertex const& vertex) const {
@@ -73,7 +73,7 @@ public:
     Mesh();
     ~Mesh();
 
-    // 基本几何体创建
+    // 基本几何体创�?
     void createCube();
     void createSphere(int segments = 32);
     void createPlane(float size = 10.0f, int subdivisions = 1);
@@ -89,7 +89,7 @@ public:
     const std::vector<uint32_t>& getIndices() const { return indices; }
     const std::string& getName() const { return name; }
     
-    // Setters - 用于程序化生成网格
+    // Setters - 用于程序化生成网�?
     void setVertices(const std::vector<Vertex>& verts) { 
         vertices = verts; 
         calculateBounds();
@@ -97,7 +97,7 @@ public:
     void setIndices(const std::vector<uint32_t>& inds) { indices = inds; }
     void setName(const std::string& n) { name = n; }
     
-    // 获取包围盒信息
+    // 获取包围盒信�?
     glm::vec3 getMinBounds() const { return minBounds; }
     glm::vec3 getMaxBounds() const { return maxBounds; }
     glm::vec3 getCenter() const { return (minBounds + maxBounds) * 0.5f; }
@@ -111,16 +111,16 @@ private:
     std::vector<uint32_t> indices;
     std::string name;
     
-    // 包围盒
+    // 包围�?
     glm::vec3 minBounds;
     glm::vec3 maxBounds;
     
-    // 计算包围盒
+    // 计算包围�?
     void calculateBounds();
     
     // 计算切线空间（用于法线贴图）
     void calculateTangents();
     
-    // 如果 OBJ 没有法线，计算顶点法线
+    // 如果 OBJ 没有法线，计算顶点法�?
     void calculateNormals();
 };

@@ -20,10 +20,10 @@ namespace VulkanEngine {
 }
 
 /**
- * UIManager - UI 管理器
+ * UIManager - UI 管理�?
  * 
- * 协调所有 UI 面板的更新和渲染。
- * 提供统一的接口来管理编辑器 UI 状态。
+ * 协调所�?UI 面板的更新和渲染�?
+ * 提供统一的接口来管理编辑�?UI 状态�?
  */
 class UIManager {
 public:
@@ -54,8 +54,8 @@ public:
     UIManager& operator=(const UIManager&) = delete;
 
     /**
-     * 渲染所有 UI 面板
-     * 在 ImGuiLayer::beginFrame() 和 endFrame() 之间调用
+     * 渲染所�?UI 面板
+     * �?ImGuiLayer::beginFrame() �?endFrame() 之间调用
      */
     void render();
 
@@ -75,7 +75,7 @@ public:
     void updateSceneInfo(const SceneInfo& info);
 
     /**
-     * 设置各面板的可见性
+     * 设置各面板的可见�?
      */
     void setDebugPanelVisible(bool visible);
     void setSceneHierarchyVisible(bool visible);
@@ -83,7 +83,7 @@ public:
     void setAssetBrowserVisible(bool visible);
 
     /**
-     * 获取各面板的可见性
+     * 获取各面板的可见�?
      */
     bool isDebugPanelVisible() const;
     bool isSceneHierarchyVisible() const;
@@ -91,7 +91,7 @@ public:
     bool isAssetBrowserVisible() const;
 
     /**
-     * 切换面板可见性
+     * 切换面板可见�?
      */
     void toggleDebugPanel();
     void toggleSceneHierarchy();
@@ -109,7 +109,7 @@ public:
     // ============================================================
 
     /**
-     * 设置 ECS 场景（启用 ECS 模式）
+     * 设置 ECS 场景（启�?ECS 模式�?
      */
     void setScene(VulkanEngine::Scene* scene);
 
@@ -119,12 +119,12 @@ public:
     VulkanEngine::Scene* getScene() const { return m_scene; }
 
     /**
-     * 设置选中的实体
+     * 设置选中的实�?
      */
     void setSelectedEntity(entt::entity entity);
 
     /**
-     * 获取选中的实体
+     * 获取选中的实�?
      */
     entt::entity getSelectedEntity() const;
 
@@ -136,13 +136,13 @@ private:
     std::unique_ptr<InspectorPanel> inspectorPanel;
     std::unique_ptr<AssetBrowserPanel> assetBrowserPanel;
 
-    // 面板可见性
+    // 面板可见�?
     bool showDebugPanel = true;
     bool showSceneHierarchy = true;
     bool showInspector = true;
     bool showAssetBrowser = false;  // 默认隐藏
 
-    // 显示 ImGui Demo（调试用）
+    // 显示 ImGui Demo（调试用�?
     bool showImGuiDemo = false;
 
     // ECS 数据

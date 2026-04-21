@@ -13,16 +13,16 @@ namespace VulkanEngine {
 /**
  * SceneHierarchyPanel - 场景层级面板
  * 
- * 显示场景中所有对象的层级结构，支持选择对象。
- * 现已与 ECS (EnTT) 系统集成。
+ * 显示场景中所有对象的层级结构，支持选择对象�?
+ * 现已�?ECS (EnTT) 系统集成�?
  */
 class SceneHierarchyPanel {
 public:
-    // 场景对象信息（保留用于兼容旧系统）
+    // 场景对象信息（保留用于兼容旧系统�?
     struct SceneObject {
         int id;
         std::string name;
-        std::string type;  // "Mesh", "Light", "Camera" 等
+        std::string type;  // "Mesh", "Light", "Camera" �?
         bool visible = true;
         std::vector<int> childrenIds;
     };
@@ -45,12 +45,12 @@ public:
     void setScene(VulkanEngine::Scene* scene);
 
     /**
-     * 获取当前选中的 ECS 实体
+     * 获取当前选中�?ECS 实体
      */
     entt::entity getSelectedEntity() const { return m_selectedEntity; }
 
     /**
-     * 设置选中的 ECS 实体
+     * 设置选中�?ECS 实体
      */
     void setSelectedEntity(entt::entity entity);
 
@@ -71,7 +71,7 @@ public:
     void setSceneObjects(const std::vector<SceneObject>& objects);
 
     /**
-     * 获取当前选中的对象 ID（-1 表示未选中）
+     * 获取当前选中的对�?ID�?1 表示未选中�?
      */
     int getSelectedObjectId() const { return selectedObjectId; }
 
@@ -97,7 +97,7 @@ private:
     void renderECSHierarchy();
     void renderEntityNode(entt::entity entity);
 
-    // 旧系统渲染方法
+    // 旧系统渲染方�?
     void renderObjectNode(const SceneObject& obj, int depth = 0);
 
     // ECS 数据
@@ -105,7 +105,7 @@ private:
     entt::entity m_selectedEntity = entt::null;
     std::function<void(entt::entity)> m_onEntitySelected;
 
-    // 旧系统数据
+    // 旧系统数�?
     std::vector<SceneObject> sceneObjects;
     int selectedObjectId = -1;
     std::function<void(int)> onSelectionChanged;

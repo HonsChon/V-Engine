@@ -98,10 +98,15 @@ endif()
 # ============================================================
 include_directories(${Vulkan_INCLUDE_DIRS})
 include_directories(src)
-include_directories(src/core)
-include_directories(src/passes)
+include_directories(src/Application)
+include_directories(src/RHI)
+include_directories(src/Core)
 include_directories(src/renderer)
+include_directories(src/renderer/passes)
 include_directories(src/resources)
+include_directories(src/World)
+include_directories(src/scene)
+include_directories(src/renderer/nanite)
 include_directories(src/third_party)
 include_directories(src/third_party/imgui)
 include_directories(src/third_party/imgui/backends)
@@ -119,53 +124,96 @@ endif()
 # Source files -- 按目录组织
 # ============================================================
 
-# Core - Vulkan 核心封装
+# Application - 应用层：生命周期、窗口、输入
+set(APPLICATION_SOURCES
+    src/Application/Engine.cpp
+    src/Application/Window.cpp
+    src/Application/Input.cpp
+)
+
+set(APPLICATION_HEADERS
+    src/Application/Engine.h
+    src/Application/Window.h
+    src/Application/Input.h
+)
+
+# RHI - 渲染硬件接口层：Vulkan封装
+set(RHI_SOURCES
+    src/RHI/VulkanDevice.cpp
+    src/RHI/VulkanSwapChain.cpp
+    src/RHI/VulkanBuffer.cpp
+    src/RHI/VulkanTexture.cpp
+    src/RHI/VulkanPipeline.cpp
+    src/RHI/ComputePipeline.cpp
+    src/RHI/FrameResources.cpp
+)
+
+set(RHI_HEADERS
+    src/RHI/VulkanDevice.h
+    src/RHI/VulkanSwapChain.h
+    src/RHI/VulkanBuffer.h
+    src/RHI/VulkanTexture.h
+    src/RHI/VulkanPipeline.h
+    src/RHI/ComputePipeline.h
+    src/RHI/FrameResources.h
+)
+
+# Core - 核心工具层：与渲染无关的基础设施
 set(CORE_SOURCES
-    src/core/VulkanDevice.cpp
-    src/core/VulkanSwapChain.cpp
-    src/core/VulkanBuffer.cpp
-    src/core/VulkanTexture.cpp
-    src/core/VulkanPipeline.cpp
-    src/core/Utils.cpp
+    src/Core/Utils.cpp
 )
 
 set(CORE_HEADERS
-    src/core/VulkanDevice.h
-    src/core/VulkanSwapChain.h
-    src/core/VulkanBuffer.h
-    src/core/VulkanTexture.h
-    src/core/VulkanPipeline.h
-    src/core/Utils.h
+    src/Core/Utils.h
 )
 
-# Passes - 渲染通道
+# Renderer Passes - 渲染通道
 set(PASSES_SOURCES
-    src/passes/GBufferPass.cpp
-    src/passes/SSRPass.cpp
-    src/passes/WaterPass.cpp
-    src/passes/ForwardPass.cpp
-    src/passes/LightingPass.cpp
+    src/renderer/passes/GBufferPass.cpp
+    src/renderer/passes/SSRPass.cpp
+    src/renderer/passes/WaterPass.cpp
+    src/renderer/passes/ForwardPass.cpp
+    src/renderer/passes/LightingPass.cpp
+    src/renderer/passes/ComputePassBase.cpp
+    src/renderer/passes/FrustumCullingPass.cpp
+    src/renderer/passes/GPUDrivenRenderer.cpp
+    src/renderer/passes/NaniteDebugPass.cpp
+    src/renderer/passes/ClusterCullingPass.cpp
 )
 
 set(PASSES_HEADERS
-    src/passes/RenderPassBase.h
-    src/passes/RenderContext.h
-    src/passes/GBufferPass.h
-    src/passes/SSRPass.h
-    src/passes/WaterPass.h
-    src/passes/ForwardPass.h
-    src/passes/LightingPass.h
+    src/renderer/passes/RenderPassBase.h
+    src/renderer/passes/RenderContext.h
+    src/renderer/passes/GBufferPass.h
+    src/renderer/passes/SSRPass.h
+    src/renderer/passes/WaterPass.h
+    src/renderer/passes/ForwardPass.h
+    src/renderer/passes/LightingPass.h
+    src/renderer/passes/ComputePassBase.h
+    src/renderer/passes/FrustumCullingPass.h
+    src/renderer/passes/GPUDrivenRenderer.h
+    src/renderer/passes/NaniteDebugPass.h
+    src/renderer/passes/ClusterCullingPass.h
 )
 
 # Renderer - 渲染器
 set(RENDERER_SOURCES
     src/renderer/VulkanRenderer.cpp
-    src/renderer/Camera.cpp
+    src/renderer/SceneRenderer.cpp
 )
 
 set(RENDERER_HEADERS
     src/renderer/VulkanRenderer.h
-    src/renderer/Camera.h
+    src/renderer/SceneRenderer.h
+)
+
+# World - 世界/场景层：场景对象
+set(WORLD_SOURCES
+    src/World/Camera.cpp
+)
+
+set(WORLD_HEADERS
+    src/World/Camera.h
 )
 
 # Resources - 资源管理
@@ -197,6 +245,22 @@ set(SCENE_HEADERS
     src/scene/Components.h
     src/scene/SelectionManager.h
     src/scene/RayPicker.h
+)
+
+# Nanite - 虚拟几何体系统 (moved to renderer/nanite/)
+set(NANITE_SOURCES
+    src/renderer/nanite/NaniteCluster.cpp
+    src/renderer/nanite/MeshClusterizer.cpp
+    src/renderer/nanite/MeshSimplifier.cpp
+    src/renderer/nanite/NaniteManager.cpp
+)
+
+set(NANITE_HEADERS
+    src/renderer/nanite/Nanite.h
+    src/renderer/nanite/NaniteCluster.h
+    src/renderer/nanite/MeshClusterizer.h
+    src/renderer/nanite/MeshSimplifier.h
+    src/renderer/nanite/NaniteManager.h
 )
 
 # Third Party Headers
@@ -250,21 +314,29 @@ set(UI_HEADERS
 # 合并所有源文件
 set(ALL_SOURCES
     src/main.cpp
+    ${APPLICATION_SOURCES}
+    ${RHI_SOURCES}
     ${CORE_SOURCES}
     ${PASSES_SOURCES}
     ${RENDERER_SOURCES}
+    ${WORLD_SOURCES}
     ${RESOURCES_SOURCES}
     ${SCENE_SOURCES}
+    ${NANITE_SOURCES}
     ${IMGUI_SOURCES}
     ${UI_SOURCES}
 )
 
 set(ALL_HEADERS
+    ${APPLICATION_HEADERS}
+    ${RHI_HEADERS}
     ${CORE_HEADERS}
     ${PASSES_HEADERS}
     ${RENDERER_HEADERS}
+    ${WORLD_HEADERS}
     ${RESOURCES_HEADERS}
     ${SCENE_HEADERS}
+    ${NANITE_HEADERS}
     ${THIRD_PARTY_HEADERS}
     ${IMGUI_HEADERS}
     ${UI_HEADERS}
@@ -278,21 +350,30 @@ add_executable(${PROJECT_NAME} ${ALL_SOURCES} ${ALL_HEADERS})
 # ============================================================
 # Source Groups for IDE (Visual Studio folder structure)
 # ============================================================
+source_group("Source Files/Application" FILES ${APPLICATION_SOURCES})
+source_group("Source Files/RHI" FILES ${RHI_SOURCES})
 source_group("Source Files/Core" FILES ${CORE_SOURCES})
-source_group("Source Files/Passes" FILES ${PASSES_SOURCES})
 source_group("Source Files/Renderer" FILES ${RENDERER_SOURCES})
+source_group("Source Files/Renderer/Passes" FILES ${PASSES_SOURCES})
+source_group("Source Files/World" FILES ${WORLD_SOURCES})
 source_group("Source Files/Resources" FILES ${RESOURCES_SOURCES})
-source_group("Header Files/Core" FILES ${CORE_HEADERS})
-source_group("Header Files/Passes" FILES ${PASSES_HEADERS})
-source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
-source_group("Header Files/Resources" FILES ${RESOURCES_HEADERS})
-source_group("Header Files/Third Party" FILES ${THIRD_PARTY_HEADERS})
-source_group("Source Files/ImGui" FILES ${IMGUI_SOURCES})
-source_group("Header Files/ImGui" FILES ${IMGUI_HEADERS})
-source_group("Source Files/UI" FILES ${UI_SOURCES})
-source_group("Header Files/UI" FILES ${UI_HEADERS})
 source_group("Source Files/Scene" FILES ${SCENE_SOURCES})
+source_group("Source Files/Nanite" FILES ${NANITE_SOURCES})
+source_group("Source Files/ImGui" FILES ${IMGUI_SOURCES})
+source_group("Source Files/UI" FILES ${UI_SOURCES})
+
+source_group("Header Files/Application" FILES ${APPLICATION_HEADERS})
+source_group("Header Files/RHI" FILES ${RHI_HEADERS})
+source_group("Header Files/Core" FILES ${CORE_HEADERS})
+source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
+source_group("Header Files/Renderer/Passes" FILES ${PASSES_HEADERS})
+source_group("Header Files/World" FILES ${WORLD_HEADERS})
+source_group("Header Files/Resources" FILES ${RESOURCES_HEADERS})
 source_group("Header Files/Scene" FILES ${SCENE_HEADERS})
+source_group("Header Files/Nanite" FILES ${NANITE_HEADERS})
+source_group("Header Files/ImGui" FILES ${IMGUI_HEADERS})
+source_group("Header Files/UI" FILES ${UI_HEADERS})
+source_group("Header Files/Third Party" FILES ${THIRD_PARTY_HEADERS})
 
 # ============================================================
 # Link libraries
@@ -366,13 +447,9 @@ endif()
 # ============================================================
 # Copy shaders and assets to build directory
 # ============================================================
-# 复制 shaders 目录
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/shaders"
-    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders"
-    COMMENT "Copying shaders to output directory"
-)
+# 注意：不再复制整个 shaders 目录，因为这会覆盖 glslc 编译好的 .spv 文件
+# 着色器由下方的 CompileShaders 目标自动编译
+# 如果需要复制源码文件（用于调试），可以单独复制非 .spv 文件
 
 # 复制 assets 目录
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -414,6 +491,13 @@ if(GLSLC)
         deferred_lighting.frag
     )
     
+    # 计算着色器（带子目录）
+    set(COMPUTE_SHADER_SOURCES
+        culling/frustum_culling.comp
+        nanite/cluster_culling.comp
+    )
+    
+    # 编译主目录着色器
     foreach(SHADER_FILE ${SHADER_SOURCES})
         set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
         
@@ -436,6 +520,40 @@ if(GLSLC)
         endif()
     endforeach()
     
+    # 编译计算着色器（保持目录结构）
+    foreach(SHADER_FILE ${COMPUTE_SHADER_SOURCES})
+        set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
+        
+        # 获取目录部分 (e.g., "culling")
+        get_filename_component(SHADER_SUBDIR ${SHADER_FILE} DIRECTORY)
+        get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
+        
+        # 创建子目录
+        if(SHADER_SUBDIR)
+            file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}/${SHADER_SUBDIR}")
+        endif()
+        
+        # 输出为 shader.comp.spv 格式
+        set(SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER_FILE}.spv")
+        
+        if(EXISTS ${SHADER_SOURCE})
+            # 同时生成到源目录（程序可能从项目根目录运行）
+            set(SHADER_SOURCE_DIR_OUTPUT "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}.spv")
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E copy ${SHADER_OUTPUT} ${SHADER_SOURCE_DIR_OUTPUT}
+                DEPENDS ${SHADER_SOURCE}
+                COMMENT "Compiling compute shader: ${SHADER_FILE} -> ${SHADER_FILE}.spv (+ sync to source)"
+            )
+            
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+            message(STATUS "  Compute Shader: ${SHADER_FILE} -> ${SHADER_FILE}.spv")
+        else()
+            message(WARNING "Compute shader file not found: ${SHADER_SOURCE}")
+        endif()
+    endforeach()
+    
     if(SHADER_OUTPUTS)
         add_custom_target(CompileShaders ALL DEPENDS ${SHADER_OUTPUTS})
         add_dependencies(${PROJECT_NAME} CompileShaders)
@@ -455,10 +573,15 @@ message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "")
 message(STATUS "Project Structure:")
-message(STATUS "  src/core/       - Vulkan core wrappers")
-message(STATUS "  src/passes/     - Render passes (GBuffer, SSR, etc.)")
-message(STATUS "  src/renderer/   - Main renderer and camera")
-message(STATUS "  src/resources/  - Mesh, Material, Scene")
-message(STATUS "  src/third_party/- Third party headers")
+message(STATUS "  src/Application/ - Engine lifecycle, Window, Input")
+message(STATUS "  src/RHI/         - Vulkan abstraction layer")
+message(STATUS "  src/Core/        - Utilities (no render dependencies)")
+message(STATUS "  src/renderer/    - SceneRenderer, VulkanRenderer")
+message(STATUS "  src/renderer/passes/ - Render passes (GBuffer, SSR, etc.)")
+message(STATUS "  src/World/       - Camera, Scene objects")
+message(STATUS "  src/resources/   - Mesh, Material")
+message(STATUS "  src/scene/       - ECS scene management")
+message(STATUS "  src/renderer/nanite/ - Virtual geometry system")
+message(STATUS "  src/ui/          - Editor UI panels")
 message(STATUS "===============================")
 message(STATUS "")

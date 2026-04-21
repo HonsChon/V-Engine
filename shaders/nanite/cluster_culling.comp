@@ -1,0 +1,209 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+
+/**
+ * Cluster Culling & LOD Selection Compute Shader
+ * 
+ * Nanite 风格的 DAG 节点独立决策 LOD 选择：
+ * 
+ * 渲染一个 cluster 的条件：
+ *   selfScreenError <= threshold < parentScreenError
+ * 
+ * 即该 cluster 是"刚好足够精细"的层级。
+ * 这保证了每个表面区域恰好被一个 cluster 覆盖（无镂空、无重叠）。
+ */
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// ============== 数据结构 ==============
+
+struct ClusterData {
+    vec4 boundingSphere;    // xyz: center, w: radius
+    vec4 aabbMin;           // xyz: min, w: lodError
+    vec4 aabbMax;           // xyz: max, w: maxChildError
+    vec4 normalCone;        // xyz: axis, w: cos(angle)
+    
+    uint vertexOffset;
+    uint indexOffset;
+    uint triangleCount;
+    uint lodLevel;
+    
+    uint parentGroupIndex;  // 父节点索引 (0xFFFFFFFF = 根节点)
+    uint flags;             // bit0=enabled, bit1=isLeaf
+    uint childStartIndex;
+    uint childCount;
+};
+
+// ============== Uniform 数据 ==============
+
+layout(set = 0, binding = 0) uniform CullingUniforms {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 viewProjMatrix;
+    vec4 frustumPlanes[6];
+    vec4 cameraPosition;
+    uvec4 clusterCountPacked;   // x=count, y=frustumCull, z=coneCull, w=lodSelect
+    vec4 screenParams;          // x=width, y=height, z=lodErrorScale, w=pixelThreshold
+} uniforms;
+
+#define CLUSTER_COUNT uniforms.clusterCountPacked.x
+#define ENABLE_FRUSTUM_CULL (uniforms.clusterCountPacked.y != 0u)
+#define ENABLE_CONE_CULL (uniforms.clusterCountPacked.z != 0u)
+#define ENABLE_LOD_SELECTION (uniforms.clusterCountPacked.w != 0u)
+#define SCREEN_WIDTH uniforms.screenParams.x
+#define SCREEN_HEIGHT uniforms.screenParams.y
+#define LOD_ERROR_SCALE uniforms.screenParams.z
+#define PIXEL_THRESHOLD uniforms.screenParams.w
+
+// ============== 缓冲区 ==============
+
+layout(set = 0, binding = 1) readonly buffer ClusterBuffer {
+    ClusterData clusters[];
+};
+
+layout(set = 0, binding = 2) readonly buffer TransformBuffer {
+    mat4 transforms[];
+};
+
+layout(set = 0, binding = 3) writeonly buffer VisibleBuffer {
+    uint visibleClusterIndices[];
+};
+
+layout(set = 0, binding = 4) buffer CounterBuffer {
+    uint visibleClusterCount;
+};
+
+layout(set = 0, binding = 5) buffer SelectionStateBuffer {
+    uint selectionState[];
+};
+
+// ============== 辅助函数 ==============
+
+float signedDistanceToPlane(vec4 plane, vec3 point) {
+    return dot(plane.xyz, point) + plane.w;
+}
+
+bool frustumCullSphere(vec3 center, float radius) {
+    for (int i = 0; i < 6; ++i) {
+        float dist = signedDistanceToPlane(uniforms.frustumPlanes[i], center);
+        if (dist < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool coneCull(vec3 coneAxis, float coneCosAngle, vec3 clusterCenter, vec3 cameraPos) {
+    if (coneCosAngle <= 0.0) {
+        return true;
+    }
+    vec3 viewDir = normalize(cameraPos - clusterCenter);
+    float viewDotCone = dot(viewDir, coneAxis);
+    return viewDotCone >= -coneCosAngle;
+}
+
+/**
+ * 计算包围球在屏幕上的直径（像素）
+ */
+float computeScreenSize(float radius, float distanceToCamera) {
+    float projScaleY = uniforms.projMatrix[1][1];
+    
+    if (distanceToCamera <= 0.001) {
+        return 10000.0;
+    }
+    
+    return (2.0 * radius * projScaleY * SCREEN_HEIGHT * 0.5) / distanceToCamera;
+}
+
+/**
+ * 计算世界空间误差投影到屏幕空间的像素数
+ */
+float computeScreenSpaceError(float lodError, float distanceToCamera) {
+    float projScaleY = uniforms.projMatrix[1][1];
+    
+    if (distanceToCamera <= 0.001) {
+        return 10000.0;
+    }
+    
+    float screenError = (lodError * projScaleY * SCREEN_HEIGHT * 0.5) / distanceToCamera;
+    return screenError * LOD_ERROR_SCALE;
+}
+
+// ============== 主函数 ==============
+
+void main() {
+    uint clusterIndex = gl_GlobalInvocationID.x;
+    
+    if (clusterIndex >= CLUSTER_COUNT) {
+        return;
+    }
+    
+    ClusterData cluster = clusters[clusterIndex];
+    
+    // 检查是否启用
+    if ((cluster.flags & 1u) == 0u) {
+        return;
+    }
+    
+    // 世界空间变换（暂用单位矩阵）
+    mat4 worldMatrix = mat4(1.0);
+    vec3 worldCenter = (worldMatrix * vec4(cluster.boundingSphere.xyz, 1.0)).xyz;
+    float distanceToCamera = length(worldCenter - uniforms.cameraPosition.xyz);
+    
+    // ============================================================
+    // Nanite DAG LOD 选择
+    //
+    // 核心原则（UE5 Nanite）：
+    //
+    // 渲染条件 = "自身误差可接受" AND "父节点误差不可接受"
+    //
+    //   selfScreenError <= threshold < parentScreenError
+    //
+    // 保证：
+    // - 在 DAG 的每条根→叶路径上，恰好选中一个节点
+    // - 无镂空（每个区域都被覆盖）
+    // - 无重叠（每个区域只有一个 LOD）
+    //
+    // 特殊情况：
+    // - 根节点（无父）：parentError 视为无穷大，总是不可接受
+    // - 叶节点（LOD0）：selfError = 0，总是可接受
+    // ============================================================
+    
+    if (ENABLE_LOD_SELECTION) {
+        // ============ DEBUG TEST: 只渲染 LOD 0 ============
+        // 如果这个测试通过（只显示 LOD 0），说明 Shader 被正确执行
+        // 如果仍然显示所有 LOD，说明 Shader 根本没被加载
+        if (cluster.lodLevel != 0u) {
+            // 非 LOD 0 的 cluster：只有根节点保留（防止没有 LOD 0 的 mesh 消失）
+            bool isRoot = (cluster.parentGroupIndex == 0xFFFFFFFFu);
+            if (!isRoot) {
+                return;
+            }
+        }
+    }
+    
+    // ============================================
+    // 视锥剔除
+    // ============================================
+    if (ENABLE_FRUSTUM_CULL) {
+        float radius = cluster.boundingSphere.w;
+        if (!frustumCullSphere(worldCenter, radius)) {
+            return;
+        }
+    }
+    
+    // ============================================
+    // 法线锥背面剔除
+    // ============================================
+    if (ENABLE_CONE_CULL) {
+        vec3 coneAxis = cluster.normalCone.xyz;
+        float coneCosAngle = cluster.normalCone.w;
+        if (!coneCull(coneAxis, coneCosAngle, worldCenter, uniforms.cameraPosition.xyz)) {
+            return;
+        }
+    }
+    
+    // 输出到可见列表
+    uint outputIndex = atomicAdd(visibleClusterCount, 1);
+    visibleClusterIndices[outputIndex] = clusterIndex;
+}

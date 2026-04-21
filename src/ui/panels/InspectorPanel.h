@@ -12,8 +12,8 @@ namespace VulkanEngine {
 /**
  * InspectorPanel - 属性检查器面板
  * 
- * 显示和编辑选中对象的属性，包括变换、材质等。
- * 现已与 ECS (EnTT) 系统集成。
+ * 显示和编辑选中对象的属性，包括变换、材质等�?
+ * 现已�?ECS (EnTT) 系统集成�?
  */
 class InspectorPanel {
 public:
@@ -62,12 +62,12 @@ public:
     void setScene(VulkanEngine::Scene* scene);
 
     /**
-     * 设置选中的 ECS 实体
+     * 设置选中�?ECS 实体
      */
     void setSelectedEntity(entt::entity entity);
 
     /**
-     * 获取当前选中的 ECS 实体
+     * 获取当前选中�?ECS 实体
      */
     entt::entity getSelectedEntity() const { return m_selectedEntity; }
 
@@ -76,7 +76,7 @@ public:
     // ============================================================
 
     /**
-     * 设置当前选中对象的信息
+     * 设置当前选中对象的信�?
      */
     void setSelectedObject(int id, const std::string& name, const std::string& type);
 
@@ -91,7 +91,7 @@ public:
     void setTransform(const Transform& transform);
 
     /**
-     * 获取变换数据（可能被用户修改）
+     * 获取变换数据（可能被用户修改�?
      */
     const Transform& getTransform() const { return currentTransform; }
 
@@ -134,7 +134,7 @@ private:
     void renderCameraComponent();
     void renderAddComponentButton();
 
-    // 旧系统渲染
+    // 旧系统渲�?
     void renderTransformSection();
     void renderMaterialSection();
     void renderLightSection();
@@ -144,7 +144,7 @@ private:
     entt::entity m_selectedEntity = entt::null;
     bool m_useECSMode = false;
 
-    // 选中对象信息（旧系统）
+    // 选中对象信息（旧系统�?
     int selectedId = -1;
     std::string selectedName;
     std::string selectedType;
