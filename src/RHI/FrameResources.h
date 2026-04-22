@@ -1,11 +1,11 @@
 /**
  * @file FrameResources.h
- * @brief 帧资源管�?- 管理多帧渲染所需的同步原语和命令缓冲�?
+ * @brief 帧资源管理- 管理多帧渲染所需的同步原语和命令缓冲区
  * 
- * 职责�?
- * 1. 管理每帧�?Command Buffer
- * 2. 管理同步原语（Semaphore、Fence�?
- * 3. 实现多帧并行（Flight Frames�?
+ * 职责：
+ * 1. 管理每帧的Command Buffer
+ * 2. 管理同步原语（Semaphore、Fence：
+ * 3. 实现多帧并行（Flight Frames：
  * 4. 提供资源获取接口
  */
 
@@ -30,7 +30,7 @@ struct FrameData {
     VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
     VkFence inFlightFence = VK_NULL_HANDLE;
     
-    // 帧计数器（用于调�?分析�?
+    // 帧计数器（用于调试分析：
     uint64_t frameNumber = 0;
 };
 
@@ -38,9 +38,9 @@ struct FrameData {
  * @brief 帧资源管理器
  * 
  * 实现 Triple Buffering 的资源管理：
- * - 一帧在 GPU 上执�?
- * - 一帧在 CPU 上录制命�?
- * - 一帧等待使�?
+ * - 一帧在 GPU 上执行
+ * - 一帧在 CPU 上录制命令
+ * - 一帧等待使用
  */
 class FrameResources {
 public:
@@ -55,26 +55,26 @@ public:
     FrameResources& operator=(const FrameResources&) = delete;
 
     /**
-     * @brief 开始新�?
+     * @brief 开始新帧
      * 
      * 等待当前帧的 Fence，重置命令缓冲区
-     * @return 当前帧索�?
+     * @return 当前帧索引
      */
     uint32_t beginFrame();
 
     /**
-     * @brief 结束当前�?
+     * @brief 结束当前帧
      * 
-     * 提交命令缓冲�?
+     * 提交命令缓冲区
      */
     void endFrame();
 
     /**
-     * @brief 提交命令缓冲�?
+     * @brief 提交命令缓冲区
      * 
      * @param waitSemaphores 等待的信号量
-     * @param waitStages 等待的管线阶�?
-     * @param signalSemaphores 要触发的信号�?
+     * @param waitStages 等待的管线阶段
+     * @param signalSemaphores 要触发的信号量
      */
     void submit(
         const std::vector<VkSemaphore>& waitSemaphores,

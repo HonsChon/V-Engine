@@ -1,10 +1,10 @@
 /**
  * @file Input.h
- * @brief 输入管理模块 - 处理键盘、鼠标输�?
+ * @brief 输入管理模块 - 处理键盘、鼠标输入
  * 
- * 职责�?
- * 1. 管理输入状态（按键、鼠标位置等�?
- * 2. 提供高级输入抽象（如相机控制�?
+ * 职责：
+ * 1. 管理输入状态（按键、鼠标位置等）
+ * 2. 提供高级输入抽象（如相机控制）
  * 3. 处理输入事件分发
  */
 
@@ -53,8 +53,8 @@ enum class InputAction {
  * @brief 鼠标模式
  */
 enum class MouseMode {
-    Normal,     // 正常模式（可以点�?UI�?
-    Camera,     // 相机控制模式（鼠标被捕获�?
+    Normal,     // 正常模式（可以点击 UI）
+    Camera,     // 相机控制模式（鼠标被捕获）
     Picking     // 拾取模式
 };
 
@@ -74,14 +74,14 @@ public:
     Input& operator=(const Input&) = delete;
 
     /**
-     * @brief 每帧更新输入状�?
-     * @param deltaTime 帧时�?
+     * @brief 每帧更新输入状态
+     * @param deltaTime 帧时间
      */
     void update(float deltaTime);
 
     /**
-     * @brief 处理连续按键（如 WASD 移动�?
-     * @param deltaTime 帧时�?
+     * @brief 处理连续按键（如 WASD 移动）
+     * @param deltaTime 帧时间
      */
     void processKeyboard(float deltaTime);
 
@@ -119,7 +119,7 @@ public:
      */
     void setPickingCallback(PickingCallback callback) { m_pickingCallback = callback; }
 
-    // ========== 状态查�?==========
+    // ========== 状态查询 ==========
 
     bool isKeyPressed(int key) const;
     bool isMouseButtonPressed(int button) const;
@@ -132,7 +132,7 @@ public:
     float getMouseSensitivity() const { return m_mouseSensitivity; }
 
 private:
-    // 来自 Window 的回�?
+    // 来自 Window 的回调
     void onKey(int key, int scancode, int action, int mods);
     void onMouseButton(int button, int action, int mods);
     void onCursorPos(double xpos, double ypos);
@@ -144,7 +144,7 @@ private:
     Window* m_window = nullptr;
     Camera* m_camera = nullptr;
 
-    // 鼠标状�?
+    // 鼠标状态
     MouseMode m_mouseMode = MouseMode::Normal;
     glm::vec2 m_lastMousePos = glm::vec2(0.0f);
     glm::vec2 m_mouseDelta = glm::vec2(0.0f);

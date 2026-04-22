@@ -7,10 +7,10 @@
 namespace VulkanEngine {
 
 /**
- * @brief 实体�?- �?entt::entity 的封�?
+ * @brief 实体类 - 对 entt::entity 的封装
  * 
- * Entity 是一个轻量级的句柄类，它封装�?entt::entity 和对应的 Scene 指针�?
- * 提供了方便的组件操作接口�?
+ * Entity 是一个轻量级的句柄类，它封装了 entt::entity 和对应的 Scene 指针，
+ * 提供了方便的组件操作接口。
  */
 class Entity {
 public:
@@ -25,9 +25,9 @@ public:
     /**
      * @brief 添加组件
      * @tparam T 组件类型
-     * @tparam Args 构造参数类�?
-     * @param args 组件构造参�?
-     * @return 添加的组件引�?
+     * @tparam Args 构造参数类型
+     * @param args 组件构造参数
+     * @return 添加的组件引用
      */
     template<typename T, typename... Args>
     T& addComponent(Args&&... args) {
@@ -36,10 +36,10 @@ public:
     }
 
     /**
-     * @brief 添加或替换组�?
+     * @brief 添加或替换组件
      * @tparam T 组件类型
-     * @tparam Args 构造参数类�?
-     * @param args 组件构造参�?
+     * @tparam Args 构造参数类型
+     * @param args 组件构造参数
      * @return 组件引用
      */
     template<typename T, typename... Args>
@@ -61,7 +61,7 @@ public:
     /**
      * @brief 获取组件 (const 版本)
      * @tparam T 组件类型
-     * @return 组件常引�?
+     * @return 组件常引用
      */
     template<typename T>
     const T& getComponent() const {
@@ -72,7 +72,7 @@ public:
     /**
      * @brief 尝试获取组件
      * @tparam T 组件类型
-     * @return 组件指针，如果没有返�?nullptr
+     * @return 组件指针，如果没有返回 nullptr
      */
     template<typename T>
     T* tryGetComponent() {
@@ -90,9 +90,9 @@ public:
     }
 
     /**
-     * @brief 检查是否拥有组�?
+     * @brief 检查是否拥有组件
      * @tparam T 组件类型
-     * @return 是否拥有该组�?
+     * @return 是否拥有该组件
      */
     template<typename T>
     bool hasComponent() const {
@@ -100,9 +100,9 @@ public:
     }
 
     /**
-     * @brief 检查是否拥有所有指定组�?
+     * @brief 检查是否拥有所有指定组件
      * @tparam T 组件类型列表
-     * @return 是否拥有所有组�?
+     * @return 是否拥有所有组件
      */
     template<typename... T>
     bool hasComponents() const {
@@ -130,7 +130,7 @@ public:
     }
 
     // ============================================================
-    // 便捷访问�?
+    // 便捷访问器
     // ============================================================
 
     /**
@@ -176,27 +176,27 @@ public:
     // ============================================================
 
     /**
-     * @brief 设置父实�?
+     * @brief 设置父实体
      */
     void setParent(Entity parent);
 
     /**
-     * @brief 获取父实�?
+     * @brief 获取父实体
      */
     Entity getParent() const;
 
     /**
-     * @brief 获取子实体列�?
+     * @brief 获取子实体列表
      */
     std::vector<Entity> getChildren() const;
 
     /**
-     * @brief 添加子实�?
+     * @brief 添加子实体
      */
     void addChild(Entity child);
 
     /**
-     * @brief 移除子实�?
+     * @brief 移除子实体
      */
     void removeChild(Entity child);
 
@@ -211,7 +211,7 @@ public:
     bool hasChildren() const;
 
     // ============================================================
-    // 操作符重�?
+    // 操作符重载
     // ============================================================
 
     operator bool() const { return m_entityHandle != entt::null && m_scene != nullptr; }
@@ -227,7 +227,7 @@ public:
     }
 
     // ============================================================
-    // 访问�?
+    // 访问器
     // ============================================================
 
     entt::entity getHandle() const { return m_entityHandle; }

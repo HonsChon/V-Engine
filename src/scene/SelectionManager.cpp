@@ -57,7 +57,7 @@ void SelectionManager::selectAll(Scene* scene) {
     m_selectedEntities.clear();
     auto& registry = scene->getRegistry();
     
-    // 选择所有有 TagComponent 的实�?
+    // 选择所有有 TagComponent 的实体
     auto view = registry.view<TagComponent>();
     for (auto entity : view) {
         m_selectedEntities.push_back(entity);

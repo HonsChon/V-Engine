@@ -18,8 +18,8 @@ public:
     void copyFrom(const void* src, VkDeviceSize size);
     
     /**
-     * 上传数据到设备本地缓冲区（使�?staging buffer�?
-     * 对于 HOST_VISIBLE 缓冲区直接映射内�?
+     * 上传数据到设备本地缓冲区（使用 staging buffer）
+     * 对于 HOST_VISIBLE 缓冲区直接映射内存
      * 对于 DEVICE_LOCAL 缓冲区使用命令缓冲区复制
      */
     void uploadData(const void* data, VkDeviceSize dataSize);
@@ -34,7 +34,7 @@ private:
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkDeviceSize size = 0;
-    VkMemoryPropertyFlags memoryProperties = 0;  // 保存创建时的内存属�?
+    VkMemoryPropertyFlags memoryProperties = 0;  // 保存创建时的内存属性
     void* mapped = nullptr;
     
     bool isHostVisible() const { 

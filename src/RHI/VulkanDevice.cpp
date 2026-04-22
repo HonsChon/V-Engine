@@ -531,7 +531,7 @@ bool VulkanDevice::checkDeviceExtensionSupport(VkPhysicalDevice device) {
 
 void VulkanDevice::beginDebugLabel(VkCommandBuffer commandBuffer, const char* labelName,
                                    float r, float g, float b, float a) {
-    // 获取函数指针（VK_EXT_debug_utils 扩展函数�?
+    // 获取函数指针（VK_EXT_debug_utils 扩展函数：
     static PFN_vkCmdBeginDebugUtilsLabelEXT pfnCmdBeginDebugUtilsLabelEXT = nullptr;
     
     if (pfnCmdBeginDebugUtilsLabelEXT == nullptr) {

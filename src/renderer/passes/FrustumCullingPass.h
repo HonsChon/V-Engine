@@ -9,23 +9,23 @@ class VulkanBuffer;
 
 /**
  * GPU 实例数据
- * 存储每个物体的变换和包围盒信�?
+ * 存储每个物体的变换和包围盒信息
  */
 struct GPUInstanceData {
     glm::mat4 modelMatrix;       // 模型矩阵
-    glm::vec4 boundingSphere;    // 包围�?(xyz: center, w: radius)
+    glm::vec4 boundingSphere;    // 包围球(xyz: center, w: radius)
     glm::vec4 aabbMin;           // AABB 最小点
     glm::vec4 aabbMax;           // AABB 最大点
     uint32_t meshIndex;          // 网格索引
     uint32_t materialIndex;      // 材质索引
-    uint32_t flags;              // 标志位（可见性等�?
+    uint32_t flags;              // 标志位（可见性等：
     uint32_t padding;
 };
 
 /**
- * GPU Culling �?Uniform 数据
- * 注意：必须与 shader 中的 std140 布局完全匹配�?
- * std140 规则对齐，使�?uvec4 代替 uint 数组避免对齐问题
+ * GPU Culling 的Uniform 数据
+ * 注意：必须与 shader 中的 std140 布局完全匹配：
+ * std140 规则对齐，使用uvec4 代替 uint 数组避免对齐问题
  */
 struct alignas(16) CullingUniforms {
     glm::mat4 viewMatrix;        // 64 bytes, offset 0
@@ -40,7 +40,7 @@ struct alignas(16) CullingUniforms {
 /**
  * FrustumCullingPass - GPU 视锥剔除
  * 
- * 使用 Compute Shader �?GPU 上执行视锥剔除�?
+ * 使用 Compute Shader 在GPU 上执行视锥剔除。
  * 输入：所有物体的实例数据
  * 输出：可见物体的间接绘制命令
  */
@@ -60,33 +60,33 @@ public:
     void updateInstances(const std::vector<GPUInstanceData>& instances);
 
     /**
-     * 更新剔除参数（相机矩阵等�?
+     * 更新剔除参数（相机矩阵等：
      */
     void updateUniforms(const CullingUniforms& uniforms);
 
     /**
-     * 获取可见实例数量（需要从 GPU 回读�?
+     * 获取可见实例数量（需要从 GPU 回读：
      */
     uint32_t getVisibleCount();
 
     /**
-     * 获取间接绘制缓冲�?
+     * 获取间接绘制缓冲区
      */
     VkBuffer getIndirectDrawBuffer() const;
 
     /**
-     * 获取可见实例索引缓冲�?
+     * 获取可见实例索引缓冲区
      */
     VkBuffer getVisibleIndicesBuffer() const;
     
     /**
-     * 获取可见实例索引（从 GPU 回读�?
-     * @return 可见实例的原始索引列�?
+     * 获取可见实例索引（从 GPU 回读：
+     * @return 可见实例的原始索引列表
      */
     const std::vector<uint32_t>& getVisibleIndices();
 
     /**
-     * 重置计数器（每帧开始时调用�?
+     * 重置计数器（每帧开始时调用：
      */
     void resetCounters(VkCommandBuffer commandBuffer);
 
@@ -95,20 +95,20 @@ private:
     void createDescriptorSet();
     void updateDescriptorSet();
 
-    // 从视图和投影矩阵提取视锥体平�?
+    // 从视图和投影矩阵提取视锥体平面
     static void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
 
-    // �?GPU 回读计数�?
+    // 从GPU 回读计数器
     void readbackCounter();
 
-    // 缓冲�?
-    std::unique_ptr<VulkanBuffer> instanceBuffer;        // 输入：所有实例数�?
+    // 缓冲区
+    std::unique_ptr<VulkanBuffer> instanceBuffer;        // 输入：所有实例数据
     std::unique_ptr<VulkanBuffer> uniformBuffer;         // Uniform 数据
-    std::unique_ptr<VulkanBuffer> visibleIndicesBuffer;  // 输出：可见实例索�?
-    std::unique_ptr<VulkanBuffer> indirectDrawBuffer;    // 输出：间接绘制命�?
-    std::unique_ptr<VulkanBuffer> counterBuffer;         // 原子计数�?
+    std::unique_ptr<VulkanBuffer> visibleIndicesBuffer;  // 输出：可见实例索引
+    std::unique_ptr<VulkanBuffer> indirectDrawBuffer;    // 输出：间接绘制命令
+    std::unique_ptr<VulkanBuffer> counterBuffer;         // 原子计数器
     std::unique_ptr<VulkanBuffer> counterReadbackBuffer; // CPU 可读的计数器副本
-    std::unique_ptr<VulkanBuffer> visibleIndicesReadbackBuffer; // CPU 可读的可见索�?
+    std::unique_ptr<VulkanBuffer> visibleIndicesReadbackBuffer; // CPU 可读的可见索引
 
     uint32_t maxInstances = 0;
     uint32_t currentInstanceCount = 0;

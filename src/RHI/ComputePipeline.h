@@ -11,18 +11,18 @@ class VulkanDevice;
 /**
  * ComputePipeline - Vulkan 计算管线封装
  * 
- * 用于 GPU 驱动渲染、粒子系统、后处理等计算任务�?
- * 支持多个描述符集布局�?Push Constants�?
+ * 用于 GPU 驱动渲染、粒子系统、后处理等计算任务。
+ * 支持多个描述符集布局和Push Constants。
  */
 class ComputePipeline {
 public:
     /**
-     * 描述符绑定信�?
+     * 描述符绑定信息
      */
     struct DescriptorBinding {
-        uint32_t binding;                    // 绑定�?
-        VkDescriptorType type;               // 描述符类�?
-        VkShaderStageFlags stageFlags;       // 着色器阶段（通常�?COMPUTE�?
+        uint32_t binding;                    // 绑定点
+        VkDescriptorType type;               // 描述符类型
+        VkShaderStageFlags stageFlags;       // 着色器阶段（通常是COMPUTE：
         uint32_t count = 1;                  // 数组大小
     };
 
@@ -36,13 +36,13 @@ public:
     };
 
     /**
-     * 配置结构�?
+     * 配置结构体
      */
     struct Config {
         std::string shaderPath;                              // SPIR-V 着色器路径
-        std::vector<DescriptorBinding> bindings;             // 描述符绑�?
+        std::vector<DescriptorBinding> bindings;             // 描述符绑定
         std::vector<PushConstantRange> pushConstantRanges;   // Push Constants
-        std::string entryPoint = "main";                     // 入口点名�?
+        std::string entryPoint = "main";                     // 入口点名称
     };
 
 public:
@@ -54,16 +54,16 @@ public:
     ComputePipeline& operator=(const ComputePipeline&) = delete;
 
     /**
-     * 绑定管线到命令缓�?
+     * 绑定管线到命令缓冲
      */
     void bind(VkCommandBuffer commandBuffer);
 
     /**
      * 调度计算任务
      * @param commandBuffer 命令缓冲
-     * @param groupCountX X 方向工作组数�?
-     * @param groupCountY Y 方向工作组数�?
-     * @param groupCountZ Z 方向工作组数�?
+     * @param groupCountX X 方向工作组数量
+     * @param groupCountY Y 方向工作组数量
+     * @param groupCountZ Z 方向工作组数量
      */
     void dispatch(VkCommandBuffer commandBuffer, 
                   uint32_t groupCountX, 
@@ -71,7 +71,7 @@ public:
                   uint32_t groupCountZ = 1);
 
     /**
-     * 推送常�?
+     * 推送常量
      */
     template<typename T>
     void pushConstants(VkCommandBuffer commandBuffer, 
@@ -100,7 +100,7 @@ public:
     VkDescriptorSet createDescriptorSet(VkDescriptorPool pool);
 
     /**
-     * 分配描述符集（使用内�?Descriptor Pool�?
+     * 分配描述符集（使用内部Descriptor Pool：
      */
     VkDescriptorSet allocateDescriptorSet();
 
@@ -129,8 +129,8 @@ private:
 };
 
 /**
- * 间接调度命令结构�?
- * �?vkCmdDispatchIndirect 配合使用
+ * 间接调度命令结构体
+ * 与vkCmdDispatchIndirect 配合使用
  */
 struct DispatchIndirectCommand {
     uint32_t x;
@@ -139,8 +139,8 @@ struct DispatchIndirectCommand {
 };
 
 /**
- * 间接绘制命令结构体（索引�?
- * �?vkCmdDrawIndexedIndirect 配合使用
+ * 间接绘制命令结构体（索引：
+ * 与vkCmdDrawIndexedIndirect 配合使用
  */
 struct DrawIndexedIndirectCommand {
     uint32_t indexCount;
@@ -152,7 +152,7 @@ struct DrawIndexedIndirectCommand {
 
 /**
  * 间接绘制命令结构体（非索引）
- * �?vkCmdDrawIndirect 配合使用
+ * 与vkCmdDrawIndirect 配合使用
  */
 struct DrawIndirectCommand {
     uint32_t vertexCount;

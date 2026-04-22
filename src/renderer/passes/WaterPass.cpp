@@ -104,7 +104,7 @@ void WaterPass::createWaterMesh() {
                 -halfSize + z * step
             );
             vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);  // 切线方向
-            vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);  // 向上的法�?
+            vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);  // 向上的法线
             vertex.texCoord = glm::vec2(
                 static_cast<float>(x) / resolution,
                 static_cast<float>(z) / resolution
@@ -141,7 +141,7 @@ void WaterPass::createVertexBuffer() {
     const auto& vertices = waterMesh->getVertices();
     VkDeviceSize bufferSize = sizeof(Vertex) * vertices.size();
     
-    // 创建暂存缓冲�?
+    // 创建暂存缓冲区
     auto stagingBuffer = std::make_unique<VulkanBuffer>(
         device,
         bufferSize,
@@ -154,7 +154,7 @@ void WaterPass::createVertexBuffer() {
     memcpy(data, vertices.data(), bufferSize);
     vkUnmapMemory(device->getDevice(), stagingBuffer->getMemory());
     
-    // 创建设备本地缓冲�?
+    // 创建设备本地缓冲区
     vertexBuffer = std::make_unique<VulkanBuffer>(
         device,
         bufferSize,
@@ -205,12 +205,12 @@ void WaterPass::createIndexBuffer() {
 }
 
 void WaterPass::createDescriptorSetLayout() {
-    // 新布局�? 个绑定点
+    // 新布局： 个绑定点
     // binding 0: Water UBO
     // binding 1: G-Buffer Position (用于 SSR)
     // binding 2: G-Buffer Normal (用于 SSR)
     // binding 3: G-Buffer Depth (用于 SSR)
-    // binding 4: Scene Color (用于反射和折�?
+    // binding 4: Scene Color (用于反射和折射
     
     std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
     
@@ -385,7 +385,7 @@ void WaterPass::createPipeline() {
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     
     // 深度测试 - 禁用，使用边缘软化（edgeSoftness）逻辑基于 G-Buffer 深度处理遮挡
-    // 因为 Final Pass 的深度缓冲在开始时被清除为 1.0，无法与场景进行正确的深度比�?
+    // 因为 Final Pass 的深度缓冲在开始时被清除为 1.0，无法与场景进行正确的深度比较
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_FALSE;  // 禁用深度测试
@@ -460,7 +460,7 @@ void WaterPass::updateUniforms(const glm::mat4& view, const glm::mat4& projectio
                                 const glm::vec3& cameraPos, float time, uint32_t frameIndex) {
     WaterUBO ubo{};
     
-    // 水面模型矩阵 - 放置在水面高�?
+    // 水面模型矩阵 - 放置在水面高度
     ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, waterHeight, 0.0f));
     ubo.view = view;
     ubo.projection = projection;
@@ -469,7 +469,7 @@ void WaterPass::updateUniforms(const glm::mat4& view, const glm::mat4& projectio
     ubo.cameraPos = glm::vec4(cameraPos, 1.0f);
     ubo.waterColor = glm::vec4(waterColor, waterAlpha);
     ubo.waterParams = glm::vec4(waveSpeed, waveStrength, time, refractionStrength);
-    // screenSize: xy=屏幕尺寸, zw=近平�?远平面（用于线性深度计算）
+    // screenSize: xy=屏幕尺寸, zw=近平面远平面（用于线性深度计算）
     ubo.screenSize = glm::vec4(width, height, 0.1f, 100.0f);
     // ssrParams: x=maxDistance, y=maxSteps, z=thickness（线性深度空间，单位：世界空间距离）
     ubo.ssrParams = glm::vec4(ssrMaxDistance, ssrMaxSteps, ssrThickness, 0.0f);
@@ -506,7 +506,7 @@ void WaterPass::updateDescriptorSets(GBufferPass* gbuffer, VkImageView sceneColo
         for (int j = 0; j < 4; j++) {
             descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[j].dstSet = descriptorSets[i];
-            descriptorWrites[j].dstBinding = j + 1;  // �?binding 1 开�?
+            descriptorWrites[j].dstBinding = j + 1;  // 从binding 1 开始
             descriptorWrites[j].dstArrayElement = 0;
             descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[j].descriptorCount = 1;
@@ -553,7 +553,7 @@ void WaterPass::render(VkCommandBuffer cmd, uint32_t frameIndex) {
 // ============================================================
 
 bool WaterPass::setWaterEntity(const VulkanEngine::Entity& entity) {
-    // 检�?Entity 是否有效
+    // 检查Entity 是否有效
     if (!entity) {
         std::cerr << "[WaterPass] Invalid entity provided!" << std::endl;
         return false;
@@ -573,7 +573,7 @@ bool WaterPass::setWaterEntity(const VulkanEngine::Entity& entity) {
         return false;
     }
     
-    // �?MeshManager 获取 GPUMesh
+    // 从MeshManager 获取 GPUMesh
     auto gpuMesh = VulkanEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
     
     if (!gpuMesh || !gpuMesh->isValid()) {

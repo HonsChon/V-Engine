@@ -18,7 +18,7 @@ struct Ray {
     Ray(const glm::vec3& o, const glm::vec3& d) : origin(o), direction(glm::normalize(d)) {}
 
     /**
-     * @brief 获取射线上的�?
+     * @brief 获取射线上的点
      * @param t 参数
      */
     glm::vec3 getPoint(float t) const {
@@ -37,21 +37,21 @@ struct AABB {
     AABB(const glm::vec3& min, const glm::vec3& max) : min(min), max(max) {}
 
     /**
-     * @brief 获取包围盒中�?
+     * @brief 获取包围盒中心
      */
     glm::vec3 getCenter() const {
         return (min + max) * 0.5f;
     }
 
     /**
-     * @brief 获取包围盒尺�?
+     * @brief 获取包围盒尺寸
      */
     glm::vec3 getSize() const {
         return max - min;
     }
 
     /**
-     * @brief 扩展包围盒以包含�?
+     * @brief 扩展包围盒以包含点
      */
     void expand(const glm::vec3& point) {
         min = glm::min(min, point);
@@ -59,10 +59,10 @@ struct AABB {
     }
 
     /**
-     * @brief 变换包围�?
+     * @brief 变换包围盒
      */
     AABB transform(const glm::mat4& matrix) const {
-        // 获取8个顶�?
+        // 获取8个顶点
         glm::vec3 corners[8] = {
             glm::vec3(min.x, min.y, min.z),
             glm::vec3(max.x, min.y, min.z),
@@ -84,12 +84,12 @@ struct AABB {
 };
 
 /**
- * @brief 射线拾取工具�?
+ * @brief 射线拾取工具�?
  */
 class RayPicker {
 public:
     /**
-     * @brief 从屏幕坐标创建射�?
+     * @brief 从屏幕坐标创建射�?
      * @param screenX 屏幕 X 坐标
      * @param screenY 屏幕 Y 坐标
      * @param screenWidth 屏幕宽度
@@ -111,14 +111,14 @@ public:
         float ndcY = 1.0f - (2.0f * screenY) / screenHeight;  // 翻转 Y
 
         // 2. 创建近裁剪面和远裁剪面上的点
-        glm::vec4 nearPoint(ndcX, ndcY, -1.0f, 1.0f);  // z = -1 (近平�?
-        glm::vec4 farPoint(ndcX, ndcY, 1.0f, 1.0f);    // z = 1 (远平�?
+        glm::vec4 nearPoint(ndcX, ndcY, -1.0f, 1.0f);  // z = -1 (近平面)
+        glm::vec4 farPoint(ndcX, ndcY, 1.0f, 1.0f);    // z = 1 (远平面)
 
-        // 3. 计算逆矩�?
+        // 3. 计算逆矩�?
         glm::mat4 invProjection = glm::inverse(projectionMatrix);
         glm::mat4 invView = glm::inverse(viewMatrix);
 
-        // 4. 转换到世界空�?
+        // 4. 转换到世界空�?
         // NDC -> View Space
         glm::vec4 nearView = invProjection * nearPoint;
         glm::vec4 farView = invProjection * farPoint;
@@ -137,11 +137,11 @@ public:
     }
 
     /**
-     * @brief 射线�?AABB 相交检�?
+     * @brief 射线�?AABB 相交检�?
      * @param ray 射线
-     * @param aabb 包围�?
-     * @param tMin 输出最�?t �?
-     * @param tMax 输出最�?t �?
+     * @param aabb 包围�?
+     * @param tMin 输出最�?t �?
+     * @param tMax 输出最�?t �?
      * @return 是否相交
      */
     static bool rayIntersectsAABB(const Ray& ray, const AABB& aabb, float& tMin, float& tMax) {
@@ -168,11 +168,11 @@ public:
     }
 
     /**
-     * @brief 射线与球体相交检�?
+     * @brief 射线与球体相交检�?
      * @param ray 射线
      * @param center 球心
      * @param radius 半径
-     * @param t 输出交点�?t �?
+     * @param t 输出交点�?t �?
      * @return 是否相交
      */
     static bool rayIntersectsSphere(const Ray& ray, const glm::vec3& center, float radius, float& t) {
@@ -190,7 +190,7 @@ public:
         float t0 = (-b - sqrtD) / (2.0f * a);
         float t1 = (-b + sqrtD) / (2.0f * a);
 
-        // 返回最近的正交�?
+        // 返回最近的正交�?
         if (t0 > 0) {
             t = t0;
             return true;
@@ -203,10 +203,10 @@ public:
     }
 
     /**
-     * @brief 射线与三角形相交检�?(Möller–Trumbore 算法)
+     * @brief 射线与三角形相交检�?(Möller–Trumbore 算法)
      * @param ray 射线
-     * @param v0, v1, v2 三角形顶�?
-     * @param t 输出交点�?t �?
+     * @param v0, v1, v2 三角形顶�?
+     * @param t 输出交点�?t �?
      * @param u, v 输出重心坐标
      * @return 是否相交
      */

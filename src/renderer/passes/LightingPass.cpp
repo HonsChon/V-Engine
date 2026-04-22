@@ -27,7 +27,7 @@ void LightingPass::cleanup() {
     VkDevice vkDevice = device->getDevice();
     vkDeviceWaitIdle(vkDevice);
 
-    // 清理全屏四边�?
+    // 清理全屏四边形
     if (quadIndexBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(vkDevice, quadIndexBuffer, nullptr);
         quadIndexBuffer = VK_NULL_HANDLE;
@@ -67,7 +67,7 @@ void LightingPass::cleanup() {
         pipelineLayout = VK_NULL_HANDLE;
     }
 
-    // 清理描述�?
+    // 清理描述符
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(vkDevice, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
@@ -302,7 +302,7 @@ void LightingPass::createPipeline() {
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // 全屏四边形不需要背面剔�?
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // 全屏四边形不需要背面剔除
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -313,7 +313,7 @@ void LightingPass::createPipeline() {
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_FALSE;  // 光照 Pass 不需要深度测�?
+    depthStencil.depthTestEnable = VK_FALSE;  // 光照 Pass 不需要深度测试
     depthStencil.depthWriteEnable = VK_FALSE;
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
@@ -453,7 +453,7 @@ void LightingPass::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
 }
 
 void LightingPass::render(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // 设置视口和裁�?
+    // 设置视口和裁剪
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -475,13 +475,13 @@ void LightingPass::render(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                             0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
-    // 绑定顶点和索引缓�?
+    // 绑定顶点和索引缓冲
     VkBuffer vertexBuffers[] = {quadVertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(cmd, quadIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-    // 绘制全屏四边�?
+    // 绘制全屏四边形
     vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
 }
 

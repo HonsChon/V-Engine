@@ -3,9 +3,9 @@
 /**
  * NaniteDebugPass.h - Nanite Cluster 调试可视化渲染通道
  * 
- * 功能�?
+ * 功能：
  * - 使用不同颜色渲染每个 Cluster，便于可视化分割结果
- * - 支持多种调试模式：Cluster 颜色、法线、LOD �?
+ * - 支持多种调试模式：Cluster 颜色、法线、LOD 等
  */
 
 #include "RenderPassBase.h"
@@ -45,8 +45,8 @@ struct ClusterDebugPushConstants {
  */
 enum class NaniteDebugMode : uint32_t {
     ClusterColor = 0,   // 每个 Cluster 不同颜色
-    Normal = 1,         // 法线可视�?
-    LOD = 2,            // LOD 级别可视�?
+    Normal = 1,         // 法线可视区
+    LOD = 2,            // LOD 级别可视区
     HashColor = 3       // 哈希随机颜色（高对比度）
 };
 
@@ -73,9 +73,9 @@ public:
     void cleanup();
     
     /**
-     * 录制渲染命令（单网格模式�?
-     * @param commandBuffer 命令缓冲�?
-     * @param frameIndex 帧索�?
+     * 录制渲染命令（单网格模式：
+     * @param commandBuffer 命令缓冲区
+     * @param frameIndex 帧索引
      * @param modelMatrix 模型变换矩阵
      */
     void recordCommands(VkCommandBuffer commandBuffer, 
@@ -83,10 +83,10 @@ public:
                        const glm::mat4& modelMatrix);
     
     /**
-     * 录制渲染命令（多网格模式�?
-     * 使用网格名称到模型矩阵的映射来渲染所有网�?
-     * @param commandBuffer 命令缓冲�?
-     * @param frameIndex 帧索�?
+     * 录制渲染命令（多网格模式：
+     * 使用网格名称到模型矩阵的映射来渲染所有网格
+     * @param commandBuffer 命令缓冲区
+     * @param frameIndex 帧索引
      * @param meshMatrices 网格名称到模型矩阵的映射
      */
     void recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
@@ -94,12 +94,12 @@ public:
                                  const std::unordered_map<std::string, glm::mat4>& meshMatrices);
     
     /**
-     * 录制渲染命令（使�?GPU LOD 选择结果�?
-     * 只渲�?GPU 剔除后选择�?Cluster
-     * @param commandBuffer 命令缓冲�?
-     * @param frameIndex 帧索�?
+     * 录制渲染命令（使用GPU LOD 选择结果：
+     * 只渲染GPU 剔除后选择的Cluster
+     * @param commandBuffer 命令缓冲区
+     * @param frameIndex 帧索引
      * @param meshMatrices 网格名称到模型矩阵的映射
-     * @param naniteManager Nanite 管理器（用于获取可见 cluster 列表�?
+     * @param naniteManager Nanite 管理器（用于获取可见 cluster 列表：
      */
     void recordCommandsWithLOD(VkCommandBuffer commandBuffer,
                                uint32_t frameIndex,
@@ -108,7 +108,7 @@ public:
     
     /**
      * 更新 Uniform Buffer
-     * @param frameIndex 帧索�?
+     * @param frameIndex 帧索引
      * @param viewMatrix 视图矩阵
      * @param projMatrix 投影矩阵
      * @param viewPos 相机位置
@@ -123,7 +123,7 @@ public:
                        const glm::vec3& lightColor);
     
     /**
-     * 窗口大小改变时重建资�?
+     * 窗口大小改变时重建资源
      */
     void resize(uint32_t width, uint32_t height) override;
     
@@ -144,19 +144,19 @@ public:
     const char* getDebugModeName() const;
     
     /**
-     * 设置要渲染的网格名称（支持多网格�?
-     * 如果传入空字符串，则渲染所有已聚类的网�?
+     * 设置要渲染的网格名称（支持多网格：
+     * 如果传入空字符串，则渲染所有已聚类的网格
      */
     void setTargetMesh(const std::string& meshName) { 
         if (m_targetMeshName != meshName) {
             m_targetMeshName = meshName; 
-            m_renderDataBuilt = false;  // 重置渲染数据，需要重新构�?
+            m_renderDataBuilt = false;  // 重置渲染数据，需要重新构建
         }
     }
     
     /**
-     * 设置渲染所有已聚类的网�?
-     * 只有在模式切换时才重置渲染数�?
+     * 设置渲染所有已聚类的网格
+     * 只有在模式切换时才重置渲染数据
      */
     void setRenderAllMeshes() {
         if (!m_renderAllMeshes) {
@@ -166,18 +166,18 @@ public:
     }
     
     /**
-     * 是否有可渲染�?Cluster 数据
+     * 是否有可渲染的Cluster 数据
      */
     bool hasClusterData() const;
     
     /**
-     * 确保渲染数据已构建（�?RenderPass 之前调用�?
-     * 这个方法会触发数据上传，必须�?RenderPass 之前调用
+     * 确保渲染数据已构建（在RenderPass 之前调用：
+     * 这个方法会触发数据上传，必须在RenderPass 之前调用
      */
     void ensureRenderDataBuilt();
     
     /**
-     * 设置 ClusterCullingPass 引用（用于获�?GPU culling 结果�?
+     * 设置 ClusterCullingPass 引用（用于获取GPU culling 结果：
      */
     void setClusterCullingPass(Nanite::ClusterCullingPass* cullingPass) {
         m_clusterCullingPass = cullingPass;
@@ -190,7 +190,7 @@ private:
     // 创建图形管线
     void createGraphicsPipeline(VkRenderPass renderPass);
     
-    // 创建描述符资�?
+    // 创建描述符资源
     void createDescriptorSetLayout();
     void createDescriptorPool();
     void createDescriptorSets();
@@ -198,10 +198,10 @@ private:
     // 创建 Uniform Buffer
     void createUniformBuffers();
     
-    // 创建用于渲染 Cluster 的顶�?索引缓冲
+    // 创建用于渲染 Cluster 的顶点索引缓冲
     void createClusterBuffers();
     
-    // �?ClusterizedMesh 构建渲染数据
+    // 从ClusterizedMesh 构建渲染数据
     void buildRenderData();
     
     // 设备引用
@@ -224,36 +224,36 @@ private:
         uint32_t vertexOffset;      // 在全局顶点缓冲中的偏移
         uint32_t indexOffset;       // 在全局索引缓冲中的偏移
         uint32_t indexCount;        // 索引数量
-        uint32_t clusterIndex;      // Cluster 索引（全局�?
+        uint32_t clusterIndex;      // Cluster 索引（全局：
     };
     
-    // 每个网格的渲染信�?
+    // 每个网格的渲染信息
     struct MeshRenderInfo {
         std::string meshName;                       // 网格名称
-        std::vector<ClusterRenderData> clusters;    // 该网格的所�?Cluster 数据
+        std::vector<ClusterRenderData> clusters;    // 该网格的所有Cluster 数据
         glm::mat4 modelMatrix;                      // 该网格的模型变换矩阵
     };
     
-    std::vector<ClusterRenderData> m_clusterRenderData;     // 兼容单网格模�?
+    std::vector<ClusterRenderData> m_clusterRenderData;     // 兼容单网格模式
     std::vector<MeshRenderInfo> m_meshRenderInfos;          // 多网格模式的渲染数据
     
-    // 顶点和索引缓�?
+    // 顶点和索引缓冲
     std::unique_ptr<VulkanBuffer> m_vertexBuffer;
     std::unique_ptr<VulkanBuffer> m_indexBuffer;
     
     uint32_t m_totalVertexCount = 0;
     uint32_t m_totalIndexCount = 0;
     uint32_t m_totalClusterCount = 0;
-    uint32_t m_lod0ClusterCount = 0;   // LOD0 �?cluster 数量（用于调试渲染）
+    uint32_t m_lod0ClusterCount = 0;   // LOD0 的cluster 数量（用于调试渲染）
     
     // 调试模式
     NaniteDebugMode m_debugMode = NaniteDebugMode::ClusterColor;
     
     // 目标网格
     std::string m_targetMeshName;
-    bool m_renderAllMeshes = false;     // 是否渲染所有网�?
+    bool m_renderAllMeshes = false;     // 是否渲染所有网格
     
-    // 状�?
+    // 状态
     bool m_initialized = false;
     bool m_renderDataBuilt = false;
     

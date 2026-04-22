@@ -2,10 +2,10 @@
  * @file Window.h
  * @brief 窗口管理模块 - 封装 GLFW 窗口操作
  * 
- * 职责�?
- * 1. 创建和销毁窗�?
- * 2. 处理窗口事件（大小改变、关闭等�?
- * 3. 提供 Vulkan Surface 创建所需的接�?
+ * 职责：
+ * 1. 创建和销毁窗口
+ * 2. 处理窗口事件（大小改变、关闭等）
+ * 3. 提供 Vulkan Surface 创建所需的接口
  */
 
 #pragma once
@@ -48,7 +48,7 @@ public:
     void pollEvents();
 
     /**
-     * @brief 检查窗口是否应该关�?
+     * @brief 检查窗口是否应该关闭
      */
     bool shouldClose() const;
 
@@ -58,11 +58,11 @@ public:
     void requestClose();
 
     /**
-     * @brief 等待事件（用于最小化时节�?CPU�?
+     * @brief 等待事件（用于最小化时节省 CPU）
      */
     void waitEvents();
 
-    // ========== 属性访�?==========
+    // ========== 属性访问 ==========
 
     GLFWwindow* getNativeHandle() const { return m_window; }
     uint32_t getWidth() const { return m_width; }
@@ -80,11 +80,11 @@ public:
     VkSurfaceKHR createSurface(VkInstance instance);
 
     /**
-     * @brief 获取所需�?Vulkan 实例扩展
+     * @brief 获取所需的 Vulkan 实例扩展
      */
     static std::vector<const char*> getRequiredInstanceExtensions();
 
-    // ========== 输入状态查�?==========
+    // ========== 输入状态查询 ==========
 
     bool isKeyPressed(int key) const;
     bool isMouseButtonPressed(int button) const;

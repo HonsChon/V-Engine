@@ -37,15 +37,15 @@ void Camera::processKeyboard(CameraMovement direction, float deltaTime) {
 }
 
 void Camera::processMouseMovement(float xoffset, float yoffset, bool constrainPitch) {
-    // 应用鼠标灵敏�?
+    // 应用鼠标灵敏度
     xoffset *= mouseSensitivity;
     yoffset *= mouseSensitivity;
     
-    // 更新偏航角和俯仰�?
+    // 更新偏航角和俯仰角
     yaw += xoffset;
     pitch += yoffset;
     
-    // 限制俯仰角，防止万向节锁和翻�?
+    // 限制俯仰角，防止万向节锁和翻转
     if (constrainPitch) {
         if (pitch > MAX_PITCH) {
             pitch = MAX_PITCH;
@@ -55,12 +55,12 @@ void Camera::processMouseMovement(float xoffset, float yoffset, bool constrainPi
         }
     }
     
-    // 根据新的欧拉角更新相机向�?
+    // 根据新的欧拉角更新相机向量
     updateCameraVectors();
 }
 
 void Camera::processMouseScroll(float yoffset) {
-    // 调整视野（zoom）实现缩放效�?
+    // 调整视野（zoom）实现缩放效果
     zoom -= yoffset;
     
     // 限制缩放范围

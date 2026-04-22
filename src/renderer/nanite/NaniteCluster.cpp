@@ -19,7 +19,7 @@ void Cluster::computeBounds() {
         bounds.aabbMax = glm::max(bounds.aabbMax, vertex.position);
     }
     
-    // 计算包围�?
+    // 计算包围球
     bounds.center = (bounds.aabbMin + bounds.aabbMax) * 0.5f;
     bounds.radius = 0.0f;
     
@@ -28,7 +28,7 @@ void Cluster::computeBounds() {
         bounds.radius = std::max(bounds.radius, dist);
     }
     
-    // 初始化其他字�?
+    // 初始化其他字段
     bounds.lodError = 0.0f;
     bounds.screenSizeThreshold = 0.0f;
 }
@@ -68,7 +68,7 @@ void Cluster::computeNormalCone() {
 void Cluster::packVertices() {
     packedVertices.resize(vertices.size());
     
-    // 计算包围盒范围用于量�?
+    // 计算包围盒范围用于量区
     glm::vec3 range = bounds.aabbMax - bounds.aabbMin;
     glm::vec3 invRange = glm::vec3(
         range.x > 0.0001f ? 1.0f / range.x : 0.0f,
@@ -80,20 +80,20 @@ void Cluster::packVertices() {
         const Vertex& src = vertices[i];
         PackedVertex& dst = packedVertices[i];
         
-        // 位置量化�?16 位（相对�?AABB�?
+        // 位置量化制16 位（相对了AABB：
         glm::vec3 normalized = (src.position - bounds.aabbMin) * invRange;
         dst.posX = static_cast<uint16_t>(glm::clamp(normalized.x, 0.0f, 1.0f) * 65535.0f);
         dst.posY = static_cast<uint16_t>(glm::clamp(normalized.y, 0.0f, 1.0f) * 65535.0f);
         dst.posZ = static_cast<uint16_t>(glm::clamp(normalized.z, 0.0f, 1.0f) * 65535.0f);
         dst.padding0 = 0;
         
-        // 法线使用八面体编�?
+        // 法线使用八面体编码
         // 简化版本：直接量化 XY 分量
         glm::vec3 n = glm::normalize(src.normal);
         dst.normalX = static_cast<int16_t>(n.x * 32767.0f);
         dst.normalY = static_cast<int16_t>(n.y * 32767.0f);
         
-        // UV 量化�?16 �?
+        // UV 量化制16 体
         dst.uvX = static_cast<uint16_t>(glm::clamp(src.uv.x, 0.0f, 1.0f) * 65535.0f);
         dst.uvY = static_cast<uint16_t>(glm::clamp(src.uv.y, 0.0f, 1.0f) * 65535.0f);
     }
@@ -114,14 +114,14 @@ uint32_t ClusterizedMesh::getTotalClusterCount() const {
 }
 
 uint32_t ClusterizedMesh::selectLODLevel(float screenSpaceError) const {
-    // 从最精细�?LOD 开始检�?
+    // 从最精细的LOD 开始检查
     for (uint32_t lod = 0; lod < lodLevels.size(); ++lod) {
-        // 如果�?LOD 的最大误差小于屏幕误差阈值，使用�?LOD
+        // 如果试LOD 的最大误差小于屏幕误差阈值，使用试LOD
         if (lodLevels[lod].maxError <= screenSpaceError) {
             return lod;
         }
     }
-    // 返回最粗糙�?LOD
+    // 返回最粗糙的LOD
     return static_cast<uint32_t>(lodLevels.size() - 1);
 }
 

@@ -136,13 +136,13 @@ void VulkanPipeline::createGraphicsPipeline() {
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    // 视口和裁�?
+    // 视口和裁剪
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
 
-    // 光栅�?
+    // 光栅化
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -159,7 +159,7 @@ void VulkanPipeline::createGraphicsPipeline() {
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // 深度和模板测�?
+    // 深度和模板测试
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_TRUE;
@@ -185,7 +185,7 @@ void VulkanPipeline::createGraphicsPipeline() {
     colorBlending.blendConstants[2] = 0.0f;
     colorBlending.blendConstants[3] = 0.0f;
 
-    // 动态状�?
+    // 动态状态
     std::vector<VkDynamicState> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR

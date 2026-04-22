@@ -13,7 +13,7 @@ class GBufferPass;
 /**
  * SSRPass - 屏幕空间反射渲染通道
  * 
- * 基于 G-Buffer 信息进行光线步进，计算屏幕空间反�?
+ * 基于 G-Buffer 信息进行光线步进，计算屏幕空间反射
  */
 class SSRPass : public RenderPassBase {
 public:
@@ -25,10 +25,10 @@ public:
         alignas(16) glm::mat4 invView;
         alignas(16) glm::vec4 cameraPos;
         alignas(16) glm::vec4 screenSize;     // xy: 屏幕尺寸, zw: 1/屏幕尺寸
-        alignas(4)  float maxDistance;        // 最大光线步进距�?
-        alignas(4)  float resolution;         // 分辨率因�?
+        alignas(4)  float maxDistance;        // 最大光线步进距离
+        alignas(4)  float resolution;         // 分辨率因存
         alignas(4)  float thickness;          // 厚度阈值（线性深度空间）
-        alignas(4)  float maxSteps;           // 最大步进次�?
+        alignas(4)  float maxSteps;           // 最大步进次数
         alignas(4)  float nearPlane;          // 近平面距离（用于线性深度计算）
         alignas(4)  float farPlane;           // 远平面距离（用于线性深度计算）
         alignas(8)  float padding[2];         // 对齐填充
@@ -53,7 +53,7 @@ public:
     void setThickness(float thickness) { params.thickness = thickness; }
     void setMaxSteps(float steps) { params.maxSteps = steps; }
 
-    // 执行 SSR Pass（需�?GBufferPass 和场景颜色作为输入）
+    // 执行 SSR Pass（需要GBufferPass 和场景颜色作为输入）
     void execute(VkCommandBuffer cmd, GBufferPass* gbuffer, 
                  VkImageView sceneColorView, uint32_t frameIndex);
 
@@ -97,7 +97,7 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
     
-    // 描述�?
+    // 描述符
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;

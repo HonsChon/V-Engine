@@ -24,7 +24,7 @@ void Mesh::createCube() {
     indices.clear();
     name = "Cube";
 
-    // 立方体顶点数�?(位置, 法线, 纹理坐标, 切线)
+    // 立方体顶点数据(位置, 法线, 纹理坐标, 切线)
     std::vector<Vertex> cubeVertices = {
         // Front face
         {{-1.0f, -1.0f,  1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
@@ -63,7 +63,7 @@ void Mesh::createCube() {
         {{-1.0f, -1.0f,  1.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}}
     };
 
-    // 立方体索引数�?(每个�?个三角形)
+    // 立方体索引数据(每个面个三角形)
     std::vector<uint32_t> cubeIndices = {
         // Front face
         0, 1, 2, 2, 3, 0,
@@ -117,18 +117,18 @@ void Mesh::createSphere(int segments) {
         }
     }
 
-    // 生成球体索引 (修正绕序，使三角形正面朝�?
+    // 生成球体索引 (修正绕序，使三角形正面朝外
     for (int lat = 0; lat < segments; ++lat) {
         for (int lon = 0; lon < segments; ++lon) {
             uint32_t first = lat * (segments + 1) + lon;
             uint32_t second = first + segments + 1;
 
-            // 第一个三角形 (逆时针绕序，面朝�?
+            // 第一个三角形 (逆时针绕序，面朝外
             indices.push_back(first);
             indices.push_back(first + 1);
             indices.push_back(second);
 
-            // 第二个三角形 (逆时针绕序，面朝�?
+            // 第二个三角形 (逆时针绕序，面朝外
             indices.push_back(second);
             indices.push_back(first + 1);
             indices.push_back(second + 1);
@@ -212,7 +212,7 @@ bool Mesh::loadFromOBJ(const std::string& filepath) {
         std::cout << "Warning: " << warn << std::endl;
     }
     
-    // 从文件路径提取名�?
+    // 从文件路径提取名称
     size_t lastSlash = filepath.find_last_of("/\\");
     size_t lastDot = filepath.find_last_of('.');
     if (lastSlash != std::string::npos && lastDot != std::string::npos) {
@@ -233,9 +233,9 @@ bool Mesh::loadFromOBJ(const std::string& filepath) {
     bool hasNormals = !attrib.normals.empty();
     bool hasTexCoords = !attrib.texcoords.empty();
     
-    // 遍历所有形�?
+    // 遍历所有形状
     for (const auto& shape : shapes) {
-        // 遍历所有面的索�?
+        // 遍历所有面的索引
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
             
@@ -283,7 +283,7 @@ bool Mesh::loadFromOBJ(const std::string& filepath) {
     std::cout << "Unique vertices: " << vertices.size() << std::endl;
     std::cout << "Indices: " << indices.size() << std::endl;
     
-    // 如果没有法线，计算它�?
+    // 如果没有法线，计算它从
     if (!hasNormals) {
         std::cout << "No normals in OBJ, calculating..." << std::endl;
         calculateNormals();
@@ -292,7 +292,7 @@ bool Mesh::loadFromOBJ(const std::string& filepath) {
     // 计算切线
     calculateTangents();
     
-    // 计算包围�?
+    // 计算包围盒
     calculateBounds();
     
     std::cout << "Bounds: min(" << minBounds.x << ", " << minBounds.y << ", " << minBounds.z << ")"
@@ -330,22 +330,22 @@ float Mesh::getBoundingSphereRadius() const {
 void Mesh::centerAndNormalize() {
     if (vertices.empty()) return;
     
-    // 计算中心和大�?
+    // 计算中心和大小
     glm::vec3 center = getCenter();
     glm::vec3 size = maxBounds - minBounds;
     float maxDim = std::max({size.x, size.y, size.z});
     
     if (maxDim == 0.0f) return;
     
-    // 缩放因子使模型适合单位立方�?
+    // 缩放因子使模型适合单位立方体
     float scale = 2.0f / maxDim;
     
-    // 变换所有顶�?
+    // 变换所有顶点
     for (auto& vertex : vertices) {
         vertex.pos = (vertex.pos - center) * scale;
     }
     
-    // 更新包围�?
+    // 更新包围盒
     calculateBounds();
     
     std::cout << "Model centered and normalized. New bounds: min(" 
@@ -354,12 +354,12 @@ void Mesh::centerAndNormalize() {
 }
 
 void Mesh::calculateNormals() {
-    // 重置所有法线为�?
+    // 重置所有法线为零
     for (auto& vertex : vertices) {
         vertex.normal = glm::vec3(0.0f);
     }
     
-    // 计算面法线并累加到顶�?
+    // 计算面法线并累加到顶点
     for (size_t i = 0; i < indices.size(); i += 3) {
         uint32_t i0 = indices[i];
         uint32_t i1 = indices[i + 1];
@@ -379,7 +379,7 @@ void Mesh::calculateNormals() {
         vertices[i2].normal += faceNormal;
     }
     
-    // 归一化所有法�?
+    // 归一化所有法线
     for (auto& vertex : vertices) {
         if (glm::length(vertex.normal) > 0.0001f) {
             vertex.normal = glm::normalize(vertex.normal);
@@ -390,12 +390,12 @@ void Mesh::calculateNormals() {
 }
 
 void Mesh::calculateTangents() {
-    // 重置所有切�?
+    // 重置所有切线
     for (auto& vertex : vertices) {
         vertex.tangent = glm::vec3(0.0f);
     }
     
-    // 计算每个三角形的切线并累�?
+    // 计算每个三角形的切线并累加
     for (size_t i = 0; i < indices.size(); i += 3) {
         uint32_t i0 = indices[i];
         uint32_t i1 = indices[i + 1];
@@ -427,13 +427,13 @@ void Mesh::calculateTangents() {
         }
     }
     
-    // Gram-Schmidt 正交化并归一�?
+    // Gram-Schmidt 正交化并归一区
     for (auto& vertex : vertices) {
         if (glm::length(vertex.tangent) > 0.0001f) {
             // 正交化：T' = T - N * dot(N, T)
             vertex.tangent = glm::normalize(vertex.tangent - vertex.normal * glm::dot(vertex.normal, vertex.tangent));
         } else {
-            // 如果切线为零，创建一个默认切�?
+            // 如果切线为零，创建一个默认切线
             if (std::abs(vertex.normal.x) < 0.9f) {
                 vertex.tangent = glm::normalize(glm::cross(vertex.normal, glm::vec3(1.0f, 0.0f, 0.0f)));
             } else {

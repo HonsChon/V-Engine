@@ -35,7 +35,7 @@ ForwardPass::~ForwardPass() {
 void ForwardPass::recreate(VkRenderPass newRenderPass, uint32_t newWidth, uint32_t newHeight) {
     vkDeviceWaitIdle(device->getDevice());
     
-    // 只需要重�?Pipeline
+    // 只需要重建Pipeline
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device->getDevice(), pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;
@@ -55,7 +55,7 @@ void ForwardPass::recreate(VkRenderPass newRenderPass, uint32_t newWidth, uint32
 void ForwardPass::cleanup() {
     VkDevice dev = device->getDevice();
     
-    // 销�?Uniform Buffers
+    // 销毁Uniform Buffers
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
             vkDestroyBuffer(dev, uniformBuffers[i], nullptr);
@@ -68,10 +68,10 @@ void ForwardPass::cleanup() {
     uniformBuffersMemory.clear();
     uniformBuffersMapped.clear();
     
-    // 清除材质描述符缓�?
+    // 清除材质描述符缓存
     materialDescriptorCache.clear();
     
-    // 销毁材质描述符�?
+    // 销毁材质描述符池
     for (auto pool : materialDescriptorPools) {
         if (pool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(dev, pool, nullptr);
@@ -189,7 +189,7 @@ void ForwardPass::createPipeline() {
     
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
     
-    // 顶点输入 - �?Vertex 结构体匹�?
+    // 顶点输入 - 与Vertex 结构体匹配
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding = 0;
     bindingDescription.stride = sizeof(float) * 11; // pos(3) + normal(3) + texCoord(2) + tangent(3)
@@ -240,7 +240,7 @@ void ForwardPass::createPipeline() {
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
     
-    // 光栅�?
+    // 光栅化
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -278,7 +278,7 @@ void ForwardPass::createPipeline() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
     
-    // 动态状�?
+    // 动态状态
     std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -293,7 +293,7 @@ void ForwardPass::createPipeline() {
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstantData);  // 2 �?mat4 = 128 bytes
+    pushConstantRange.size = sizeof(PushConstantData);  // 2 与mat4 = 128 bytes
     
     // Pipeline 布局 - 使用两个描述符集
     std::array<VkDescriptorSetLayout, 2> setLayouts = { globalSetLayout, materialSetLayout };
@@ -400,13 +400,13 @@ void ForwardPass::createDescriptorPools() {
 }
 
 void ForwardPass::ensureMaterialPoolCapacity() {
-    // 检查是否需要创建新的材质描述符�?
+    // 检查是否需要创建新的材质描述符池
     if (materialDescriptorPools.empty() || 
         allocatedMaterialSets >= MATERIALS_PER_POOL * maxFramesInFlight) {
         
         VkDescriptorPoolSize poolSize{};
         poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSize.descriptorCount = MATERIALS_PER_POOL * 3 * maxFramesInFlight;  // 每个材质 3 个纹�?
+        poolSize.descriptorCount = MATERIALS_PER_POOL * 3 * maxFramesInFlight;  // 每个材质 3 个纹理
         
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -468,7 +468,7 @@ void ForwardPass::updateUniformBuffer(uint32_t currentFrame, const UniformBuffer
     memcpy(uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 }
 
-// ========== 材质描述符管�?==========
+// ========== 材质描述符管理==========
 
 ForwardPass::MaterialDescriptor* ForwardPass::allocateMaterialDescriptor(const std::string& materialId) {
     // 检查是否已存在
@@ -480,7 +480,7 @@ ForwardPass::MaterialDescriptor* ForwardPass::allocateMaterialDescriptor(const s
     // 确保池有容量
     ensureMaterialPoolCapacity();
     
-    // 创建新的材质描述�?
+    // 创建新的材质描述符
     MaterialDescriptor descriptor;
     descriptor.sets.resize(maxFramesInFlight);
     
@@ -560,7 +560,7 @@ ForwardPass::MaterialDescriptor* ForwardPass::getMaterialDescriptor(const std::s
 // ========== 渲染命令 ==========
 
 void ForwardPass::begin(VkCommandBuffer cmd) {
-    // 设置视口和裁�?
+    // 设置视口和裁剪
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;

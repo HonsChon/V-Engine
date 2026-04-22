@@ -25,13 +25,13 @@ void Entity::setParent(Entity parent) {
     auto& myRelationship = getComponent<RelationshipComponent>();
     auto& parentRelationship = parent.getComponent<RelationshipComponent>();
     
-    // 如果已经有父节点，先从原父节点移�?
+    // 如果已经有父节点，先从原父节点移除
     if (myRelationship.parent != entt::null) {
         Entity oldParent(myRelationship.parent, m_scene);
         oldParent.removeChild(*this);
     }
     
-    // 设置新的父节�?
+    // 设置新的父节点
     myRelationship.parent = parent.getHandle();
     
     // 将自己添加到新父节点的子节点链表
@@ -49,7 +49,7 @@ void Entity::setParent(Entity parent) {
             lastChildRelationship = lastChild.getComponent<RelationshipComponent>();
         }
         
-        // 添加到链表末�?
+        // 添加到链表末尾
         lastChildRelationship.nextSibling = m_entityHandle;
         myRelationship.prevSibling = lastChild.getHandle();
     }
@@ -114,7 +114,7 @@ void Entity::removeChild(Entity child) {
     auto& myRelationship = getComponent<RelationshipComponent>();
     auto& childRelationship = child.getComponent<RelationshipComponent>();
     
-    // 确认是父子关�?
+    // 确认是父子关系
     if (childRelationship.parent != m_entityHandle) {
         return;
     }

@@ -16,15 +16,15 @@ class VulkanBuffer;
 /**
  * GBufferPass - 几何缓冲区渲染通道
  * 
- * 用于延迟渲染的第一阶段，存储场景的几何信息�?
+ * 用于延迟渲染的第一阶段，存储场景的几何信息：
  * - Position (RGB16F) - 世界空间位置
  * - Normal (RGB16F) - 世界空间法线
- * - Albedo (RGBA8) - 反照�?+ 金属�?
+ * - Albedo (RGBA8) - 反照率+ 金属度
  * - Depth (D32F) - 深度缓冲
  * 
- * 描述符集架构�?
- * - Set 0: 全局 UBO（view, proj, 光照�?
- * - Set 1: 材质纹理（albedo, normal, specular�? 每个材质独立
+ * 描述符集架构：
+ * - Set 0: 全局 UBO（view, proj, 光照：
+ * - Set 1: 材质纹理（albedo, normal, specular： 每个材质独立
  */
 class GBufferPass : public RenderPassBase {
 public:
@@ -37,7 +37,7 @@ public:
         COUNT = 4
     };
 
-    // Push Constants 结构�?
+    // Push Constants 结构体
     struct PushConstantData {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 normalMatrix;
@@ -45,11 +45,11 @@ public:
     
     // 材质描述符结构体
     struct MaterialDescriptor {
-        std::vector<VkDescriptorSet> sets;  // 每帧一�?
+        std::vector<VkDescriptorSet> sets;  // 每帧一与
         bool valid = false;
     };
 
-    // UBO 结构�?
+    // UBO 结构体
     struct UniformBufferObject {
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
@@ -66,7 +66,7 @@ public:
 
     void resize(uint32_t width, uint32_t height);
 
-    // 获取�?
+    // 获取器
     VkRenderPass getRenderPass() const { return renderPass; }
     VkFramebuffer getFramebuffer() const { return framebuffer; }
     
@@ -94,7 +94,7 @@ public:
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
     void bindPipeline(VkCommandBuffer cmd) const;
     
-    // 描述符绑�?
+    // 描述符绑定
     void bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const;
     void bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex, MaterialDescriptor* material) const;
     
@@ -105,7 +105,7 @@ public:
     // 初始化描述符
     void createDescriptorSets();
     
-    // 材质描述符管�?
+    // 材质描述符管理
     MaterialDescriptor* allocateMaterialDescriptor(const std::string& materialId);
     MaterialDescriptor* getMaterialDescriptor(const std::string& materialId);
     void updateMaterialTextures(MaterialDescriptor* material,
@@ -162,7 +162,7 @@ private:
     VkDescriptorSetLayout globalSetLayout = VK_NULL_HANDLE;    // Set 0: UBO
     VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;  // Set 1: 纹理
     
-    // 描述符资�?
+    // 描述符资源
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     static constexpr uint32_t MAX_MATERIALS = 100;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
@@ -170,7 +170,7 @@ private:
     // 全局描述符集 (Set 0)
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> globalDescriptorSets = {};
     
-    // 材质描述符缓�?(Set 1)
+    // 材质描述符缓存(Set 1)
     std::unordered_map<std::string, MaterialDescriptor> materialDescriptorCache;
     
     // Uniform Buffers

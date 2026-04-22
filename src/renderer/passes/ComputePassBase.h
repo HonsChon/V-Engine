@@ -11,8 +11,8 @@ class ComputePipeline;
 /**
  * ComputePassBase - 计算通道基类
  * 
- * 所有计算通道（如 GPU Culling、粒子更新等）的基类�?
- * 提供通用的计算管线管理和资源绑定功能�?
+ * 所有计算通道（如 GPU Culling、粒子更新等）的基类。
+ * 提供通用的计算管线管理和资源绑定功能。
  */
 class ComputePassBase {
 public:
@@ -62,7 +62,7 @@ protected:
                              VkAccessFlags dstAccess);
 
     /**
-     * 插入缓冲区屏�?
+     * 插入缓冲区屏障
      */
     void insertBufferBarrier(VkCommandBuffer commandBuffer,
                              VkBuffer buffer,

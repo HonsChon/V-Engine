@@ -61,7 +61,7 @@ public:
     void endSingleTimeCommands(VkCommandBuffer commandBuffer);
     
     // ========== RenderDoc 调试标记支持 ==========
-    // 开始调试区域（�?RenderDoc 中显示为层级目录�?
+    // 开始调试区域（在 RenderDoc 中显示为层级目录）
     void beginDebugLabel(VkCommandBuffer commandBuffer, const char* labelName, 
                          float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f);
     // 结束调试区域

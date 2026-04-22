@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <glm/gtc/type_ptr.hpp>
 
-// 静态回调函数实�?
+// 静态回调函数实现
 void VulkanRenderer::mouseCallback(GLFWwindow* window, double xposIn, double yposIn) {
     auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
     if (!renderer || !renderer->mouseEnabled) return;
@@ -41,7 +41,7 @@ void VulkanRenderer::mouseCallback(GLFWwindow* window, double xposIn, double ypo
     }
     
     float xoffset = xpos - renderer->lastMouseX;
-    float yoffset = renderer->lastMouseY - ypos; // Y轴反�?
+    float yoffset = renderer->lastMouseY - ypos; // Y轴反转
     
     renderer->lastMouseX = xpos;
     renderer->lastMouseY = ypos;
@@ -60,7 +60,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
     auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
     if (!renderer) return;
     
-    // 快捷键处�?
+    // 快捷键处理
     if (action == GLFW_PRESS) {
         switch (key) {
             case GLFW_KEY_5:
@@ -68,7 +68,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                 if (renderer->renderMode == RenderMode::Normal) {
                     renderer->renderMode = RenderMode::WaterScene;
                     std::cout << "Switching to Water Scene mode (SSR enabled)" << std::endl;
-                    // 初始化水面场景（如果还没有初始化�?
+                    // 初始化水面场景（如果还没有初始化：
                     if (!renderer->gbuffer) {
                         renderer->initWaterScene();
                     }
@@ -87,7 +87,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                 renderer->enableGPUCulling = !renderer->enableGPUCulling;
                 std::cout << "GPU Culling " << (renderer->enableGPUCulling ? "enabled" : "disabled") << std::endl;
                 
-                // 如果还没有初始化 GPU-Driven Renderer，则初始�?
+                // 如果还没有初始化 GPU-Driven Renderer，则初始区
                 if (renderer->enableGPUCulling && !renderer->gpuDrivenRenderer) {
                     renderer->initGPUDrivenRendering();
                 }
@@ -97,7 +97,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                 renderer->enableNanite = !renderer->enableNanite;
                 std::cout << "Nanite " << (renderer->enableNanite ? "enabled" : "disabled") << std::endl;
                 
-                // 如果还没有初始化 Nanite，则初始�?
+                // 如果还没有初始化 Nanite，则初始区
                 if (renderer->enableNanite && !renderer->naniteInitialized) {
                     renderer->initNanite();
                 }
@@ -110,7 +110,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                 renderer->testNaniteClustering();
                 break;
             case GLFW_KEY_9:
-                // 切换 Cluster 可视�?
+                // 切换 Cluster 可视区
                 renderer->showClusterVisualization = !renderer->showClusterVisualization;
                 std::cout << "Cluster Visualization: " 
                           << (renderer->showClusterVisualization ? "ON" : "OFF") << std::endl;
@@ -118,7 +118,7 @@ void VulkanRenderer::keyCallback(GLFWwindow* window, int key, int scancode, int 
                     if (!renderer->naniteDebugPass) {
                         renderer->initNaniteDebugPass();
                     }
-                    // 确保设置目标网格并构建渲染数�?
+                    // 确保设置目标网格并构建渲染数据
                     if (renderer->naniteDebugPass && !renderer->lastClusterizedMeshPath.empty()) {
                         renderer->naniteDebugPass->setTargetMesh(renderer->lastClusterizedMeshPath);
                         std::cout << "  Target mesh: " << renderer->lastClusterizedMeshPath << std::endl;
@@ -146,7 +146,7 @@ void VulkanRenderer::dropCallback(GLFWwindow* window, int count, const char** pa
     std::string filePath = paths[0];
     std::string extension = std::filesystem::path(filePath).extension().string();
     
-    // 转换为小写进行比�?
+    // 转换为小写进行比较
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
     
     if (extension == ".obj") {
@@ -164,7 +164,7 @@ void VulkanRenderer::mouseButtonCallback(GLFWwindow* window, int button, int act
     auto renderer = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(window));
     if (!renderer) return;
     
-    // 检�?ImGui 是否正在捕获鼠标输入
+    // 检查ImGui 是否正在捕获鼠标输入
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureMouse) {
         return;  // ImGui 正在使用鼠标，不处理场景交互
@@ -197,7 +197,7 @@ void VulkanRenderer::mouseButtonCallback(GLFWwindow* window, int button, int act
     // 中键 - 可扩展（如平移视图）
     // ========================================
     else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
-        // 预留给将来的中键功能（如平移视图�?
+        // 预留给将来的中键功能（如平移视图：
         if (action == GLFW_PRESS) {
             // TODO: 实现中键平移
         }
@@ -223,7 +223,7 @@ void VulkanRenderer::initWindow() {
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     
-    // 设置鼠标和滚轮回�?
+    // 设置鼠标和滚轮回调
     glfwSetCursorPosCallback(window, mouseCallback);
     glfwSetMouseButtonCallback(window, mouseButtonCallback);  // 统一处理鼠标按钮事件
     glfwSetScrollCallback(window, scrollCallback);
@@ -237,13 +237,13 @@ void VulkanRenderer::initVulkan() {
     // 创建 Vulkan 设备
     device = std::make_unique<VulkanDevice>(window);
     
-    // 创建交换�?
+    // 创建交换链
     swapChain = std::make_unique<VulkanSwapChain>(std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}), WIDTH, HEIGHT);
     
     // 创建命令缓冲
     createCommandBuffers();
     
-    // 创建 ForwardPass（前向渲染）- 它会管理自己�?Pipeline、Descriptor Pool �?UBO
+    // 创建 ForwardPass（前向渲染）- 它会管理自己的Pipeline、Descriptor Pool 和UBO
     forwardPass = std::make_unique<ForwardPass>(
         std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){}),
         swapChain->getRenderPass(),
@@ -253,13 +253,13 @@ void VulkanRenderer::initVulkan() {
     );
     
     // 注意：新架构中，材质描述符由 RenderSystem::updateRenderables 自动分配
-    // 每个实体/材质都会获得独立的描述符�?
+    // 每个实体/材质都会获得独立的描述符集
     std::cout << "ForwardPass initialized (Pipeline + Dual Descriptor Sets + UBO)" << std::endl;
     
     // 创建相机 - 位于 (0, 0, 5) 看向原点
     camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
     
-    // 初始�?ECS 场景
+    // 初始区ECS 场景
     scene = std::make_unique<VulkanEngine::Scene>();
     
     // 初始化多物体渲染系统
@@ -273,7 +273,7 @@ void VulkanRenderer::initVulkan() {
     sphereEntity.addComponent<VulkanEngine::MeshRendererComponent>("sphere", "earth_material");
     // TransformComponent 已由 Scene::createEntity 自动添加
     
-    // 为球体添�?PBR 材质组件（使用地球纹理）
+    // 为球体添加PBR 材质组件（使用地球纹理）
     auto& sphereMaterial = sphereEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
     sphereMaterial.albedoMap = "../../assets/Earth/Maps/Color Map.jpg";
     sphereMaterial.normalMap = "../../assets/Earth/Maps/Bump.jpg";
@@ -286,9 +286,9 @@ void VulkanRenderer::initVulkan() {
     // 设置 UFO 的位置和缩放
     auto& ufoTransform = ufoEntity.getComponent<VulkanEngine::TransformComponent>();
     ufoTransform.position = glm::vec3(3.0f, 0.0f, 0.0f);  // 放在球体右边
-    ufoTransform.scale = glm::vec3(1.0f);  // 可能需要调�?
+    ufoTransform.scale = glm::vec3(1.0f);  // 可能需要调数
     
-    // 添加 UFO �?PBR 材质组件
+    // 添加 UFO 的PBR 材质组件
     auto& ufoMaterial = ufoEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
     ufoMaterial.albedoMap = "../../assets/UFO/textures/UFO_color.jpg";
     ufoMaterial.normalMap = "../../assets/UFO/textures/UFO_nmap.jpg";
@@ -296,7 +296,7 @@ void VulkanRenderer::initVulkan() {
     
     std::cout << "UFO entity created" << std::endl;
 
-    //创建一个蓝色平�?
+    //创建一个蓝色平面
     auto & planeEntity = scene->createEntity("Plane");
     planeEntity.addComponent<VulkanEngine::MeshRendererComponent>("plane", "plane_material");
 
@@ -304,17 +304,17 @@ void VulkanRenderer::initVulkan() {
     auto & planeTransform = planeEntity.getComponent<VulkanEngine::TransformComponent>();
     planeTransform.position = glm::vec3(0.0f, -1.5f, 0.0f);  // 放在球体下方
 
-    // 添加蓝色平面�?PBR 材质组件（使用默认纹理，通过 baseColor 控制颜色�?
+    // 添加蓝色平面的PBR 材质组件（使用默认纹理，通过 baseColor 控制颜色：
     auto& planeMaterial = planeEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
     // 使用默认白色纹理，通过着色器中的 baseColor 设置蓝色
-    // 如果没有指定纹理路径，RenderSystem 会自动使用默认纹�?
+    // 如果没有指定纹理路径，RenderSystem 会自动使用默认纹理
 
-    // 设置 SelectionManager 的场景引�?
+    // 设置 SelectionManager 的场景引用
     VulkanEngine::SelectionManager::getInstance().setScene(scene.get());
     
     std::cout << "ECS Scene initialized with multiple entities" << std::endl;
     
-    // 初始�?UI 系统
+    // 初始区UI 系统
     initUI();
     
     std::cout << "Vulkan initialization complete!" << std::endl;
@@ -327,7 +327,7 @@ void VulkanRenderer::createSyncObjects() {
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
     
-    // 为每�?swapchain image 创建一�?fence 引用（用于跟踪哪�?frame 正在使用�?image�?
+    // 为每与swapchain image 创建一与fence 引用（用于跟踪哪丆frame 正在使用试image：
     imagesInFlight.resize(swapChain->getImageCount(), VK_NULL_HANDLE);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
@@ -385,7 +385,7 @@ void VulkanRenderer::mainLoop() {
     int fpsFrameCount = 0;
     
     while (!glfwWindowShouldClose(window)) {
-        // 计算帧时间（deltaTime�?
+        // 计算帧时间（deltaTime：
         float currentTime = static_cast<float>(glfwGetTime());
         deltaTime = currentTime - lastFrameTime;
         lastFrameTime = currentTime;
@@ -410,7 +410,7 @@ void VulkanRenderer::mainLoop() {
         // 处理键盘输入
         processKeyboardInput(deltaTime);
         
-        // 注意：鼠标按钮事件（左键选择、右键旋转）现在�?mouseButtonCallback 统一处理
+        // 注意：鼠标按钮事件（左键选择、右键旋转）现在用mouseButtonCallback 统一处理
         
         drawFrame();
         
@@ -421,7 +421,7 @@ void VulkanRenderer::mainLoop() {
             // std::cout << "Rendered " << frameCount << " frames in " << duration << "ms" << std::endl;
         }
         
-        // 临时：按ESC键退�?
+        // 临时：按ESC键退出
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             std::cout << "ESC pressed, exiting..." << std::endl;
             glfwSetWindowShouldClose(window, true);
@@ -440,7 +440,7 @@ void VulkanRenderer::mainLoop() {
     
     std::cout << "Exiting main loop after " << frameCount << " frames in " << totalDuration << "ms total" << std::endl;
     
-    // 保持窗口打开几秒钟，让用户看到结�?
+    // 保持窗口打开几秒钟，让用户看到结构
     std::cout << "Keeping window open for 3 seconds..." << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(3));
 }
@@ -495,13 +495,13 @@ void VulkanRenderer::handleMousePicking() {
     
     std::cout << "[Picking] Mouse: (" << mouseX << ", " << mouseY << "), Window: " << width << "x" << height << std::endl;
     
-    // 3. 获取视图和投影矩�?
-    // 注意：这里不翻转 Y，因�?screenToWorldRay 已经处理�?
+    // 3. 获取视图和投影矩阵
+    // 注意：这里不翻转 Y，因与screenToWorldRay 已经处理了
     glm::mat4 viewMatrix = camera->getViewMatrix();
     float fov = glm::radians(camera->getZoom());
     float aspect = static_cast<float>(width) / static_cast<float>(height);
     glm::mat4 projMatrix = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    // 不需�?projMatrix[1][1] *= -1; 因为 RayPicker 使用的是标准 OpenGL 坐标
+    // 不需要projMatrix[1][1] *= -1; 因为 RayPicker 使用的是标准 OpenGL 坐标
     
     // 4. 创建射线
     VulkanEngine::Ray ray = VulkanEngine::RayPicker::screenToWorldRay(
@@ -516,14 +516,14 @@ void VulkanRenderer::handleMousePicking() {
     std::cout << "[Picking] Ray origin: (" << ray.origin.x << ", " << ray.origin.y << ", " << ray.origin.z << ")" << std::endl;
     std::cout << "[Picking] Ray direction: (" << ray.direction.x << ", " << ray.direction.y << ", " << ray.direction.z << ")" << std::endl;
     
-    // 5. 遍历场景中所有有 MeshRendererComponent 的实体进行射线检�?
+    // 5. 遍历场景中所有有 MeshRendererComponent 的实体进行射线检测
     entt::entity hitEntity = entt::null;
     float closestT = std::numeric_limits<float>::max();
     
     auto& registry = scene->getRegistry();
     auto ecsView = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
     
-    // 获取 MeshManager 来查�?AABB
+    // 获取 MeshManager 来查试AABB
     auto* meshManager = renderSystem->getMeshManager();
     
     int entityCount = 0;
@@ -532,12 +532,12 @@ void VulkanRenderer::handleMousePicking() {
         auto& transform = ecsView.get<VulkanEngine::TransformComponent>(entity);
         auto& meshRenderer = ecsView.get<VulkanEngine::MeshRendererComponent>(entity);
         
-        // �?MeshManager 获取该实体网格的包围�?
+        // 从MeshManager 获取该实体网格的包围盒
         VulkanEngine::AABB meshAABB;
         if (meshManager) {
             meshAABB = meshManager->getMeshAABB(meshRenderer.meshPath);
         } else {
-            // 如果没有 MeshManager，使用默认的单位立方�?AABB
+            // 如果没有 MeshManager，使用默认的单位立方体AABB
             meshAABB.min = glm::vec3(-1.0f);
             meshAABB.max = glm::vec3(1.0f);
         }
@@ -551,7 +551,7 @@ void VulkanRenderer::handleMousePicking() {
                   << " AABB: min(" << worldAABB.min.x << ", " << worldAABB.min.y << ", " << worldAABB.min.z << ")"
                   << " max(" << worldAABB.max.x << ", " << worldAABB.max.y << ", " << worldAABB.max.z << ")" << std::endl;
         
-        // 射线-AABB 相交检�?
+        // 射线-AABB 相交检测
         float tMin, tMax;
         if (VulkanEngine::RayPicker::rayIntersectsAABB(ray, worldAABB, tMin, tMax)) {
             std::cout << "[Picking] HIT! tMin=" << tMin << ", tMax=" << tMax << std::endl;
@@ -577,10 +577,10 @@ void VulkanRenderer::handleMousePicking() {
         std::cout << "Entity selected: " << entityName << " Hit at (" 
                   << hitPoint.x << ", " << hitPoint.y << ", " << hitPoint.z << ")" << std::endl;
         
-        // 通过 SelectionManager 更新选择状态（使用 ECS 实体�?
+        // 通过 SelectionManager 更新选择状态（使用 ECS 实体：
         VulkanEngine::SelectionManager::getInstance().select(hitEntity);
         
-        // 同步�?UI 面板
+        // 同步到UI 面板
         if (uiManager) {
             // 更新 SceneHierarchyPanel
             auto* hierarchy = uiManager->getSceneHierarchyPanel();
@@ -591,7 +591,7 @@ void VulkanRenderer::handleMousePicking() {
             // 更新 InspectorPanel
             auto* inspector = uiManager->getInspectorPanel();
             if (inspector) {
-                inspector->setScene(scene.get());  // 确保设置了场景引�?
+                inspector->setScene(scene.get());  // 确保设置了场景引用
                 inspector->setSelectedEntity(hitEntity);
             }
         }
@@ -600,7 +600,7 @@ void VulkanRenderer::handleMousePicking() {
         std::cout << "No object selected" << std::endl;
         VulkanEngine::SelectionManager::getInstance().clearSelection();
         
-        // 同步�?UI 面板
+        // 同步到UI 面板
         if (uiManager) {
             // 更新 SceneHierarchyPanel
             auto* hierarchy = uiManager->getSceneHierarchyPanel();
@@ -617,7 +617,7 @@ void VulkanRenderer::handleMousePicking() {
     }
 }
 
-// calculateMeshAABB 已移�?MeshManager::getMeshAABB()
+// calculateMeshAABB 已移至MeshManager::getMeshAABB()
 // 每个 GPUMesh 在加载时会自动计算其 AABB
 
 void VulkanRenderer::drawFrame() {
@@ -629,7 +629,7 @@ void VulkanRenderer::drawFrame() {
     // 等待当前帧的 fence 完成（确保这个帧槽可用）
     vkWaitForFences(device->getDevice(), 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
     
-    // GPU 工作已完成，现在可以安全地读�?Nanite 剔除结果
+    // GPU 工作已完成，现在可以安全地读取Nanite 剔除结果
     // 传入 currentFrame 以确保读取正确的双缓冲槽
     if (naniteManager) {
         naniteManager->readbackCullingResults(currentFrame);
@@ -646,32 +646,32 @@ void VulkanRenderer::drawFrame() {
         throw std::runtime_error("failed to acquire swap chain image!");
     }
     
-    // 检查此 swapchain image 是否仍在被前一帧使�?
-    // 如果是，等待该帧完成（解�?semaphore 同步问题�?
+    // 检查此 swapchain image 是否仍在被前一帧使用
+    // 如果是，等待该帧完成（解冲semaphore 同步问题：
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(device->getDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
-    // 标记�?swapchain image 现在由当前帧使用
+    // 标记步swapchain image 现在由当前帧使用
     imagesInFlight[imageIndex] = inFlightFences[currentFrame];
     
-    // 在重�?fence 之前更新 uniform buffer
+    // 在重置fence 之前更新 uniform buffer
     updateUniformBuffer(currentFrame);
     
-    // 如果是水面场景模式，更新水面相关�?uniform
+    // 如果是水面场景模式，更新水面相关的uniform
     if (renderMode == RenderMode::WaterScene && waterPass) {
         updateWaterUniforms(currentFrame);
     }
     
-    // 统一更新 RenderSystem 的可渲染数据（使�?RTTI 多态接口）
+    // 统一更新 RenderSystem 的可渲染数据（使用RTTI 多态接口）
     if (renderSystem && scene) {
         std::vector<RenderPassBase*> passes;
         
         if (renderMode == RenderMode::WaterScene) {
-            // 水面场景模式：同时需�?ForwardPass �?GBufferPass 的材质描述符
+            // 水面场景模式：同时需要ForwardPass 和GBufferPass 的材质描述符
             if (forwardPass) passes.push_back(forwardPass.get());
             if (gbuffer) passes.push_back(gbuffer.get());
         } else {
-            // 普通模式：只需�?ForwardPass
+            // 普通模式：只需要ForwardPass
             if (forwardPass) passes.push_back(forwardPass.get());
         }
         
@@ -687,7 +687,7 @@ void VulkanRenderer::drawFrame() {
         prepareGPUCullingData();
     }
     
-    // 根据渲染模式选择不同的命令录�?
+    // 根据渲染模式选择不同的命令录制
     if (renderMode == RenderMode::WaterScene && waterPass) {
         recordWaterSceneCommandBuffer(commandBuffers[currentFrame], imageIndex);
     } else {
@@ -746,7 +746,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     
     ForwardPass::UniformBufferObject ubo{};
     
-    // View 矩阵 - 从相机获�?
+    // View 矩阵 - 从相机获取
     if (camera) {
         ubo.view = camera->getViewMatrix();
     } else {
@@ -760,19 +760,19 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     float aspect = swapChain->getExtent().width / (float)swapChain->getExtent().height;
     ubo.proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
     
-    // Vulkan �?Y 轴是反的（与 OpenGL 相反�?
+    // Vulkan 的Y 轴是反的（与 OpenGL 相反：
     ubo.proj[1][1] *= -1;
     
-    // 相机位置（用于光照计算）- 使用 vec4，w 分量不使�?
+    // 相机位置（用于光照计算）- 使用 vec4，w 分量不使用
     glm::vec3 camPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
     ubo.viewPos = glm::vec4(camPos, 1.0f);
     
-    // 光源绕球体旋�?
-    float lightRadius = 5.0f;  // 灯光距离球体中心的距�?
-    float lightSpeed = 0.5f;   // 旋转速度（每秒弧度数�?
+    // 光源绕球体旋转
+    float lightRadius = 5.0f;  // 灯光距离球体中心的距离
+    float lightSpeed = 0.5f;   // 旋转速度（每秒弧度数：
     float lightAngle = time * lightSpeed;
     
-    // 灯光�?XZ 平面上绕 Y 轴旋转，同时有一定高�?
+    // 灯光在XZ 平面上绕 Y 轴旋转，同时有一定高度
     glm::vec3 lightPosition = glm::vec3(
         lightRadius * cos(lightAngle),   // X 坐标
         3.0f,                             // Y 坐标（高度）
@@ -782,7 +782,7 @@ void VulkanRenderer::updateUniformBuffer(uint32_t currentImage) {
     
     ubo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f); // 高强度点光源
     
-    // 更新 ForwardPass �?UBO（不再包�?model �?normalMatrix，这些通过 Push Constants 传递）
+    // 更新 ForwardPass 的UBO（不再包合model 和normalMatrix，这些通过 Push Constants 传递）
     forwardPass->updateUniformBuffer(currentImage, ubo);
 }
 
@@ -795,14 +795,14 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     }
 
     // ========================================
-    // GPU-Driven: 执行 Compute Pass 进行剔除（在 RenderPass 之前�?
+    // GPU-Driven: 执行 Compute Pass 进行剔除（在 RenderPass 之前：
     // ========================================
     if (enableGPUCulling && gpuDrivenRenderer) {
-        // 执行 GPU Culling（Compute Shader�?
+        // 执行 GPU Culling（Compute Shader：
         gpuDrivenRenderer->executeCulling(commandBuffer);
         
         // 添加内存屏障：Compute -> Graphics
-        // 确保剔除完成后再开始绘�?
+        // 确保剔除完成后再开始绘制
         VkMemoryBarrier memoryBarrier{};
         memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
         memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -820,7 +820,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     }
 
     // ========================================
-    // Nanite: 执行 GPU Cluster 剔除（在 RenderPass 之前�?
+    // Nanite: 执行 GPU Cluster 剔除（在 RenderPass 之前：
     // ========================================
     if (showClusterVisualization && naniteManager && naniteDebugPass) {
         prepareNaniteCulling(commandBuffer, imageIndex);
@@ -834,7 +834,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     renderPassInfo.renderArea.extent = swapChain->getExtent();
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.1f, 0.2f, 0.4f, 1.0f}}; // 深蓝色背�?
+    clearValues[0].color = {{0.1f, 0.2f, 0.4f, 1.0f}}; // 深蓝色背景
     clearValues[1].depthStencil = {1.0f, 0};
 
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
@@ -843,13 +843,13 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // ========================================
-    // 场景渲染区域（RenderDoc 调试标记�?
+    // 场景渲染区域（RenderDoc 调试标记：
     // ========================================
     device->beginDebugLabel(commandBuffer, "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
 
-    // 使用 ForwardPass 进行渲染（每�?Pass 管理自己�?Pipeline �?Descriptor�?
+    // 使用 ForwardPass 进行渲染（每与Pass 管理自己的Pipeline 和Descriptor：
     if (forwardPass && scene && renderSystem) {
-        // 设置视口和裁�?
+        // 设置视口和裁剪
         forwardPass->begin(commandBuffer);
         
         // 绑定前向渲染管线
@@ -859,8 +859,8 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         // GPU-Driven 渲染路径 vs 传统渲染路径
         // ========================================
         if (enableGPUCulling && gpuDrivenRenderer) {
-            // GPU-Driven: 方案B - 使用压缩的可见索引列�?
-            // �?GPU 读取哪些实体是可见的，只渲染这些实体
+            // GPU-Driven: 方案B - 使用压缩的可见索引列表
+            // 从GPU 读取哪些实体是可见的，只渲染这些实体
             
             VkBuffer indirectBuffer = gpuDrivenRenderer->getIndirectDrawBuffer();
             
@@ -869,14 +869,14 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                 forwardPass->bindGlobalDescriptorSet(commandBuffer, currentFrame);
                 
                 // ========================================
-                // 方案B核心逻辑：获取可见实体索引列�?
+                // 方案B核心逻辑：获取可见实体索引列表
                 // ========================================
                 
-                // 获取可见实体索引（这会从 GPU 读回数据�?
+                // 获取可见实体索引（这会从 GPU 读回数据：
                 const std::vector<uint32_t>& visibleIndices = gpuDrivenRenderer->getVisibleIndices();
                 uint32_t visibleCount = static_cast<uint32_t>(visibleIndices.size());
                 
-                // 构建实体列表（按索引访问�?
+                // 构建实体列表（按索引访问：
                 auto& registry = scene->getRegistry();
                 auto ecsView = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
                 std::vector<entt::entity> entityList;
@@ -895,15 +895,15 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                     auto& transform = ecsView.get<VulkanEngine::TransformComponent>(entity);
                     auto& meshRenderer = ecsView.get<VulkanEngine::MeshRendererComponent>(entity);
                     
-                    // 获取 GPU 网格（返�?shared_ptr�?
+                    // 获取 GPU 网格（返回shared_ptr：
                     auto gpuMesh = VulkanEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
                     if (!gpuMesh) continue;
                     
-                    // 推送模型矩�?
+                    // 推送模型矩阵
                     glm::mat4 modelMatrix = transform.getTransform();
                     forwardPass->pushModelMatrix(commandBuffer, modelMatrix);
                     
-                    // �?renderSystem �?renderables 中查找匹配的材质描述�?
+                    // 从renderSystem 的renderables 中查找匹配的材质描述符
                     ForwardPass::MaterialDescriptor* materialDescriptor = nullptr;
                     for (const auto& renderable : renderSystem->getRenderables()) {
                         if (renderable.entityHandle == entity && renderable.materialDescriptor) {
@@ -912,9 +912,9 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                         }
                     }
                     
-                    // 必须绑定材质描述符集！如果没有有效的材质，跳过这个实�?
+                    // 必须绑定材质描述符集！如果没有有效的材质，跳过这个实体
                     if (!materialDescriptor || !materialDescriptor->valid) {
-                        continue;  // 跳过没有有效材质的实�?
+                        continue;  // 跳过没有有效材质的实体
                     }
                     forwardPass->bindMaterialDescriptorSet(commandBuffer, currentFrame, materialDescriptor);
                     
@@ -925,7 +925,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                     vkCmdBindIndexBuffer(commandBuffer, gpuMesh->indexBuffer->getBuffer(), 0, VK_INDEX_TYPE_UINT32);
                     
                     // 直接绘制（使用正确的 indexCount 而非 indirect buffer 中的硬编码值）
-                    // GPU Culling 只用于确定可见性，实际绘制参数�?gpuMesh 获取
+                    // GPU Culling 只用于确定可见性，实际绘制参数从gpuMesh 获取
                     vkCmdDrawIndexed(commandBuffer, gpuMesh->getIndexCount(), 1, 0, 0, 0);
                 }
                 
@@ -939,14 +939,14 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
                     lastPrintTime = totalTime;
                 }
             } else {
-                // 间接缓冲区不可用，回退到传统渲�?
+                // 间接缓冲区不可用，回退到传统渲染
                 renderSystem->render(commandBuffer, forwardPass.get(), currentFrame);
             }
         } else {
             // 传统渲染路径
-            // 如果启用�?Cluster 可视化，则使�?NaniteDebugPass 替代普通渲�?
+            // 如果启用了Cluster 可视化，则使用NaniteDebugPass 替代普通渲染
             if (showClusterVisualization && naniteDebugPass) {
-                // 注意：recordNaniteDebugCommands 内部会调�?buildRenderData()
+                // 注意：recordNaniteDebugCommands 内部会调用buildRenderData()
                 recordNaniteDebugCommands(commandBuffer, imageIndex);
             } else {
                 renderSystem->render(commandBuffer, forwardPass.get(), currentFrame);
@@ -958,11 +958,11 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     device->endDebugLabel(commandBuffer);
 
     // ========================================
-    // UI 渲染区域（RenderDoc 调试标记�?
+    // UI 渲染区域（RenderDoc 调试标记：
     // ========================================
     device->beginDebugLabel(commandBuffer, "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
 
-    // 更新并渲�?UI（在场景渲染之后，RenderPass 结束之前�?
+    // 更新并渲染UI（在场景渲染之后，RenderPass 结束之前：
     updateUI();
     renderUI(commandBuffer);
 
@@ -986,7 +986,7 @@ void VulkanRenderer::initNanite() {
     std::cout << "========================================" << std::endl;
     
     try {
-        // 创建共享指针（不负责释放�?
+        // 创建共享指针（不负责释放：
         auto devicePtr = std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){});
         
         naniteManager = std::make_unique<Nanite::NaniteManager>(devicePtr);
@@ -1048,7 +1048,7 @@ void VulkanRenderer::initNaniteDebugPass() {
         naniteDebugPass = std::make_unique<NaniteDebugPass>(devicePtr, swapChainPtr, naniteManagerPtr);
         naniteDebugPass->initialize(swapChain->getRenderPass());
         
-        // 设置 ClusterCullingPass 引用（用于获�?GPU culling 结果�?
+        // 设置 ClusterCullingPass 引用（用于获取GPU culling 结果：
         naniteDebugPass->setClusterCullingPass(naniteManager->getCullingPass());
         
         // 设置目标网格
@@ -1064,23 +1064,23 @@ void VulkanRenderer::initNaniteDebugPass() {
     }
 }
 
-// �?RenderPass 之前执行 Nanite GPU 剔除（Compute Pass�?
+// 在RenderPass 之前执行 Nanite GPU 剔除（Compute Pass：
 void VulkanRenderer::prepareNaniteCulling(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     if (!naniteManager || !naniteDebugPass) {
         return;
     }
     
-    // 确保渲染数据已构建（这是�?RenderPass 之前，可以安全地执行上传操作�?
+    // 确保渲染数据已构建（这是在RenderPass 之前，可以安全地执行上传操作：
     naniteDebugPass->setRenderAllMeshes();
     naniteDebugPass->ensureRenderDataBuilt();
     
-    // 计算宽高�?
+    // 计算宽高比
     VkExtent2D extent = swapChain->getExtent();
     float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
     
-    // 获取投影矩阵并翻�?Y 轴（Vulkan 坐标系与 OpenGL 不同�?
+    // 获取投影矩阵并翻转Y 轴（Vulkan 坐标系与 OpenGL 不同：
     glm::mat4 projMatrix = camera->getProjectionMatrix(aspect, camera->getZoom());
-    projMatrix[1][1] *= -1;  // Vulkan Y 轴翻�?
+    projMatrix[1][1] *= -1;  // Vulkan Y 轴翻转
     
     glm::mat4 viewMatrix = camera->getViewMatrix();
     glm::vec3 cameraPos = camera->getPosition();
@@ -1088,12 +1088,12 @@ void VulkanRenderer::prepareNaniteCulling(VkCommandBuffer commandBuffer, uint32_
     // 设置屏幕参数
     naniteManager->setScreenParams(extent.width, extent.height);
     
-    // 执行 GPU 剔除�?LOD 选择（Compute Shader�?
-    // 传入 currentFrame 以实现正确的双缓冲同�?
+    // 执行 GPU 剔除和LOD 选择（Compute Shader：
+    // 传入 currentFrame 以实现正确的双缓冲同步
     naniteManager->performCulling(commandBuffer, viewMatrix, projMatrix, cameraPos, currentFrame);
     
     // 添加内存屏障：Compute -> Graphics
-    // 注意：VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT 必须�?VK_PIPELINE_STAGE_VERTEX_INPUT_BIT 配对
+    // 注意：VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT 必须与VK_PIPELINE_STAGE_VERTEX_INPUT_BIT 配对
     VkMemoryBarrier memoryBarrier{};
     memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1109,7 +1109,7 @@ void VulkanRenderer::prepareNaniteCulling(VkCommandBuffer commandBuffer, uint32_
         0, nullptr
     );
     
-    // 更新 Uniforms（Host -> Device，不需要命令缓冲区�?
+    // 更新 Uniforms（Host -> Device，不需要命令缓冲区：
     naniteDebugPass->updateUniforms(
         imageIndex,
         viewMatrix,
@@ -1120,27 +1120,27 @@ void VulkanRenderer::prepareNaniteCulling(VkCommandBuffer commandBuffer, uint32_
     );
 }
 
-// �?RenderPass 内录�?Nanite 绘制命令
+// 在RenderPass 内录制Nanite 绘制命令
 void VulkanRenderer::recordNaniteDebugCommands(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     if (!naniteDebugPass || !showClusterVisualization) {
         return;
     }
     
-    // 收集所有已聚类网格的模型矩�?
+    // 收集所有已聚类网格的模型矩阵
     std::unordered_map<std::string, glm::mat4> meshMatrices;
     
     if (scene && naniteManager) {
         auto& registry = scene->getRegistry();
         auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
         
-        // 获取所有已聚类的网格名�?
+        // 获取所有已聚类的网格名称
         auto clusterizedMeshNames = naniteManager->getAllMeshNames();
         std::set<std::string> clusterizedSet(clusterizedMeshNames.begin(), clusterizedMeshNames.end());
         
         for (auto entity : view) {
             auto& meshRenderer = view.get<VulkanEngine::MeshRendererComponent>(entity);
             
-            // 检查该网格是否已聚�?
+            // 检查该网格是否已聚类
             if (clusterizedSet.count(meshRenderer.meshPath) > 0) {
                 auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
                 meshMatrices[meshRenderer.meshPath] = transform.getTransform();
@@ -1148,12 +1148,12 @@ void VulkanRenderer::recordNaniteDebugCommands(VkCommandBuffer commandBuffer, ui
         }
     }
     
-    // 如果没有可渲染的网格，返�?
+    // 如果没有可渲染的网格，返回
     if (meshMatrices.empty()) {
         return;
     }
     
-    // 录制绘制命令（此�?GPU 剔除已在 prepareNaniteCulling 中完成）
+    // 录制绘制命令（此时GPU 剔除已在 prepareNaniteCulling 中完成）
     naniteDebugPass->recordCommandsWithLOD(commandBuffer, imageIndex, meshMatrices, naniteManager.get());
 }
 
@@ -1173,7 +1173,7 @@ void VulkanRenderer::testNaniteClustering() {
         return;
     }
     
-    // 从场景中获取所有网格并进行 Cluster �?
+    // 从场景中获取所有网格并进行 Cluster 区
     uint32_t processedMeshes = 0;
     uint32_t totalClusters = 0;
     
@@ -1186,34 +1186,34 @@ void VulkanRenderer::testNaniteClustering() {
         for (auto entity : view) {
             auto& meshRenderer = view.get<VulkanEngine::MeshRendererComponent>(entity);
             
-            // 避免重复处理相同的网�?
+            // 避免重复处理相同的网格
             if (processedPaths.count(meshRenderer.meshPath) > 0) {
                 continue;
             }
             processedPaths.insert(meshRenderer.meshPath);
             
-            // 获取 GPU Mesh 数据（包�?CPU 端的 Mesh�?
+            // 获取 GPU Mesh 数据（包含CPU 端的 Mesh：
             auto gpuMesh = meshManager->getMesh(meshRenderer.meshPath);
             if (!gpuMesh || !gpuMesh->mesh) {
                 std::cout << "[Nanite] Mesh not found: " << meshRenderer.meshPath << std::endl;
                 continue;
             }
             
-            // 转换�?InputMesh
+            // 转换与InputMesh
             Nanite::InputMesh inputMesh = Nanite::InputMesh::fromMesh(*gpuMesh->mesh);
             
             std::cout << "\n[Nanite] Processing mesh: " << inputMesh.name << std::endl;
             std::cout << "  Vertices: " << inputMesh.getVertexCount() << std::endl;
             std::cout << "  Triangles: " << inputMesh.getTriangleCount() << std::endl;
             
-            // 进行 Cluster �?
+            // 进行 Cluster 区
             auto clusterizedMesh = naniteManager->processMesh(inputMesh, meshRenderer.meshPath);
             
             if (clusterizedMesh) {
                 uint32_t clusterCount = clusterizedMesh->getTotalClusterCount();
                 totalClusters += clusterCount;
                 
-                // 保存最后处理的网格路径（用于可视化�?
+                // 保存最后处理的网格路径（用于可视化：
                 lastClusterizedMeshPath = meshRenderer.meshPath;
                 
                 std::cout << "  Generated Clusters: " << clusterCount << std::endl;
@@ -1243,7 +1243,7 @@ void VulkanRenderer::testNaniteClustering() {
         }
     }
     
-    // 上传�?GPU
+    // 上传制GPU
     if (processedMeshes > 0) {
         std::cout << "\n[Nanite] Uploading " << totalClusters << " clusters to GPU..." << std::endl;
         naniteManager->uploadToGPU();
@@ -1253,7 +1253,7 @@ void VulkanRenderer::testNaniteClustering() {
             initNaniteDebugPass();
         }
         
-        // 设置目标网格（使用最后处理的网格�?
+        // 设置目标网格（使用最后处理的网格：
         if (naniteDebugPass && !lastClusterizedMeshPath.empty()) {
             naniteDebugPass->setTargetMesh(lastClusterizedMeshPath);
         }
@@ -1303,7 +1303,7 @@ void VulkanRenderer::cleanupGPUDrivenRendering() {
 void VulkanRenderer::prepareGPUCullingData() {
     if (!gpuDrivenRenderer || !scene || !camera || !renderSystem) return;
     
-    // �?ECS 场景收集实例数据
+    // 从ECS 场景收集实例数据
     std::vector<GPUInstanceData> instances;
     
     auto& registry = scene->getRegistry();
@@ -1318,7 +1318,7 @@ void VulkanRenderer::prepareGPUCullingData() {
         GPUInstanceData data{};
         data.modelMatrix = transform.getTransform();
         
-        // �?MeshManager 获取包围盒信�?
+        // 从MeshManager 获取包围盒信息
         VulkanEngine::AABB meshAABB;
         if (meshManager) {
             meshAABB = meshManager->getMeshAABB(meshRenderer.meshPath);
@@ -1327,7 +1327,7 @@ void VulkanRenderer::prepareGPUCullingData() {
             meshAABB.max = glm::vec3(1.0f);
         }
         
-        // 计算包围�?
+        // 计算包围球
         glm::vec3 center = (meshAABB.min + meshAABB.max) * 0.5f;
         float radius = glm::length(meshAABB.max - center);
         data.boundingSphere = glm::vec4(center, radius);
@@ -1350,7 +1350,7 @@ void VulkanRenderer::prepareGPUCullingData() {
     float fov = glm::radians(camera->getZoom());
     float aspect = swapChain->getExtent().width / (float)swapChain->getExtent().height;
     glm::mat4 projMatrix = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    projMatrix[1][1] *= -1;  // Vulkan Y 轴翻�?
+    projMatrix[1][1] *= -1;  // Vulkan Y 轴翻转
     
     // 准备 GPU 剔除数据
     gpuDrivenRenderer->prepare(instances, viewMatrix, projMatrix, camera->getPosition());
@@ -1373,7 +1373,7 @@ void VulkanRenderer::recreateSwapChain() {
 
     swapChain->recreate(width, height);
     
-    // 重置 imagesInFlight 数组（交换链重建�?image 数量可能变化�?
+    // 重置 imagesInFlight 数组（交换链重建后image 数量可能变化：
     imagesInFlight.clear();
     imagesInFlight.resize(swapChain->getImageCount(), VK_NULL_HANDLE);
     
@@ -1390,8 +1390,8 @@ void VulkanRenderer::recreateSwapChain() {
     }
 }
 
-// createVertexBuffer �?createIndexBuffer 已迁移到 MeshManager
-// 每个 GPUMesh 现在�?MeshManager 统一管理其顶点和索引缓冲�?
+// createVertexBuffer 和createIndexBuffer 已迁移到 MeshManager
+// 每个 GPUMesh 现在用MeshManager 统一管理其顶点和索引缓冲区
 
 // ============================================================
 // UI 系统相关方法实现
@@ -1401,7 +1401,7 @@ void VulkanRenderer::initUI() {
     std::cout << "Initializing UI system..." << std::endl;
     
     try {
-        // 创建 ImGui �?
+        // 创建 ImGui 局
         imguiLayer = std::make_unique<ImGuiLayer>(
             window,
             device->getInstance(),
@@ -1413,10 +1413,10 @@ void VulkanRenderer::initUI() {
             static_cast<uint32_t>(swapChain->getImageCount())
         );
         
-        // 创建 UI 管理�?
+        // 创建 UI 管理器
         uiManager = std::make_unique<UIManager>();
         
-        // 设置资源浏览器的根目�?
+        // 设置资源浏览器的根目录
         if (uiManager->getAssetBrowserPanel()) {
             uiManager->getAssetBrowserPanel()->setRootPath("assets");
         }
@@ -1426,7 +1426,7 @@ void VulkanRenderer::initUI() {
             uiManager->getInspectorPanel()->setScene(scene.get());
         }
         
-        // 设置 SceneHierarchyPanel 的场景引�?
+        // 设置 SceneHierarchyPanel 的场景引用
         if (uiManager->getSceneHierarchyPanel() && scene) {
             uiManager->getSceneHierarchyPanel()->setScene(scene.get());
         }
@@ -1455,13 +1455,13 @@ void VulkanRenderer::updateUI() {
     auto* debugPanel = uiManager->getDebugPanel();
     if (debugPanel) {
         debugPanel->setFPS(fps);
-        debugPanel->setFrameTime(deltaTime * 1000.0f); // 转换为毫�?
+        debugPanel->setFrameTime(deltaTime * 1000.0f); // 转换为毫秒
         
         // 更新相机信息
         debugPanel->setCameraPosition(camera->getPosition());
         debugPanel->setCameraFOV(camera->getZoom());
         
-        // �?RenderSystem 获取渲染器统计信�?
+        // 从RenderSystem 获取渲染器统计信息
         uint32_t vertexCount = 0;
         uint32_t triangleCount = 0;
         uint32_t drawCalls = 0;
@@ -1476,23 +1476,23 @@ void VulkanRenderer::updateUI() {
     }
     
     // SceneHierarchyPanel 现在会自动从 ECS 场景获取实体列表
-    // 不再需要手动添加示例对�?
+    // 不再需要手动添加示例对象
 }
 
 void VulkanRenderer::renderUI(VkCommandBuffer commandBuffer) {
     if (!imguiLayer || !uiManager || !showUI) return;
     
-    // 开始新�?ImGui �?
+    // 开始新的ImGui 帧
     imguiLayer->beginFrame();
     
-    // 渲染所�?UI 面板
+    // 渲染所有UI 面板
     uiManager->render();
     
     // 结束 ImGui 帧并记录渲染命令
     imguiLayer->endFrame(commandBuffer);
 }
 
-// createDescriptorPool、createDescriptorSets、loadTextures 已移至各�?Pass 类和 TextureManager 中管�?
+// createDescriptorPool、createDescriptorSets、loadTextures 已移至各与Pass 类和 TextureManager 中管理
 
 void VulkanRenderer::cleanup() {
     // 等待设备闲置
@@ -1545,21 +1545,21 @@ void VulkanRenderer::initWaterScene() {
         
         // 3. 创建 Water Pass（使用内置水面网格）
         waterPass = std::make_unique<WaterPass>(devicePtr, width, height, swapChain->getRenderPass());
-        waterPass->setWaterHeight(-1.5f);  // 水面�?Y = -1.5 位置
+        waterPass->setWaterHeight(-1.5f);  // 水面在Y = -1.5 位置
         waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created (using built-in water mesh)" << std::endl;
         
-        // 4. 创建场景颜色纹理（用�?SSR 采样�?
+        // 4. 创建场景颜色纹理（用了SSR 采样：
         createSceneColorImage();
         std::cout << "  Scene color image created" << std::endl;
         
-        // 5. �?GBuffer 创建描述符集（拥有独立的 UBO�?
+        // 5. 与GBuffer 创建描述符集（拥有独立的 UBO：
         if (gbuffer) {
             gbuffer->createDescriptorSets();
             std::cout << "  GBuffer descriptor sets created" << std::endl;
             
-            // GBuffer 纹理绑定将在 recordWaterSceneCommandBuffer �?
-            // 根据每个实体�?PBRMaterialComponent 动态设�?
+            // GBuffer 纹理绑定将在 recordWaterSceneCommandBuffer 与
+            // 根据每个实体的PBRMaterialComponent 动态设置
             std::cout << "  GBuffer texture bindings will be set per-entity" << std::endl;
         }
         
@@ -1568,7 +1568,7 @@ void VulkanRenderer::initWaterScene() {
         lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
         std::cout << "  LightingPass created" << std::endl;
         
-        // 7. 设置 LightingPass �?G-Buffer 输入
+        // 7. 设置 LightingPass 的G-Buffer 输入
         if (gbuffer) {
             lightingPass->setGBufferInputs(
                 gbuffer->getPositionView(),
@@ -1579,12 +1579,12 @@ void VulkanRenderer::initWaterScene() {
             std::cout << "  LightingPass G-Buffer inputs set" << std::endl;
         }
         
-        // 8. 更新 WaterPass 的描述符集（绑定 G-Buffer 用于内置 SSR�?
+        // 8. 更新 WaterPass 的描述符集（绑定 G-Buffer 用于内置 SSR：
         if (gbuffer) {
             waterPass->updateDescriptorSets(
-                gbuffer.get(),                   // G-Buffer（Position, Normal, Depth�?
-                sceneColorView,                  // 场景颜色（用于反射和折射�?
-                sceneColorSampler                // 采样�?
+                gbuffer.get(),                   // G-Buffer（Position, Normal, Depth：
+                sceneColorView,                  // 场景颜色（用于反射和折射：
+                sceneColorSampler                // 采样器
             );
             std::cout << "  Water Pass descriptors updated (integrated SSR)" << std::endl;
         }
@@ -1694,7 +1694,7 @@ void VulkanRenderer::createSceneColorImage() {
         throw std::runtime_error("Failed to create scene color image view!");
     }
     
-    // 创建采样�?
+    // 创建采样器
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -1721,7 +1721,7 @@ void VulkanRenderer::updateWaterUniforms(uint32_t frameIndex) {
     float fov = glm::radians(camera->getZoom());
     float aspect = swapChain->getExtent().width / (float)swapChain->getExtent().height;
     glm::mat4 projection = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    projection[1][1] *= -1;  // Vulkan Y 轴翻�?
+    projection[1][1] *= -1;  // Vulkan Y 轴翻转
     
     waterPass->updateUniforms(view, projection, camera->getPosition(), totalTime, frameIndex);
     
@@ -1732,10 +1732,10 @@ void VulkanRenderer::updateWaterUniforms(uint32_t frameIndex) {
 }
 
 void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-    // 完整的多 Pass 渲染流程�?
-    // Pass 1: G-Buffer Pass - 渲染场景�?G-Buffer（使�?ForwardPass �?Pipeline�?
+    // 完整的多 Pass 渲染流程：
+    // Pass 1: G-Buffer Pass - 渲染场景制G-Buffer（使用ForwardPass 的Pipeline：
     // Pass 2: SSR Pass - 计算屏幕空间反射
-    // Pass 3: Final Pass - 渲染场景 + 水面（使�?SSR 结果�?
+    // Pass 3: Final Pass - 渲染场景 + 水面（使用SSR 结果：
     
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1745,7 +1745,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
     }
 
     // ========================================
-    // 场景渲染区域开始（RenderDoc 调试标记�?
+    // 场景渲染区域开始（RenderDoc 调试标记：
     // ========================================
     device->beginDebugLabel(commandBuffer, "Water Scene Rendering", 0.2f, 0.6f, 0.9f, 1.0f);
 
@@ -1765,19 +1765,19 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
     scissor.extent = swapChain->getExtent();
 
     // ========================================
-    // Pass 1: G-Buffer Pass - 使用 GBuffer 自己�?Pipeline 渲染场景
+    // Pass 1: G-Buffer Pass - 使用 GBuffer 自己的Pipeline 渲染场景
     // ========================================
     if (gbuffer && scene) {
-        // 更新 GBuffer �?UBO（全局数据，不包含 model �?normalMatrix�?
+        // 更新 GBuffer 的UBO（全局数据，不包含 model 和normalMatrix：
         GBufferPass::UniformBufferObject gbufferUBO{};
         
-        // 从相机获�?View/Projection 矩阵
+        // 从相机获取View/Projection 矩阵
         if (camera) {
             gbufferUBO.view = camera->getViewMatrix();
             float fov = glm::radians(camera->getZoom());
             float aspect = swapChain->getExtent().width / (float)swapChain->getExtent().height;
             gbufferUBO.proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
-            gbufferUBO.proj[1][1] *= -1;  // Vulkan Y 轴翻�?
+            gbufferUBO.proj[1][1] *= -1;  // Vulkan Y 轴翻转
             gbufferUBO.viewPos = glm::vec4(camera->getPosition(), 1.0f);
         } else {
             gbufferUBO.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), 
@@ -1805,10 +1805,10 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         gbufferUBO.lightPos = glm::vec4(lightPosition, 1.0f);
         gbufferUBO.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
         
-        // 更新 GBuffer �?UBO（只包含全局数据�?
+        // 更新 GBuffer 的UBO（只包含全局数据：
         gbuffer->updateUniformBuffer(currentFrame, gbufferUBO);
         
-        // 开�?GBuffer RenderPass
+        // 开始GBuffer RenderPass
         gbuffer->beginRenderPass(commandBuffer);
         
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -1817,10 +1817,10 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         // 绑定 Pipeline
         gbuffer->bindPipeline(commandBuffer);
         
-        // 使用新的 RTTI 多态接口渲�?
+        // 使用新的 RTTI 多态接口渲染
         if (renderSystem) {
             // 注意：updateRenderables 应该在主渲染循环中调用一次，包含所有需要的 Pass
-            // 这里直接使用统一�?render 接口
+            // 这里直接使用统一的render 接口
             renderSystem->render(commandBuffer, gbuffer.get(), currentFrame);
         }
         
@@ -1828,10 +1828,10 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
     }
 
     // ========================================
-    // Pass 1.5: 复制 GBuffer Albedo �?sceneColorImage
+    // Pass 1.5: 复制 GBuffer Albedo 制sceneColorImage
     // ========================================
     if (gbuffer && sceneColorImage != VK_NULL_HANDLE) {
-        // 转换 sceneColorImage 布局为传输目�?
+        // 转换 sceneColorImage 布局为传输目标
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1851,7 +1851,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        // 执行 Blit（从 GBuffer Albedo 复制�?sceneColorImage�?
+        // 执行 Blit（从 GBuffer Albedo 复制制sceneColorImage：
         VkImageBlit blitRegion{};
         blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blitRegion.srcSubresource.mipLevel = 0;
@@ -1901,7 +1901,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         renderPassInfo.renderArea.extent = swapChain->getExtent();
 
         std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = {{0.02f, 0.05f, 0.1f, 1.0f}}; // 深蓝色夜空背�?
+        clearValues[0].color = {{0.02f, 0.05f, 0.1f, 1.0f}}; // 深蓝色夜空背景
         clearValues[1].depthStencil = {1.0f, 0};
 
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
@@ -1909,7 +1909,7 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // 使用 LightingPass 进行延迟光照渲染（从 G-Buffer 读取数据�?
+        // 使用 LightingPass 进行延迟光照渲染（从 G-Buffer 读取数据：
         if (lightingPass && gbuffer) {
             // 计算光源位置（与 ForwardPass 保持一致）
             static auto startTime = std::chrono::high_resolution_clock::now();
@@ -1925,16 +1925,16 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
                 lightRadius * sin(lightAngle)
             );
             
-            // 更新 LightingPass �?Uniform
+            // 更新 LightingPass 的Uniform
             glm::vec3 camPos = camera ? camera->getPosition() : glm::vec3(0.0f, 0.0f, 5.0f);
             lightingPass->updateUniforms(currentFrame, camPos, lightPosition, 
                                          glm::vec3(300.0f, 300.0f, 300.0f), 1.0f);
             
-            // 渲染全屏光照四边�?
+            // 渲染全屏光照四边形
             lightingPass->render(commandBuffer, currentFrame);
         }
 
-        // 渲染水面（使�?SSR 反射结果�?
+        // 渲染水面（使用SSR 反射结果：
         if (waterPass) {
             waterPass->render(commandBuffer, currentFrame);
         }
@@ -1943,11 +1943,11 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         device->endDebugLabel(commandBuffer);
 
         // ========================================
-        // UI 渲染区域（RenderDoc 调试标记�?
+        // UI 渲染区域（RenderDoc 调试标记：
         // ========================================
         device->beginDebugLabel(commandBuffer, "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
 
-        // 更新并渲�?UI（在场景渲染之后，RenderPass 结束之前�?
+        // 更新并渲染UI（在场景渲染之后，RenderPass 结束之前：
         updateUI();
         renderUI(commandBuffer);
 

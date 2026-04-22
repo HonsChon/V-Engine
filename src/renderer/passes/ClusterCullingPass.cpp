@@ -1,5 +1,5 @@
 /**
- * ClusterCullingPass.cpp - Nanite Cluster 剔除�?LOD 选择实现
+ * ClusterCullingPass.cpp - Nanite Cluster 剔除和LOD 选择实现
  */
 
 #include "ClusterCullingPass.h"
@@ -25,7 +25,7 @@ void ClusterCullingPass::init() {
     
     std::cout << "[ClusterCulling] Initializing..." << std::endl;
     
-    // 创建 buffer（需要在 pipeline 之前创建，用�?descriptor set�?
+    // 创建 buffer（需要在 pipeline 之前创建，用了descriptor set：
     createBuffers();
     
     // 创建 Compute Pipeline
@@ -50,7 +50,7 @@ void ClusterCullingPass::init() {
     
     pipeline = std::make_unique<ComputePipeline>(device, config);
     
-    // 获取 pipeline 创建�?descriptor set layout
+    // 获取 pipeline 创建的descriptor set layout
     m_descriptorSetLayout = pipeline->getDescriptorSetLayout();
     
     // 创建 descriptor set
@@ -72,7 +72,7 @@ void ClusterCullingPass::cleanup() {
         vkDestroyDescriptorPool(device->getDevice(), m_descriptorPool, nullptr);
         m_descriptorPool = VK_NULL_HANDLE;
     }
-    m_descriptorSetLayout = VK_NULL_HANDLE; // 不要销毁，�?pipeline 管理
+    m_descriptorSetLayout = VK_NULL_HANDLE; // 不要销毁，用pipeline 管理
     
     // 清理 buffer
     m_uniformBuffer.reset();
@@ -81,7 +81,7 @@ void ClusterCullingPass::cleanup() {
     m_counterBuffer.reset();
     m_selectionStateBuffer.reset();
     
-    // 清理双缓�?readback buffers
+    // 清理双缓冲readback buffers
     for (uint32_t i = 0; i < READBACK_BUFFER_COUNT; ++i) {
         m_readbackBuffers[i].reset();
     }
@@ -90,7 +90,7 @@ void ClusterCullingPass::cleanup() {
     m_initialized = false;
 }
 
-// createDescriptorSetLayout 不再需要，pipeline 会自动创�?
+// createDescriptorSetLayout 不再需要，pipeline 会自动创建
 
 void ClusterCullingPass::createBuffers() {
     // Uniform buffer
@@ -105,7 +105,7 @@ void ClusterCullingPass::createBuffers() {
     // 必须使用 STORAGE_BUFFER_BIT 以满足描述符类型要求
     m_dummyStorageBuffer = std::make_unique<VulkanBuffer>(
         device,
-        sizeof(glm::mat4),  // 至少能存放一个矩�?
+        sizeof(glm::mat4),  // 至少能存放一个矩阵
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
@@ -135,8 +135,8 @@ void ClusterCullingPass::createBuffers() {
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     
-    // 双缓�?Readback buffers
-    // 用于稳定�?GPU->CPU 数据传输：帧 N 写入 buffer[N%2]，读�?buffer[(N+1)%2]
+    // 双缓冲Readback buffers
+    // 用于稳定的GPU->CPU 数据传输：帧 N 写入 buffer[N%2]，读取buffer[(N+1)%2]
     for (uint32_t i = 0; i < READBACK_BUFFER_COUNT; ++i) {
         m_readbackBuffers[i] = std::make_unique<VulkanBuffer>(
             device,
@@ -307,7 +307,7 @@ void ClusterCullingPass::resetCounters(VkCommandBuffer commandBuffer) {
     // 重置可见计数器为 0
     vkCmdFillBuffer(commandBuffer, m_counterBuffer->getBuffer(), 0, sizeof(uint32_t), 0);
     
-    // 重置选择状�?
+    // 重置选择状态
     vkCmdFillBuffer(commandBuffer, m_selectionStateBuffer->getBuffer(), 0,
                     sizeof(uint32_t) * m_clusterCount, 0);
     
@@ -329,7 +329,7 @@ void ClusterCullingPass::resetCounters(VkCommandBuffer commandBuffer) {
 }
 
 void ClusterCullingPass::record(VkCommandBuffer commandBuffer) {
-    // 无帧索引版本：使用内部计数器（不推荐，可能有同步问题�?
+    // 无帧索引版本：使用内部计数器（不推荐，可能有同步问题：
     record(commandBuffer, m_currentReadbackIndex);
 }
 
@@ -370,16 +370,16 @@ void ClusterCullingPass::record(VkCommandBuffer commandBuffer, uint32_t frameInd
     
     // =====================================================
     // 基于帧索引的双缓冲策略：
-    // - �?N 写入 buffer[N % READBACK_BUFFER_COUNT]
-    // - 读取时（�?vkWaitForFences 之后）读�?buffer[currentFrame]
-    //   此时 GPU 已完成对�?buffer 的写入（因为 fence 保证了上一次使用该帧槽的命令已完成�?
+    // - 帧N 写入 buffer[N % READBACK_BUFFER_COUNT]
+    // - 读取时（在vkWaitForFences 之后）读取buffer[currentFrame]
+    //   此时 GPU 已完成对试buffer 的写入（因为 fence 保证了上一次使用该帧槽的命令已完成：
     // =====================================================
     
     uint32_t writeIndex = frameIndex % READBACK_BUFFER_COUNT;
-    m_currentReadbackIndex = writeIndex;  // 记录当前写入的索�?
+    m_currentReadbackIndex = writeIndex;  // 记录当前写入的索引
     VkBuffer writeBuffer = m_readbackBuffers[writeIndex]->getBuffer();
     
-    // 复制计数器到当前写入�?readback buffer
+    // 复制计数器到当前写入的readback buffer
     VkBufferCopy countCopyRegion{};
     countCopyRegion.size = sizeof(uint32_t);
     vkCmdCopyBuffer(commandBuffer, m_counterBuffer->getBuffer(), 
@@ -414,7 +414,7 @@ void ClusterCullingPass::record(VkCommandBuffer commandBuffer, uint32_t frameInd
 }
 
 void ClusterCullingPass::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
-    // �?VP 矩阵提取视锥平面（Gribb/Hartmann 方法�?
+    // 从VP 矩阵提取视锥平面（Gribb/Hartmann 方法：
     // Left
     planes[0] = glm::vec4(
         viewProj[0][3] + viewProj[0][0],
@@ -458,7 +458,7 @@ void ClusterCullingPass::extractFrustumPlanes(const glm::mat4& viewProj, glm::ve
         viewProj[3][3] - viewProj[3][2]
     );
     
-    // 归一化平�?
+    // 归一化平面
     for (int i = 0; i < 6; i++) {
         float length = glm::length(glm::vec3(planes[i]));
         if (length > 0.0f) {
@@ -479,20 +479,20 @@ const std::vector<uint32_t>& ClusterCullingPass::getVisibleIndices() {
 
 void ClusterCullingPass::readbackData(uint32_t frameIndex) {
     // =====================================================
-    // 帧同步双缓冲读取策略�?
+    // 帧同步双缓冲读取策略：
     // 
-    // 渲染循环时序�?
-    // 1. vkWaitForFences(currentFrame) -- 等待使用同一帧槽的命令完�?
+    // 渲染循环时序：
+    // 1. vkWaitForFences(currentFrame) -- 等待使用同一帧槽的命令完成
     // 2. readbackData(currentFrame)    -- 此函数调用点
     // 3. record(..., currentFrame)      -- 写入 buffer[currentFrame % 2]
     // 4. vkQueueSubmit                   -- 提交命令
     //
-    // vkWaitForFences(currentFrame) 保证的是�?
-    //   上一次使�?frameIndex == currentFrame 的帧已经完成
-    //   �?"两帧�? 的工作已完成
+    // vkWaitForFences(currentFrame) 保证的是：
+    //   上一次使用frameIndex == currentFrame 的帧已经完成
+    //   半"两帧前 的工作已完成
     //
-    // 所以我们应该读�?buffer[currentFrame % 2]，这是上一�?
-    // 使用同一帧槽时写入的数据，此�?GPU 一定已完成写入�?
+    // 所以我们应该读取buffer[currentFrame % 2]，这是上一与
+    // 使用同一帧槽时写入的数据，此时GPU 一定已完成写入。
     // =====================================================
     
     uint32_t readIndex = frameIndex % READBACK_BUFFER_COUNT;
@@ -504,7 +504,7 @@ void ClusterCullingPass::readbackData(uint32_t frameIndex) {
         return;
     }
     
-    // 读取数据（readback buffer �?HOST_VISIBLE 的）
+    // 读取数据（readback buffer 是HOST_VISIBLE 的）
     void* mappedData = nullptr;
     m_readbackBuffers[readIndex]->map(&mappedData);
     
@@ -518,7 +518,7 @@ void ClusterCullingPass::readbackData(uint32_t frameIndex) {
     
     m_visibleCount = data[0];
     
-    // 限制可见数量到有效范�?
+    // 限制可见数量到有效范围
     if (m_visibleCount > m_clusterCount) {
         m_visibleCount = m_clusterCount;
     }
@@ -535,11 +535,11 @@ void ClusterCullingPass::readbackData(uint32_t frameIndex) {
     // 输出调试信息（每隔一段时间）
     static uint32_t debugCounter = 0;
     if (++debugCounter % 300 == 0) {
-        // 统计每个 LOD 级别的可�?cluster 数量
+        // 统计每个 LOD 级别的可见cluster 数量
         std::cout << "[ClusterCulling] Visible: " << m_visibleCount 
                   << "/" << m_clusterCount << " (readBuffer=" << readIndex << ") | indices: ";
         
-        // 输出前几个可�?cluster 的索引（用于调试�?
+        // 输出前几个可见cluster 的索引（用于调试：
         size_t sampleCount = std::min(m_visibleIndicesCPU.size(), size_t(5));
         for (size_t i = 0; i < sampleCount; ++i) {
             std::cout << m_visibleIndicesCPU[i];

@@ -30,7 +30,7 @@ Entity Scene::createEntity(const std::string& name) {
 Entity Scene::createEntityWithUUID(uint64_t uuid, const std::string& name) {
     Entity entity(m_registry.create(), this);
     
-    // 每个实体都必须有 TagComponent �?TransformComponent
+    // 每个实体都必须有 TagComponent 和 TransformComponent
     entity.addComponent<UUIDComponent>(uuid);
     entity.addComponent<TagComponent>(name);
     entity.addComponent<TransformComponent>();
@@ -45,7 +45,7 @@ void Scene::destroyEntity(Entity entity) {
     if (entity.hasComponent<RelationshipComponent>()) {
         auto& relationship = entity.getComponent<RelationshipComponent>();
         
-        // 移除与父节点的关�?
+        // 移除与父节点的关系
         if (relationship.parent != entt::null) {
             Entity parent(relationship.parent, this);
             parent.removeChild(entity);
@@ -135,7 +135,7 @@ std::vector<Entity> Scene::getRootEntities() {
     for (auto entityHandle : view) {
         Entity entity(entityHandle, this);
         
-        // 如果没有 RelationshipComponent，或�?parent �?null，则是根节点
+        // 如果没有 RelationshipComponent，或者 parent 为 null，则是根节点
         if (!entity.hasComponent<RelationshipComponent>()) {
             roots.push_back(entity);
         }
@@ -158,7 +158,7 @@ void Scene::onStart() {
     m_isRunning = true;
     m_isPaused = false;
     
-    // 初始化所有脚本组�?
+    // 初始化所有脚本组件
     auto view = m_registry.view<NativeScriptComponent>();
     for (auto entity : view) {
         auto& script = view.get<NativeScriptComponent>(entity);
@@ -171,17 +171,17 @@ void Scene::onStart() {
 void Scene::onUpdate(float deltaTime) {
     if (!m_isRunning || m_isPaused) return;
     
-    // 更新所有脚本组�?
+    // 更新所有脚本组件
     {
         auto view = m_registry.view<NativeScriptComponent>();
         for (auto entity : view) {
             auto& script = view.get<NativeScriptComponent>(entity);
-            // 如果有实例，可以调用�?OnUpdate 方法
-            // 这里需要定�?ScriptableEntity 基类
+            // 如果有实例，可以调用其 OnUpdate 方法
+            // 这里需要定义 ScriptableEntity 基类
         }
     }
     
-    // 更新相机宽高�?
+    // 更新相机宽高比
     {
         auto view = m_registry.view<CameraComponent>();
         for (auto entity : view) {
@@ -196,7 +196,7 @@ void Scene::onUpdate(float deltaTime) {
 void Scene::onStop() {
     m_isRunning = false;
     
-    // 销毁所有脚本实�?
+    // 销毁所有脚本实例
     auto view = m_registry.view<NativeScriptComponent>();
     for (auto entity : view) {
         auto& script = view.get<NativeScriptComponent>(entity);
@@ -221,7 +221,7 @@ void Scene::onViewportResize(uint32_t width, uint32_t height) {
 }
 
 // ============================================================
-// 主相�?
+// 主相机
 // ============================================================
 
 Entity Scene::getPrimaryCameraEntity() {
@@ -240,8 +240,8 @@ Entity Scene::getPrimaryCameraEntity() {
 // ============================================================
 
 uint64_t Scene::generateUUID() {
-    // 简单的 UUID 生成�?
-    // 在生产环境中，应该使用更可靠�?UUID 生成方案
+    // 简单的 UUID 生成器
+    // 在生产环境中，应该使用更可靠的 UUID 生成方案
     return m_nextUUID++;
 }
 

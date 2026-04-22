@@ -18,14 +18,14 @@ namespace VulkanEngine {
 }
 
 /**
- * WaterPass - 水面渲染通道（内�?SSR�?
+ * WaterPass - 水面渲染通道（内置SSR：
  * 
- * 直接对水�?mesh 进行 SSR 光线步进，只计算水面覆盖的像�?
- * 比全�?SSR 后处理效率更�?
+ * 直接对水面mesh 进行 SSR 光线步进，只计算水面覆盖的像素
+ * 比全屏SSR 后处理效率更高
  */
 class WaterPass : public RenderPassBase {
 public:
-    // 水面参数结构 - 包含 SSR 所需的矩�?
+    // 水面参数结构 - 包含 SSR 所需的矩阵
     struct WaterUBO {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 view;
@@ -33,7 +33,7 @@ public:
         alignas(16) glm::mat4 invView;
         alignas(16) glm::mat4 invProjection;
         alignas(16) glm::vec4 cameraPos;
-        alignas(16) glm::vec4 waterColor;     // RGB: 水的颜色, A: 透明�?
+        alignas(16) glm::vec4 waterColor;     // RGB: 水的颜色, A: 透明度
         alignas(16) glm::vec4 waterParams;    // x: 波浪速度, y: 波浪强度, z: 时间, w: 折射强度
         alignas(16) glm::vec4 screenSize;     // xy: 屏幕尺寸, zw: nearPlane, farPlane
         alignas(16) glm::vec4 ssrParams;      // x: maxDistance, y: maxSteps, z: thickness（线性深度空间）, w: reserved
@@ -66,7 +66,7 @@ public:
     void updateUniforms(const glm::mat4& view, const glm::mat4& projection,
                         const glm::vec3& cameraPos, float time, uint32_t frameIndex);
 
-    // 更新描述符集 - 需�?G-Buffer 用于 SSR
+    // 更新描述符集 - 需要G-Buffer 用于 SSR
     void updateDescriptorSets(GBufferPass* gbuffer, VkImageView sceneColorView, VkSampler sampler);
 
     // 渲染水面
@@ -80,16 +80,16 @@ public:
     
     /**
      * @brief 设置水面 Entity
-     * 从给定的 Entity 获取�?MeshRendererComponent，然后使用其 mesh 作为水面
+     * 从给定的 Entity 获取充MeshRendererComponent，然后使用其 mesh 作为水面
      * @param entity 要作为水面的实体
-     * @return true 如果成功设置，false 如果 entity 无效或没�?mesh
+     * @return true 如果成功设置，false 如果 entity 无效或没有mesh
      */
     bool setWaterEntity(const VulkanEngine::Entity& entity);
     
     /**
      * @brief 设置水面网格 (通过 GPUMesh)
-     * 直接使用已有�?GPUMesh 作为水面
-     * @param gpuMesh 指向 GPUMesh 的共享指�?
+     * 直接使用已有的GPUMesh 作为水面
+     * @param gpuMesh 指向 GPUMesh 的共享指针
      * @return true 如果成功设置，false 如果 gpuMesh 无效
      */
     bool setWaterMesh(std::shared_ptr<VulkanEngine::GPUMesh> gpuMesh);
@@ -100,7 +100,7 @@ public:
     void clearExternalMesh();
     
     /**
-     * @brief 检查是否正在使用外部网�?
+     * @brief 检查是否正在使用外部网格
      */
     bool isUsingExternalMesh() const { return useExternalMesh; }
 
@@ -130,9 +130,9 @@ private:
     float waterHeight = 0.0f;
     
     // SSR 参数
-    float ssrMaxDistance = 30.0f;   // 最大光线步进距离（世界单位�?
-    float ssrMaxSteps = 2048.0f;     // 最大步进次�?
-    float ssrThickness = 0.03f;     // 厚度阈值（线性深度空间，世界单位�?
+    float ssrMaxDistance = 30.0f;   // 最大光线步进距离（世界单位：
+    float ssrMaxSteps = 2048.0f;     // 最大步进次数
+    float ssrThickness = 0.03f;     // 厚度阈值（线性深度空间，世界单位：
 
     // 水面网格 (内置)
     std::unique_ptr<Mesh> waterMesh;
@@ -147,7 +147,7 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
     
-    // 描述�?
+    // 描述符
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;

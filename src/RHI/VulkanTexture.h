@@ -8,10 +8,10 @@ class VulkanDevice;
 
 class VulkanTexture {
 public:
-    // 默认构造函数（需要后续调�?loadFromFile �?createDefault*�?
+    // 默认构造函数（需要后续调用loadFromFile 成createDefault*：
     VulkanTexture(std::shared_ptr<VulkanDevice> device);
     
-    // 从文件加载纹理的构造函�?
+    // 从文件加载纹理的构造函数
     VulkanTexture(std::shared_ptr<VulkanDevice> device, const std::string& filepath);
     
     ~VulkanTexture();
@@ -20,13 +20,13 @@ public:
     VulkanTexture(const VulkanTexture&) = delete;
     VulkanTexture& operator=(const VulkanTexture&) = delete;
 
-    // 从文件加载纹�?
+    // 从文件加载纹理
     bool loadFromFile(const std::string& filepath);
     
-    // 创建默认白色纹理�?x1�?
+    // 创建默认白色纹理：x1：
     void createDefaultTexture(uint8_t r = 255, uint8_t g = 255, uint8_t b = 255, uint8_t a = 255);
     
-    // 创建默认法线纹理�?x1，指向正Z�?
+    // 创建默认法线纹理：x1，指向正Z：
     void createDefaultNormalTexture();
 
     VkImageView getImageView() const { return imageView; }
@@ -43,7 +43,7 @@ public:
 
 private:
     void createTextureImage(const std::string& filepath);
-    // format 参数：默�?SRGB 用于颜色贴图，法线贴图应使用 UNORM
+    // format 参数：默认SRGB 用于颜色贴图，法线贴图应使用 UNORM
     void createTextureImageFromMemory(const unsigned char* pixels, int width, int height, int channels,
                                       VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
     void createImage(uint32_t width, uint32_t height, VkFormat format, 

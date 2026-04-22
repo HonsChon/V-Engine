@@ -19,7 +19,7 @@ void GPUDrivenRenderer::init() {
         std::cout << "[GPUDrivenRenderer] Frustum Culling Pass initialized" << std::endl;
     }
     
-    // 后续初始化其�?Pass
+    // 后续初始化其从Pass
     // if (config.enableOcclusionCulling) { ... }
     // if (config.enableLODSelection) { ... }
     
@@ -55,7 +55,7 @@ void GPUDrivenRenderer::executeCulling(VkCommandBuffer commandBuffer) {
         return;
     }
     
-    // 重置计数�?
+    // 重置计数器
     frustumCullingPass->resetCounters(commandBuffer);
     
     // 执行剔除

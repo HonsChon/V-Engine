@@ -10,20 +10,20 @@ class VulkanDevice;
 /**
  * ImGuiLayer - ImGui Vulkan/GLFW 后端封装
  * 
- * 负责 ImGui 的初始化、资源管理和渲染集成�?
- * 使用 ImGui �?docking 分支支持窗口停靠功能�?
+ * 负责 ImGui 的初始化、资源管理和渲染集成。
+ * 使用 ImGui 的docking 分支支持窗口停靠功能。
  */
 class ImGuiLayer {
 public:
     ImGuiLayer();
     
     /**
-     * 带参数的构造函�?- 直接初始�?ImGui
+     * 带参数的构造函数- 直接初始区ImGui
      * @param window GLFW 窗口句柄
      * @param instance Vulkan 实例
      * @param physicalDevice Vulkan 物理设备
      * @param logicalDevice Vulkan 逻辑设备
-     * @param queueFamily 图形队列族索�?
+     * @param queueFamily 图形队列族索引
      * @param queue 图形队列
      * @param renderPass 目标 RenderPass
      * @param imageCount SwapChain 图像数量
@@ -44,10 +44,10 @@ public:
     ImGuiLayer& operator=(const ImGuiLayer&) = delete;
 
     /**
-     * 初始�?ImGui（使�?VulkanDevice 对象�?
+     * 初始区ImGui（使用VulkanDevice 对象：
      * @param window GLFW 窗口句柄
      * @param device Vulkan 设备
-     * @param renderPass 目标 RenderPass（通常�?SwapChain �?RenderPass�?
+     * @param renderPass 目标 RenderPass（通常是SwapChain 的RenderPass：
      * @param imageCount SwapChain 图像数量
      */
     void init(GLFWwindow* window, 
@@ -61,27 +61,27 @@ public:
     void cleanup();
 
     /**
-     * 开始新�?ImGui �?
-     * 必须在每帧渲�?UI 之前调用
+     * 开始新的ImGui 帧
+     * 必须在每帧渲染UI 之前调用
      */
     void beginFrame();
 
     /**
      * 结束 ImGui 帧并录制渲染命令
-     * @param commandBuffer 当前帧的命令缓冲�?
+     * @param commandBuffer 当前帧的命令缓冲区
      */
     void endFrame(VkCommandBuffer commandBuffer);
 
     /**
      * 处理窗口大小改变（交换链重建时调用）
-     * @param width 新宽�?
-     * @param height 新高�?
+     * @param width 新宽度
+     * @param height 新高度
      * @param renderPass 新的 RenderPass（交换链重建后可能改变）
      */
     void onResize(uint32_t width, uint32_t height, VkRenderPass renderPass = VK_NULL_HANDLE);
 
     /**
-     * 检查是否已初始�?
+     * 检查是否已初始区
      */
     bool isInitialized() const { return initialized; }
 
@@ -91,12 +91,12 @@ public:
     void setDockingEnabled(bool enabled) { dockingEnabled = enabled; }
 
     /**
-     * 设置是否显示 Demo 窗口（调试用�?
+     * 设置是否显示 Demo 窗口（调试用：
      */
     void setShowDemoWindow(bool show) { showDemoWindow = show; }
 
     /**
-     * 获取是否正在捕获鼠标（用于判断是否应该传递输入给场景�?
+     * 获取是否正在捕获鼠标（用于判断是否应该传递输入给场景：
      */
     bool wantCaptureMouse() const;
 
@@ -110,7 +110,7 @@ private:
     void createDescriptorPoolDirect();  // 使用原始 Vulkan 对象
     void setupStyle();
 
-    // VulkanDevice 对象（用�?init() 方法�?
+    // VulkanDevice 对象（用了init() 方法：
     std::shared_ptr<VulkanDevice> device;
     
     // 原始 Vulkan 对象（用于带参数的构造函数）

@@ -1,6 +1,6 @@
 /**
  * @file FrameResources.cpp
- * @brief 帧资源管理实�?
+ * @brief 帧资源管理实现
  */
 
 #include "FrameResources.h"
@@ -31,7 +31,7 @@ void FrameResources::createCommandBuffers() {
     // 这里使用设备的默认命令池
     VkCommandPool commandPool = m_device->getCommandPool();
 
-    // 分配命令缓冲�?
+    // 分配命令缓冲区
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = commandPool;
@@ -57,7 +57,7 @@ void FrameResources::createSyncObjects() {
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // 初始�?signaled 状�?
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // 初始为signaled 状态
 
     VkDevice device = m_device->getDevice();
 
@@ -80,10 +80,10 @@ uint32_t FrameResources::beginFrame() {
     vkWaitForFences(device, 1, &frame.inFlightFence, VK_TRUE, UINT64_MAX);
     vkResetFences(device, 1, &frame.inFlightFence);
 
-    // 重置命令缓冲�?
+    // 重置命令缓冲区
     vkResetCommandBuffer(frame.commandBuffer, 0);
 
-    // 开始录制命�?
+    // 开始录制命令
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -92,7 +92,7 @@ uint32_t FrameResources::beginFrame() {
         throw std::runtime_error("Failed to begin recording command buffer!");
     }
 
-    // 更新帧计�?
+    // 更新帧计数
     frame.frameNumber = m_totalFrameCount;
 
     return m_currentFrame;
@@ -103,12 +103,12 @@ void FrameResources::endFrame() {
 
     FrameData& frame = m_frames[m_currentFrame];
 
-    // 结束命令缓冲区录�?
+    // 结束命令缓冲区录制
     if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("Failed to record command buffer!");
     }
 
-    // 移动到下一�?
+    // 移动到下一帧
     m_currentFrame = (m_currentFrame + 1) % m_framesInFlight;
     m_totalFrameCount++;
 }
@@ -142,7 +142,7 @@ void FrameResources::waitAllFrames() {
 
     VkDevice device = m_device->getDevice();
     
-    // 等待所有帧�?Fence
+    // 等待所有帧的Fence
     std::vector<VkFence> fences;
     fences.reserve(m_framesInFlight);
     
@@ -159,10 +159,10 @@ void FrameResources::cleanup() {
 
     VkDevice device = m_device->getDevice();
 
-    // 等待所有操作完�?
+    // 等待所有操作完成
     vkDeviceWaitIdle(device);
 
-    // 销毁同步对�?
+    // 销毁同步对象
     for (auto& frame : m_frames) {
         if (frame.imageAvailableSemaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(device, frame.imageAvailableSemaphore, nullptr);
@@ -178,7 +178,7 @@ void FrameResources::cleanup() {
         }
     }
 
-    // 命令缓冲区会随命令池销毁而自动释�?
+    // 命令缓冲区会随命令池销毁而自动释放
     // 如果创建了独立的命令池，在这里销毁它
 
     std::cout << "[FrameResources] Cleaned up\n";

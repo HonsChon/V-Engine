@@ -14,8 +14,8 @@ class GBufferPass;
 /**
  * LightingPass - 延迟渲染光照阶段
  * 
- * 使用 G-Buffer 中的几何信息进行光照计算�?
- * 渲染一个全屏四边形，在片段着色器中完成所有光照运算�?
+ * 使用 G-Buffer 中的几何信息进行光照计算：
+ * 渲染一个全屏四边形，在片段着色器中完成所有光照运算。
  */
 class LightingPass : public RenderPassBase {
 public:
@@ -24,7 +24,7 @@ public:
         alignas(16) glm::vec4 viewPos;      // 相机位置
         alignas(16) glm::vec4 lightPos;     // 光源位置
         alignas(16) glm::vec4 lightColor;   // 光源颜色 + 强度
-        alignas(16) glm::vec4 ambientColor; // 环境光颜�?+ 强度
+        alignas(16) glm::vec4 ambientColor; // 环境光颜色+ 强度
         alignas(16) glm::vec4 screenSize;   // 屏幕尺寸
     };
 
@@ -45,16 +45,16 @@ public:
                         const glm::vec3& lightPos, const glm::vec3& lightColor,
                         float lightIntensity = 1.0f);
 
-    // 设置环境�?
+    // 设置环境光
     void setAmbientLight(const glm::vec3& color, float intensity = 0.1f);
 
-    // 录制渲染命令（渲染全屏四边形�?
+    // 录制渲染命令（渲染全屏四边形：
     void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) override;
 
     // 渲染（简化接口）
     void render(VkCommandBuffer cmd, uint32_t frameIndex);
 
-    // 获取�?
+    // 获取器
     VkPipeline getPipeline() const { return pipeline; }
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
 
@@ -77,7 +77,7 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
 
-    // 描述�?
+    // 描述符
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets = {};
@@ -87,13 +87,13 @@ private:
     std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniformBuffersMemory = {};
     std::array<void*, MAX_FRAMES_IN_FLIGHT> uniformBuffersMapped = {};
 
-    // 全屏四边�?
+    // 全屏四边形
     VkBuffer quadVertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory quadVertexMemory = VK_NULL_HANDLE;
     VkBuffer quadIndexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory quadIndexMemory = VK_NULL_HANDLE;
 
-    // 缓存�?G-Buffer 视图
+    // 缓存的G-Buffer 视图
     VkImageView cachedPositionView = VK_NULL_HANDLE;
     VkImageView cachedNormalView = VK_NULL_HANDLE;
     VkImageView cachedAlbedoView = VK_NULL_HANDLE;

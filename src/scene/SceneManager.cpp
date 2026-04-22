@@ -24,7 +24,7 @@ std::shared_ptr<Scene> SceneManager::createScene(const std::string& name) {
     auto scene = std::make_shared<Scene>(name);
     m_scenes[name] = scene;
     
-    // 如果没有活动场景，将新场景设为活动场�?
+    // 如果没有活动场景，将新场景设为活动场景
     if (!m_activeScene) {
         setActiveScene(scene);
     }
@@ -35,14 +35,14 @@ std::shared_ptr<Scene> SceneManager::createScene(const std::string& name) {
 void SceneManager::setActiveScene(std::shared_ptr<Scene> scene) {
     if (m_activeScene == scene) return;
     
-    // 停止旧场�?
+    // 停止旧场景
     if (m_activeScene && m_activeScene->isRunning()) {
         m_activeScene->onStop();
     }
     
     m_activeScene = scene;
     
-    // 通知监听�?
+    // 通知监听器
     notifySceneChange();
 }
 
@@ -73,7 +73,7 @@ void SceneManager::unloadScene(const std::string& name) {
     
     m_scenes.erase(it);
     
-    // 如果还有其他场景，选择一个作为活动场�?
+    // 如果还有其他场景，选择一个作为活动场景
     if (!m_activeScene && !m_scenes.empty()) {
         setActiveScene(m_scenes.begin()->second);
     }
@@ -108,7 +108,7 @@ void SceneManager::switchToScene(const std::string& name, bool async) {
     
     if (async) {
         // TODO: 实现异步加载
-        // 这里需要使用线程池或其他异步机�?
+        // 这里需要使用线程池或其他异步机制
         std::cerr << "Async scene loading not implemented yet!" << std::endl;
     }
     
@@ -116,14 +116,14 @@ void SceneManager::switchToScene(const std::string& name, bool async) {
 }
 
 std::shared_ptr<Scene> SceneManager::loadScene(const std::string& filepath) {
-    // TODO: 实现从文件加载场�?
+    // TODO: 实现从文件加载场景
     // 这里需要场景序列化系统
     std::cerr << "Scene loading from file not implemented yet!" << std::endl;
     return nullptr;
 }
 
 bool SceneManager::saveScene(std::shared_ptr<Scene> scene, const std::string& filepath) {
-    // TODO: 实现保存场景到文�?
+    // TODO: 实现保存场景到文件
     // 这里需要场景序列化系统
     std::cerr << "Scene saving to file not implemented yet!" << std::endl;
     return false;

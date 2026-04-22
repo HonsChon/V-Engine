@@ -10,7 +10,7 @@ class Scene;
 class Entity;
 
 /**
- * @brief 选择管理�?- 管理场景中实体的选中状�?
+ * @brief 选择管理器 - 管理场景中实体的选中状态
  */
 class SelectionManager {
 public:
@@ -21,7 +21,7 @@ public:
      */
     static SelectionManager& getInstance();
 
-    // 禁止复制和移�?
+    // 禁止复制和移动
     SelectionManager(const SelectionManager&) = delete;
     SelectionManager& operator=(const SelectionManager&) = delete;
 
@@ -31,7 +31,7 @@ public:
 
     /**
      * @brief 选中实体
-     * @param entity 要选中的实�?
+     * @param entity 要选中的实体
      */
     void select(entt::entity entity);
 
@@ -48,7 +48,7 @@ public:
     void removeFromSelection(entt::entity entity);
 
     /**
-     * @brief 切换选中状�?
+     * @brief 切换选中状态
      * @param entity 实体
      */
     void toggleSelection(entt::entity entity);
@@ -59,7 +59,7 @@ public:
     void clearSelection();
 
     /**
-     * @brief 全�?
+     * @brief 全选
      * @param scene 场景
      */
     void selectAll(Scene* scene);
@@ -74,7 +74,7 @@ public:
     entt::entity getSelectedEntity() const;
 
     /**
-     * @brief 获取所有选中的实�?
+     * @brief 获取所有选中的实体
      */
     const std::vector<entt::entity>& getSelectedEntities() const { return m_selectedEntities; }
 
@@ -84,7 +84,7 @@ public:
     bool isSelected(entt::entity entity) const;
 
     /**
-     * @brief 是否有选中的实�?
+     * @brief 是否有选中的实体
      */
     bool hasSelection() const { return !m_selectedEntities.empty(); }
 
@@ -107,12 +107,12 @@ public:
     // ============================================================
 
     /**
-     * @brief 设置关联的场�?
+     * @brief 设置关联的场景
      */
     void setScene(Scene* scene) { m_scene = scene; }
 
     /**
-     * @brief 获取关联的场�?
+     * @brief 获取关联的场景
      */
     Scene* getScene() const { return m_scene; }
 

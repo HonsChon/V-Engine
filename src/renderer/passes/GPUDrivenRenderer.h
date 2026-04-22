@@ -8,10 +8,10 @@ class VulkanDevice;
 class Camera;
 
 /**
- * GPUDrivenRenderer - GPU 驱动渲染管理�?
+ * GPUDrivenRenderer - GPU 驱动渲染管理器
  * 
- * 整合所�?GPU Culling �?Indirect Drawing 功能�?
- * 这是 Nanite 风格渲染的核心入口�?
+ * 整合所有GPU Culling 和Indirect Drawing 功能。
+ * 这是 Nanite 风格渲染的核心入口。
  */
 class GPUDrivenRenderer {
 public:
@@ -19,7 +19,7 @@ public:
         uint32_t maxInstances = 100000;      // 最大实例数
         bool enableFrustumCulling = true;    // 启用视锥剔除
         bool enableOcclusionCulling = false; // 启用遮挡剔除（后续实现）
-        bool enableLODSelection = true;      // 启用 LOD 选择（已实现�?
+        bool enableLODSelection = true;      // 启用 LOD 选择（已实现：
     };
 
     struct Statistics {
@@ -34,7 +34,7 @@ public:
     ~GPUDrivenRenderer();
 
     /**
-     * 初始化所�?Pass
+     * 初始化所有Pass
      */
     void init();
 
@@ -56,23 +56,23 @@ public:
     void executeCulling(VkCommandBuffer commandBuffer);
 
     /**
-     * 获取间接绘制缓冲�?
+     * 获取间接绘制缓冲区
      */
     VkBuffer getIndirectDrawBuffer() const;
 
     /**
-     * 获取可见实例索引缓冲�?
+     * 获取可见实例索引缓冲区
      */
     VkBuffer getVisibleIndicesBuffer() const;
 
     /**
-     * 获取可见物体数量（需�?GPU->CPU 回读�?
+     * 获取可见物体数量（需要GPU->CPU 回读：
      */
     uint32_t getVisibleCount() const;
 
     /**
-     * 获取可见实体索引列表（方案B：GPU->CPU 回读压缩索引�?
-     * @return 可见实体的原始索引列�?
+     * 获取可见实体索引列表（方案B：GPU->CPU 回读压缩索引：
+     * @return 可见实体的原始索引列表
      */
     const std::vector<uint32_t>& getVisibleIndices();
 

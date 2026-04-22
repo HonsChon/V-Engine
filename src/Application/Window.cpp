@@ -10,13 +10,13 @@
 Window::Window(const Config& config) 
     : m_width(config.width), m_height(config.height) {
     
-    // 初始�?GLFW（如果还没有初始化）
+    // 初始化 GLFW（如果还没有初始化）
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW");
     }
 
     // 配置窗口
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // 不使�?OpenGL
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // 不使用 OpenGL
     glfwWindowHint(GLFW_RESIZABLE, config.resizable ? GLFW_TRUE : GLFW_FALSE);
 
     // 创建窗口
@@ -104,7 +104,7 @@ void Window::setCursorMode(int mode) {
     glfwSetInputMode(m_window, GLFW_CURSOR, mode);
 }
 
-// ========== 静态回调实�?==========
+// ========== 静态回调实现 ==========
 
 void Window::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
     auto* self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));

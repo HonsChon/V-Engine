@@ -17,14 +17,14 @@ SSRPass::SSRPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t 
     
     passName = "SSR Pass";
     
-    // 初始化默认参�?
+    // 初始化默认参数
     params.maxDistance = 50.0f;
     params.resolution = 1.0f;
-    params.thickness = 0.01f;     // 线性深度空间的厚度阈值（世界单位�?
+    params.thickness = 0.01f;     // 线性深度空间的厚度阈值（世界单位：
     params.maxSteps = 64.0f;
     params.screenSize = glm::vec4(width, height, 1.0f / width, 1.0f / height);
-    params.nearPlane = 0.1f;      // 默认近平�?
-    params.farPlane = 100.0f;     // 默认远平�?
+    params.nearPlane = 0.1f;      // 默认近平面
+    params.farPlane = 100.0f;     // 默认远平面
     
     createOutputImage();
     createRenderPass();
@@ -178,7 +178,7 @@ void SSRPass::createOutputImage() {
         throw std::runtime_error("Failed to create SSR output image view!");
     }
     
-    // 创建采样�?
+    // 创建采样器
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -366,7 +366,7 @@ void SSRPass::createDescriptorSets() {
         throw std::runtime_error("Failed to allocate SSR descriptor sets!");
     }
     
-    // 注意：描述符集的实际纹理绑定将在 execute() 时更�?
+    // 注意：描述符集的实际纹理绑定将在 execute() 时更新
 }
 
 void SSRPass::createPipeline() {
@@ -391,7 +391,7 @@ void SSRPass::createPipeline() {
     
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
     
-    // 顶点输入 - 全屏三角形不需要顶点输�?
+    // 顶点输入 - 全屏三角形不需要顶点输入
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 0;
@@ -575,7 +575,7 @@ void SSRPass::execute(VkCommandBuffer cmd, GBufferPass* gbuffer,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
                             &descriptorSets[frameIndex], 0, nullptr);
     
-    // 绘制全屏三角�?
+    // 绘制全屏三角形
     vkCmdDraw(cmd, 3, 1, 0, 0);
     
     vkCmdEndRenderPass(cmd);

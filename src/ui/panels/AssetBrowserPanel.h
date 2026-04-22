@@ -7,9 +7,9 @@
 #include <functional>
 
 /**
- * AssetBrowserPanel - 资源浏览器面�?
+ * AssetBrowserPanel - 资源浏览器面板
  * 
- * 浏览项目的资源文件（纹理、模型等），支持预览和拖拽加载�?
+ * 浏览项目的资源文件（纹理、模型等），支持预览和拖拽加载。
  */
 class AssetBrowserPanel {
 public:
@@ -24,7 +24,7 @@ public:
         Folder
     };
 
-    // 资源�?
+    // 资源项
     struct AssetItem {
         std::string name;
         std::string path;
@@ -41,7 +41,7 @@ public:
     void render();
 
     /**
-     * 设置资源根目�?
+     * 设置资源根目录
      */
     void setRootPath(const std::string& path);
 

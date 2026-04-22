@@ -10,7 +10,7 @@
 using namespace VulkanEngine;
 
 SceneHierarchyPanel::SceneHierarchyPanel() {
-    // 添加一些示例对象用于测�?
+    // 添加一些示例对象用于测试
     addObject(0, "Main Camera", "Camera");
     addObject(1, "Directional Light", "Light");
     addObject(2, "Sphere", "Mesh");
@@ -20,7 +20,7 @@ SceneHierarchyPanel::SceneHierarchyPanel() {
 void SceneHierarchyPanel::render() {
     ImGui::Begin("Scene Hierarchy", nullptr, ImGuiWindowFlags_NoCollapse);
 
-    // 搜索�?
+    // 搜索框
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##Search", "Search objects...", searchFilter, sizeof(searchFilter));
 
@@ -33,7 +33,7 @@ void SceneHierarchyPanel::render() {
         } else {
             // 旧系统的对象列表
             for (const auto& obj : sceneObjects) {
-                // 如果有搜索过滤，检查名称是否匹�?
+                // 如果有搜索过滤，检查名称是否匹配
                 if (strlen(searchFilter) > 0) {
                     std::string lowerName = obj.name;
                     std::string lowerFilter = searchFilter;
@@ -58,7 +58,7 @@ void SceneHierarchyPanel::setScene(VulkanEngine::Scene* scene) {
     m_scene = scene;
     m_useECSMode = (scene != nullptr);
     
-    // 同步选择管理�?
+    // 同步选择管理器
     if (scene) {
         SelectionManager::getInstance().setScene(scene);
     }
@@ -78,7 +78,7 @@ void SceneHierarchyPanel::renderECSHierarchy() {
     auto view = registry.view<TagComponent>();
     
     for (auto entity : view) {
-        // 检查是否有父级，如果有则跳过（将在父级的子树中渲染�?
+        // 检查是否有父级，如果有则跳过（将在父级的子树中渲染：
         if (registry.all_of<RelationshipComponent>(entity)) {
             auto& relationship = registry.get<RelationshipComponent>(entity);
             if (relationship.parent != entt::null) {
@@ -102,7 +102,7 @@ void SceneHierarchyPanel::renderECSHierarchy() {
         renderEntityNode(entity);
     }
 
-    // 右键菜单 - 在空白区�?
+    // 右键菜单 - 在空白区域
     if (ImGui::BeginPopupContextWindow("HierarchyContextMenu", ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::MenuItem("Create Empty Entity")) {
             auto newEntity = m_scene->createEntity("Empty Entity");
@@ -138,7 +138,7 @@ void SceneHierarchyPanel::renderEntityNode(entt::entity entity) {
         name = registry.get<TagComponent>(entity).tag;
     }
 
-    // 检查是否有子节�?
+    // 检查是否有子节点
     bool hasChildren = false;
     entt::entity firstChild = entt::null;
     if (registry.all_of<RelationshipComponent>(entity)) {
@@ -147,7 +147,7 @@ void SceneHierarchyPanel::renderEntityNode(entt::entity entity) {
         firstChild = relationship.firstChild;
     }
 
-    // 设置树节点标�?
+    // 设置树节点标志
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | 
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -235,13 +235,13 @@ void SceneHierarchyPanel::renderEntityNode(entt::entity entity) {
         ImGui::EndDragDropTarget();
     }
 
-    // 递归渲染子节�?
+    // 递归渲染子节点
     if (nodeOpen && hasChildren) {
         entt::entity child = firstChild;
         while (child != entt::null) {
             renderEntityNode(child);
             
-            // 获取下一个兄弟节�?
+            // 获取下一个兄弟节点
             if (registry.all_of<RelationshipComponent>(child)) {
                 child = registry.get<RelationshipComponent>(child).nextSibling;
             } else {
@@ -257,12 +257,12 @@ void SceneHierarchyPanel::renderObjectNode(const SceneObject& obj, int depth) {
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
 
-    // 如果没有子对象，显示为叶子节�?
+    // 如果没有子对象，显示为叶子节点
     if (obj.childrenIds.empty()) {
         flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     }
 
-    // 如果是选中的对�?
+    // 如果是选中的对象
     if (selectedObjectId == obj.id) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
@@ -284,7 +284,7 @@ void SceneHierarchyPanel::renderObjectNode(const SceneObject& obj, int depth) {
         ImGui::Indent(depth * 10.0f);
     }
 
-    // 设置可见性颜�?
+    // 设置可见性颜色
     if (!obj.visible) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
     }
@@ -319,12 +319,12 @@ void SceneHierarchyPanel::renderObjectNode(const SceneObject& obj, int depth) {
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Rename")) {
-            // TODO: 重命�?
+            // TODO: 重命合
         }
         ImGui::EndPopup();
     }
 
-    // 递归渲染子对�?
+    // 递归渲染子对象
     if (nodeOpen && !obj.childrenIds.empty()) {
         // TODO: 根据 childrenIds 找到子对象并渲染
         ImGui::TreePop();

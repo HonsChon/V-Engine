@@ -49,7 +49,7 @@ void GBufferPass::resize(uint32_t newWidth, uint32_t newHeight) {
 void GBufferPass::cleanup() {
     VkDevice dev = device->getDevice();
     
-    // 销�?Uniform Buffers
+    // 销毁Uniform Buffers
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
             vkDestroyBuffer(dev, uniformBuffers[i], nullptr);
@@ -62,7 +62,7 @@ void GBufferPass::cleanup() {
         uniformBuffersMapped[i] = nullptr;
     }
     
-    // 清空材质描述符缓�?
+    // 清空材质描述符缓存
     materialDescriptorCache.clear();
     
     // 销毁描述符池（描述符集会自动释放）
@@ -74,7 +74,7 @@ void GBufferPass::cleanup() {
         }
     }
     
-    // 销�?Pipeline
+    // 销毁Pipeline
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(dev, pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;
@@ -137,7 +137,7 @@ void GBufferPass::createAttachments() {
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, NORMAL);
     
-    // Albedo - 反照�?+ 金属�?
+    // Albedo - 反照�+ 金属�
     createImage(attachmentFormats[ALBEDO],
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, ALBEDO);
@@ -367,7 +367,7 @@ void GBufferPass::beginRenderPass(VkCommandBuffer cmd) {
     
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     
-    // 设置视口和裁�?
+    // 设置视口和裁�
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -390,16 +390,16 @@ void GBufferPass::endRenderPass(VkCommandBuffer cmd) {
 std::array<VkClearValue, 4> GBufferPass::getClearValues() const {
     std::array<VkClearValue, 4> clearValues{};
     
-    // Position - 清除为黑色（远处�?
+    // Position - 清除为黑色（远处�
     clearValues[0].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Normal - 清除为黑�?
+    // Normal - 清除为黑�
     clearValues[1].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Albedo - 清除为黑�?
+    // Albedo - 清除为黑�
     clearValues[2].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Depth - 清除为最�?
+    // Depth - 清除为最�
     clearValues[3].depthStencil = { 1.0f, 0 };
     
     return clearValues;
@@ -559,7 +559,7 @@ void GBufferPass::createPipeline() {
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
     
-    // 光栅�?
+    // 光栅�
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -585,7 +585,7 @@ void GBufferPass::createPipeline() {
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
     
-    // 颜色混合 - 3个颜色附件，无混�?
+    // 颜色混合 - 3个颜色附件，无混�
     std::array<VkPipelineColorBlendAttachmentState, 3> colorBlendAttachments{};
     for (auto& attachment : colorBlendAttachments) {
         attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
@@ -599,7 +599,7 @@ void GBufferPass::createPipeline() {
     colorBlending.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
     colorBlending.pAttachments = colorBlendAttachments.data();
     
-    // 动态状�?
+    // 动态状�
     std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -614,9 +614,9 @@ void GBufferPass::createPipeline() {
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstantData);  // 2 �?mat4 = 128 bytes
+    pushConstantRange.size = sizeof(PushConstantData);  // 2 与mat4 = 128 bytes
     
-    // Pipeline 布局 - 使用双描述符�?
+    // Pipeline 布局 - 使用双描述符集
     std::array<VkDescriptorSetLayout, 2> setLayouts = { globalSetLayout, materialSetLayout };
     
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
@@ -694,20 +694,20 @@ std::vector<char> GBufferPass::readFile(const std::string& filename) {
 // ============================================
 
 void GBufferPass::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // 使用当前存储�?context 录制命令
+    // 使用当前存储�context 录制命令
     recordCommands(cmd, currentContext);
 }
 
 void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& context) {
     if (!enabled) return;
     
-    // 开�?G-Buffer 渲染通道
+    // 开�G-Buffer 渲染通道
     beginRenderPass(cmd);
     
     // 绑定 G-Buffer Pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     
-    // 绑定描述符集（如果已设置�?
+    // 绑定描述符集（如果已设置�
     if (currentDescriptorSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
                                pipelineLayout, 0, 1, 
@@ -731,7 +731,7 @@ void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& conte
 }
 
 // ============================================
-// 描述符集创建和更�?
+// 描述符集创建和更�
 // ============================================
 
 void GBufferPass::createUniformBuffers() {
@@ -776,10 +776,10 @@ void GBufferPass::createUniformBuffers() {
 void GBufferPass::createDescriptorSets() {
     VkDevice dev = device->getDevice();
     
-    // 先创�?Uniform Buffers
+    // 先创建Uniform Buffers
     createUniformBuffers();
     
-    // 如果已存在描述符池，先销�?
+    // 如果已存在描述符池，先销毁
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
@@ -790,13 +790,13 @@ void GBufferPass::createDescriptorSets() {
     }
     
     // 创建描述符池
-    // Set 0: MAX_FRAMES_IN_FLIGHT �?UBO 描述符集
-    // Set 1: 每个材质需�?MAX_FRAMES_IN_FLIGHT 个描述符集，每个�?3 个纹�?
+    // Set 0: MAX_FRAMES_IN_FLIGHT 与UBO 描述符集
+    // Set 1: 每个材质需要MAX_FRAMES_IN_FLIGHT 个描述符集，每个有3 个纹理
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = MAX_MATERIALS * MAX_FRAMES_IN_FLIGHT * 3; // 每材�?个纹�?
+    poolSizes[1].descriptorCount = MAX_MATERIALS * MAX_FRAMES_IN_FLIGHT * 3; // 每材质个纹理
     
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -850,7 +850,7 @@ void GBufferPass::updateUniformBuffer(uint32_t frameIndex, const UniformBufferOb
 }
 
 // ============================================
-// Pipeline 绑定和绘制方�?
+// Pipeline 绑定和绘制方法
 // ============================================
 
 void GBufferPass::bindPipeline(VkCommandBuffer cmd) const {
@@ -875,7 +875,7 @@ void GBufferPass::pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model) {
 }
 
 // ============================================
-// 材质描述符管�?
+// 材质描述符管理
 // ============================================
 
 GBufferPass::MaterialDescriptor* GBufferPass::allocateMaterialDescriptor(const std::string& materialId) {

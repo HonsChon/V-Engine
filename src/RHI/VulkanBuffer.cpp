@@ -7,7 +7,7 @@ VulkanBuffer::VulkanBuffer(std::shared_ptr<VulkanDevice> device, VkDeviceSize si
                           VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) 
     : device(device), size(size), memoryProperties(properties) {
     
-    // 创建缓冲�?
+    // 创建缓冲区
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -18,7 +18,7 @@ VulkanBuffer::VulkanBuffer(std::shared_ptr<VulkanDevice> device, VkDeviceSize si
         throw std::runtime_error("failed to create buffer!");
     }
 
-    // 获取内存需�?
+    // 获取内存需求
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(device->getDevice(), buffer, &memRequirements);
 
@@ -77,9 +77,9 @@ void VulkanBuffer::copyFrom(const void* src, VkDeviceSize copySize) {
 }
 
 void VulkanBuffer::uploadData(const void* data, VkDeviceSize dataSize) {
-    // 根据内存属性决定上传策�?
+    // 根据内存属性决定上传策略
     if (isHostVisible()) {
-        // HOST_VISIBLE: 直接映射并复�?
+        // HOST_VISIBLE: 直接映射并复制
         if (vkMapMemory(device->getDevice(), memory, 0, dataSize, 0, &mapped) != VK_SUCCESS) {
             throw std::runtime_error("Failed to map HOST_VISIBLE buffer memory!");
         }
@@ -120,13 +120,13 @@ void VulkanBuffer::uploadData(const void* data, VkDeviceSize dataSize) {
         
         vkBindBufferMemory(device->getDevice(), stagingBuffer, stagingMemory, 0);
         
-        // 复制数据�?staging buffer
+        // 复制数据到 staging buffer
         void* mappedData;
         vkMapMemory(device->getDevice(), stagingMemory, 0, dataSize, 0, &mappedData);
         memcpy(mappedData, data, dataSize);
         vkUnmapMemory(device->getDevice(), stagingMemory);
         
-        // 使用命令缓冲区复制到目标缓冲�?
+        // 使用命令缓冲区复制到目标缓冲区
         VkCommandBuffer commandBuffer = device->beginSingleTimeCommands();
         
         VkBufferCopy copyRegion{};
