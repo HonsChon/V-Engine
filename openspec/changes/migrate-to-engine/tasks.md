@@ -71,5 +71,5 @@
 - [ ] 10.4 验证 GPU Culling (6)、Nanite (7/8/9) 快捷键正常
 - [ ] 10.5 验证 OBJ 拖放加载正常
 - [ ] 10.6 验证窗口 resize 正常
-- [ ] 10.7 删除 `src/renderer/VulkanRenderer.h` 和 `src/renderer/VulkanRenderer.cpp`
-- [ ] 10.8 最终编译确认无报错
+- [x] 10.7 删除 `src/renderer/VulkanRenderer.h` 和 `src/renderer/VulkanRenderer.cpp`，并从 CMakeLists.txt 移除引用
+- [x] 10.8 最终编译确认无报错

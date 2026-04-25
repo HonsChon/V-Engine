@@ -1,4 +1,65 @@
+CMake is re-running because F:/图形学习/PBR/V-Engine/build/CMakeFiles/generate.stamp is out-of-date.
+  the file 'F:/图形学习/PBR/V-Engine/CMakeLists.txt'
+  is newer than 'F:/图形学习/PBR/V-Engine/build/CMakeFiles/generate.stamp.depend'
+  result='-1'
+-- Using vcpkg toolchain: D:/vcpkg-master/scripts/buildsystems/vcpkg.cmake
+-- Vcpkg triplet: x64-windows
+-- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+-- Found Vulkan: C:/VulkanSDK/1.4.313.1/Include
+-- Vulkan Libraries: C:/VulkanSDK/1.4.313.1/Lib/vulkan-1.lib
+-- Found EnTT via vcpkg
+-- Found glslc: C:/VulkanSDK/1.4.313.1/Bin/glslc.exe
+--   Shader: simple.vert -> simple_vert.spv
+--   Shader: simple.frag -> simple_frag.spv
+--   Shader: mesh.vert -> mesh_vert.spv
+--   Shader: mesh.frag -> mesh_frag.spv
+--   Shader: pbr.vert -> pbr_vert.spv
+--   Shader: pbr.frag -> pbr_frag.spv
+--   Shader: simple_mesh.vert -> simple_mesh_vert.spv
+--   Shader: simple_mesh.frag -> simple_mesh_frag.spv
+--   Shader: gbuffer.vert -> gbuffer_vert.spv
+--   Shader: gbuffer.frag -> gbuffer_frag.spv
+--   Shader: ssr.vert -> ssr_vert.spv
+--   Shader: ssr.frag -> ssr_frag.spv
+--   Shader: water.vert -> water_vert.spv
+--   Shader: water.frag -> water_frag.spv
+--   Shader: deferred_lighting.vert -> deferred_lighting_vert.spv
+--   Shader: deferred_lighting.frag -> deferred_lighting_frag.spv
+--   SSAO Shader: ssao/ssao_deinterleave.comp -> ssao_deinterleave_comp.spv
+--   SSAO Shader: ssao/ssao.vert -> ssao_vert.spv
+--   SSAO Shader: ssao/ssao.frag -> ssao_frag.spv
+--   SSAO Shader: ssao/ssao_reinterleave.comp -> ssao_reinterleave_comp.spv
+--   SSAO Shader: ssao/ssao_blur.vert -> ssao_blur_vert.spv
+--   SSAO Shader: ssao/ssao_blur.frag -> ssao_blur_frag.spv
+--   Compute Shader: culling/frustum_culling.comp -> culling/frustum_culling.comp.spv
+--   Compute Shader: nanite/cluster_culling.comp -> nanite/cluster_culling.comp.spv
+-- 
+-- === VulkanPBR Configuration ===
+-- CMAKE_BUILD_TYPE: 
+-- CMAKE_CXX_COMPILER: D:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+-- Output directory: F:/图形学习/PBR/V-Engine/build/bin
+-- 
+-- Project Structure:
+--   src/Application/ - Engine lifecycle, Window, Input
+--   src/RHI/         - Vulkan abstraction layer
+--   src/Core/        - Utilities (no render dependencies)
+--   src/renderer/    - SceneRenderer
+--   src/renderer/passes/ - Render passes (GBuffer, SSR, SSAO, etc.)
+--   src/World/       - Camera, Scene objects
+--   src/resources/   - Mesh, Material
+--   src/scene/       - ECS scene management
+--   src/renderer/nanite/ - Virtual geometry system
+--   src/ui/          - Editor UI panels
+-- ===============================
+-- 
+-- Configuring done (0.1s)
+-- Generating done (0.1s)
+-- Build files have been written to: F:/图形学习/PBR/V-Engine/build
 适用于 .NET Framework MSBuild 版本 17.14.40+3e7442088
 
+  1>Checking Build System
+  Building Custom Rule F:/图形学习/PBR/V-Engine/CMakeLists.txt
+  Building Custom Rule F:/图形学习/PBR/V-Engine/CMakeLists.txt
   VulkanPBR.vcxproj -> F:\图形学习\PBR\V-Engine\build\bin\VulkanPBR.exe
   	Copying assets to output directory
+  Building Custom Rule F:/图形学习/PBR/V-Engine/CMakeLists.txt

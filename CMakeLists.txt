@@ -201,12 +201,10 @@ set(PASSES_HEADERS
 
 # Renderer - 渲染器
 set(RENDERER_SOURCES
-    src/renderer/VulkanRenderer.cpp
     src/renderer/SceneRenderer.cpp
 )
 
 set(RENDERER_HEADERS
-    src/renderer/VulkanRenderer.h
     src/renderer/SceneRenderer.h
 )
 
@@ -620,7 +618,7 @@ message(STATUS "Project Structure:")
 message(STATUS "  src/Application/ - Engine lifecycle, Window, Input")
 message(STATUS "  src/RHI/         - Vulkan abstraction layer")
 message(STATUS "  src/Core/        - Utilities (no render dependencies)")
-message(STATUS "  src/renderer/    - SceneRenderer, VulkanRenderer")
+message(STATUS "  src/renderer/    - SceneRenderer")
 message(STATUS "  src/renderer/passes/ - Render passes (GBuffer, SSR, SSAO, etc.)")
 message(STATUS "  src/World/       - Camera, Scene objects")
 message(STATUS "  src/resources/   - Mesh, Material")
