@@ -57,10 +57,10 @@ Input::~Input() {
 }
 
 void Input::update(float deltaTime) {
-    // 重置每帧的鼠标增�?
+    // 重置每帧的鼠标增量
     m_mouseDelta = glm::vec2(0.0f);
     
-    // 处理连续按键（如移动�?
+    // 处理连续按键（如移动等
     processKeyboard(deltaTime);
 }
 
@@ -69,9 +69,9 @@ void Input::processKeyboard(float deltaTime) {
 
     GLFWwindow* glfwWindow = m_window->getNativeHandle();
 
-    // 检查是否应该处理相机移动（�?UI 模式时）
+    // 检查是否应该处理相机移动（非UI 模式时）
     if (m_mouseMode == MouseMode::Normal) {
-        // 在正常模式下，只有按住右键才能移动相�?
+        // 在正常模式下，只有按住右键才能移动相机
         // 如果需要其他逻辑，可以在这里修改
     }
 
@@ -110,7 +110,7 @@ void Input::setMouseMode(MouseMode mode) {
             break;
         case MouseMode::Camera:
             glfwSetInputMode(glfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            m_firstMouse = true; // 重置鼠标位置，避免跳�?
+            m_firstMouse = true; // 重置鼠标位置，避免跳动
             break;
         case MouseMode::Picking:
             glfwSetInputMode(glfwWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
@@ -150,7 +150,7 @@ void Input::onKey(int key, int scancode, int action, int mods) {
 }
 
 void Input::processKeyAction(int key, int action, int mods) {
-    // 只处理按下事�?
+    // 只处理按下事件
     if (action != GLFW_PRESS) return;
 
     // 查找键位映射
@@ -210,7 +210,7 @@ void Input::onCursorPos(double xpos, double ypos) {
     m_mouseDelta.x = xoffset;
     m_mouseDelta.y = yoffset;
 
-    // 只在相机模式下处理鼠标移�?
+    // 只在相机模式下处理鼠标移动
     if (m_mouseMode == MouseMode::Camera) {
         xoffset *= m_mouseSensitivity;
         yoffset *= m_mouseSensitivity;

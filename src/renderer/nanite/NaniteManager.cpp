@@ -1,5 +1,5 @@
 /**
- * NaniteManager.cpp - Nanite 系统管理器实�?
+ * NaniteManager.cpp - Nanite 系统管理器实现
  */
 
 #include "NaniteManager.h"
@@ -13,7 +13,7 @@
 namespace Nanite {
 
 // ============================================================================
-// 构�?析构
+// 构建析构
 // ============================================================================
 
 NaniteManager::NaniteManager(std::shared_ptr<VulkanDevice> device)
@@ -36,7 +36,7 @@ void NaniteManager::initialize() {
     m_cullingPass = std::make_unique<ClusterCullingPass>(m_device);
     m_cullingPass->init();
     
-    // 创建 GPU 缓冲区将�?uploadToGPU 时进�?
+    // 创建 GPU 缓冲区将在uploadToGPU 时进行
     m_initialized = true;
 }
 
@@ -54,7 +54,7 @@ void NaniteManager::cleanup() {
         m_cullingPass.reset();
     }
     
-    // 清理缓冲�?
+    // 清理缓冲区
     m_clusterDataBuffer.reset();
     m_transformBuffer.reset();
     m_uniformBuffer.reset();
@@ -77,7 +77,7 @@ std::shared_ptr<ClusterizedMesh> NaniteManager::processMesh(
     const InputMesh& mesh, 
     const std::string& meshName) 
 {
-    // 检查缓�?
+    // 检查缓存
     auto it = m_meshCache.find(meshName);
     if (it != m_meshCache.end()) {
         std::cout << "[Nanite] Using cached mesh: " << meshName << std::endl;
@@ -89,7 +89,7 @@ std::shared_ptr<ClusterizedMesh> NaniteManager::processMesh(
     
     auto startTime = std::chrono::high_resolution_clock::now();
     
-    // Cluster 化处�?
+    // Cluster 化处理
     auto uniqueMesh = m_clusterizer->clusterize(mesh);
     auto clusterizedMesh = std::shared_ptr<ClusterizedMesh>(uniqueMesh.release());
     
@@ -111,7 +111,7 @@ std::shared_ptr<ClusterizedMesh> NaniteManager::processMesh(
         }
     }
     
-    // 缓存并标记需要更�?GPU
+    // 缓存并标记需要更新GPU
     m_meshCache[meshName] = clusterizedMesh;
     m_gpuDataDirty = true;
     
@@ -129,8 +129,8 @@ std::vector<std::string> NaniteManager::getAllMeshNames() const {
     for (const auto& [name, mesh] : m_meshCache) {
         names.push_back(name);
     }
-    // 必须排序！确保与 uploadToGPU() �?buildRenderData() 中的遍历顺序一�?
-    // 否则 GPU culling 返回�?clusterIndex �?CPU 渲染端不匹配
+    // 必须排序！确保与 uploadToGPU() 和buildRenderData() 中的遍历顺序一致
+    // 否则 GPU culling 返回的clusterIndex 与CPU 渲染端不匹配
     std::sort(names.begin(), names.end());
     return names;
 }
@@ -142,13 +142,13 @@ std::vector<std::string> NaniteManager::getAllMeshNames() const {
 void NaniteManager::uploadToGPU() {
     if (!m_gpuDataDirty) return;
     
-    // 收集所�?Cluster 数据
+    // 收集所属Cluster 数据
     // 重要：必须按照确定性顺序（字典序）遍历 mesh
-    // 这与 NaniteDebugPass::buildRenderData() 中的顺序必须一�?
-    // 否则 GPU culling 返回�?clusterIndex �?CPU 端的不匹�?
+    // 这与 NaniteDebugPass::buildRenderData() 中的顺序必须一致
+    // 否则 GPU culling 返回的clusterIndex 与CPU 端的不匹配
     std::vector<GPUClusterData> allClusterData;
     
-    // 先收集所�?mesh 名称并排�?
+    // 先收集所有mesh 名称并排序
     std::vector<std::string> sortedMeshNames;
     sortedMeshNames.reserve(m_meshCache.size());
     for (const auto& [name, mesh] : m_meshCache) {
@@ -345,7 +345,7 @@ void NaniteManager::uploadToGPU() {
         }
     }
     
-    // 创建或更�?Cluster 数据缓冲�?
+    // 创建或更新Cluster 数据缓冲区
     VkDeviceSize clusterBufferSize = sizeof(GPUClusterData) * m_totalClusterCount;
     
     m_clusterDataBuffer = std::make_unique<VulkanBuffer>(
@@ -358,7 +358,7 @@ void NaniteManager::uploadToGPU() {
     // 通过 staging buffer 上传
     m_clusterDataBuffer->uploadData(allClusterData.data(), clusterBufferSize);
     
-    // 创建可见索引缓冲区（最多和�?Cluster 数量一样大�?
+    // 创建可见索引缓冲区（最多和总Cluster 数量一样大）
     VkDeviceSize visibleBufferSize = sizeof(uint32_t) * m_totalClusterCount;
     
     m_visibleIndicesBuffer = std::make_unique<VulkanBuffer>(
@@ -368,7 +368,7 @@ void NaniteManager::uploadToGPU() {
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     
-    // 创建计数器缓冲区（单�?uint32_t�?
+    // 创建计数器缓冲区（单个uint32_t）
     m_counterBuffer = std::make_unique<VulkanBuffer>(
         m_device,
         sizeof(uint32_t),
@@ -376,8 +376,8 @@ void NaniteManager::uploadToGPU() {
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     
-    // 创建 Uniform 缓冲�?
-    // ClusterCullingUniforms 结构大小（参�?cluster_culling.comp�?
+    // 创建 Uniform 缓冲区
+    // ClusterCullingUniforms 结构大小（参考cluster_culling.comp）
     constexpr VkDeviceSize uniformSize = 368; // 6 planes * 16 + viewProj + 其他
     
     m_uniformBuffer = std::make_unique<VulkanBuffer>(
@@ -387,7 +387,7 @@ void NaniteManager::uploadToGPU() {
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     
-    // 创建 readback 缓冲�?
+    // 创建 readback 缓冲区
     m_readbackBuffer = std::make_unique<VulkanBuffer>(
         m_device,
         sizeof(uint32_t) * (m_totalClusterCount + 1), // +1 for counter
@@ -395,7 +395,7 @@ void NaniteManager::uploadToGPU() {
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     
-    // �?cluster buffer 绑定�?culling pass
+    // 将cluster buffer 绑定到culling pass
     if (m_cullingPass) {
         m_cullingPass->setClusterBuffer(m_clusterDataBuffer->getBuffer(), m_totalClusterCount);
         if (m_transformBuffer) {
@@ -412,7 +412,7 @@ void NaniteManager::uploadToGPU() {
 }
 
 void NaniteManager::createGPUBuffers() {
-    // �?uploadToGPU() 处理
+    // 在uploadToGPU() 处理
 }
 
 void NaniteManager::performCulling(
@@ -455,10 +455,10 @@ void NaniteManager::performCulling(
         m_config.screenSpaceErrorThreshold      // w: pixel threshold
     );
     
-    // 更新 culling pass �?uniform
+    // 更新 culling pass 的uniform
     m_cullingPass->updateUniforms(uniforms);
     
-    // 重置计数器和选择状�?
+    // 重置计数器和选择状态
     m_cullingPass->resetCounters(commandBuffer);
     
     // 执行 compute pass，传递帧索引以实现双缓冲同步
@@ -477,8 +477,8 @@ void NaniteManager::updateUniformBuffer(
     glm::vec4 frustumPlanes[6];
     extractFrustumPlanes(viewProj, frustumPlanes);
     
-    // 构建 uniform 数据（需要与 shader 匹配�?
-    // 必须�?cluster_culling.comp 中的 CullingUniforms 完全一�?
+    // 构建 uniform 数据（需要与 shader 匹配）
+    // 必须和cluster_culling.comp 中的 CullingUniforms 完全一致
     struct ClusterCullingUniforms {
         glm::mat4 viewMatrix;        // 64 bytes
         glm::mat4 projMatrix;        // 64 bytes
@@ -511,12 +511,12 @@ void NaniteManager::updateUniformBuffer(
         m_config.screenSpaceErrorThreshold      // w: pixel threshold
     );
     
-    // 使用 copyFrom 直接写入（对�?HOST_VISIBLE 缓冲区）
+    // 使用 copyFrom 直接写入（对于HOST_VISIBLE 缓冲区）
     m_uniformBuffer->copyFrom(&uniforms, sizeof(uniforms));
 }
 
 void NaniteManager::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
-    // �?VP 矩阵提取视锥平面（标准算法）
+    // 从VP 矩阵提取视锥平面（标准算法）
     // Left
     planes[0] = glm::vec4(
         viewProj[0][3] + viewProj[0][0],
@@ -560,7 +560,7 @@ void NaniteManager::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 pl
         viewProj[3][3] - viewProj[3][2]
     );
     
-    // 归一化平�?
+    // 归一化平面
     for (int i = 0; i < 6; i++) {
         float length = glm::length(glm::vec3(planes[i]));
         if (length > 0.0f) {
@@ -570,15 +570,15 @@ void NaniteManager::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 pl
 }
 
 const std::vector<uint32_t>& NaniteManager::getVisibleClusters() {
-    // �?GPU 读取可见 Cluster 列表
-    // 这是一个同步操作，通常只在需�?CPU 端访问时使用
+    // 从GPU 读取可见 Cluster 列表
+    // 这是一个同步操作，通常只在需要CPU 端访问时使用
     
-    // TODO: 实际实现需要复�?counterBuffer �?visibleIndicesBuffer �?readbackBuffer
+    // TODO: 实际实现需要复制counterBuffer 和visibleIndicesBuffer 到readbackBuffer
     // 然后映射读取
     
     m_visibleClustersCPU.clear();
     
-    // 暂时返回空列�?
+    // 暂时返回空列表
     return m_visibleClustersCPU;
 }
 
@@ -595,7 +595,7 @@ uint32_t NaniteManager::getVisibleClusterCount() const {
         // 注意：这需要上一帧的剔除结果已经完成
         return m_cullingPass->getVisibleCount();
     }
-    return m_totalClusterCount; // 没有剔除时返回全�?
+    return m_totalClusterCount; // 没有剔除时返回全部
 }
 
 const std::vector<uint32_t>& NaniteManager::getVisibleClusterIndices() {
@@ -603,7 +603,7 @@ const std::vector<uint32_t>& NaniteManager::getVisibleClusterIndices() {
         return m_cullingPass->getVisibleIndices();
     }
     
-    // 如果没有剔除，返回全部索�?
+    // 如果没有剔除，返回全部索引
     static std::vector<uint32_t> allIndices;
     if (allIndices.size() != m_totalClusterCount) {
         allIndices.resize(m_totalClusterCount);

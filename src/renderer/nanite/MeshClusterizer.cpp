@@ -27,7 +27,7 @@ std::unique_ptr<ClusterizedMesh> MeshClusterizer::clusterize(const InputMesh& in
     
     m_inputMesh = &inputMesh;
     
-    // 步骤 1：构建三角形邻接�?
+    // 步骤 1：构建三角形邻接图
     if (m_progressCallback) {
         m_progressCallback(0.1f, "Building triangle adjacency graph");
     }
@@ -36,19 +36,19 @@ std::unique_ptr<ClusterizedMesh> MeshClusterizer::clusterize(const InputMesh& in
     std::cout << "[MeshClusterizer] Built graph with " << m_triangles.size() 
               << " triangles" << std::endl;
     
-    // 步骤 2：多级图分区（METIS 风格�?
+    // 步骤 2：多级图分区（METIS 风格）
     if (m_progressCallback) {
         m_progressCallback(0.3f, "Multilevel graph partitioning");
     }
     multilevelPartition();
     
-    // 步骤 3：边界优�?
+    // 步骤 3：边界优化
     if (m_progressCallback) {
         m_progressCallback(0.5f, "Optimizing partition boundaries");
     }
     optimizePartitionBoundaries();
     
-    // 步骤 4：生�?Cluster 数据
+    // 步骤 4：生成Cluster 数据
     if (m_progressCallback) {
         m_progressCallback(0.7f, "Generating cluster data");
     }
@@ -61,7 +61,7 @@ std::unique_ptr<ClusterizedMesh> MeshClusterizer::clusterize(const InputMesh& in
     lod0.maxError = 0.0f;
     result->lodLevels.push_back(lod0);
     
-    // 步骤 5：生�?LOD 层级
+    // 步骤 5：生成LOD 层级
     if (m_config.generateLODs && result->clusters.size() > 4) {
         if (m_progressCallback) {
             m_progressCallback(0.85f, "Generating LOD hierarchy");
@@ -83,7 +83,7 @@ std::unique_ptr<ClusterizedMesh> MeshClusterizer::clusterize(const InputMesh& in
 }
 
 // ============================================================================
-// 步骤 1：构建三角形邻接�?
+// 步骤 1：构建三角形邻接图
 // ============================================================================
 
 void MeshClusterizer::buildTriangleGraph(const InputMesh& mesh) {
@@ -136,11 +136,11 @@ void MeshClusterizer::buildTriangleGraph(const InputMesh& mesh) {
     }
     
     // ============ 构建三角形图（仅使用有效三角形）============
-    // 创建原始索引到新索引的映�?
+    // 创建原始索引到新索引的映射
     std::vector<uint32_t> originalToNewIndex(triangleCount, ~0u);
     m_triangles.resize(validTriangleIndices.size());
     
-    // 第一遍：创建三角形节点，建立�?-> 三角形映�?
+    // 第一遍：创建三角形节点，建立顶-> 三角形映射
     for (uint32_t newIdx = 0; newIdx < validTriangleIndices.size(); ++newIdx) {
         uint32_t originalIdx = validTriangleIndices[newIdx];
         originalToNewIndex[originalIdx] = newIdx;
@@ -180,7 +180,7 @@ void MeshClusterizer::buildTriangleGraph(const InputMesh& mesh) {
         m_edgeToTriangles[e2].push_back(newIdx);
     }
     
-    // 第二遍：建立三角形邻接关系和边权�?
+    // 第二遍：建立三角形邻接关系和边权重
     uint32_t validTriCount = static_cast<uint32_t>(m_triangles.size());
     for (uint32_t i = 0; i < validTriCount; ++i) {
         TriangleNode& tri = m_triangles[i];
@@ -204,7 +204,7 @@ void MeshClusterizer::buildTriangleGraph(const InputMesh& mesh) {
             }
         }
         
-        // 计算边权�?
+        // 计算边权重
         tri.neighbors.reserve(neighborSet.size());
         tri.edgeWeights.reserve(neighborSet.size());
         
@@ -220,7 +220,7 @@ float MeshClusterizer::computeEdgeWeight(uint32_t tri1, uint32_t tri2, const Inp
     const TriangleNode& t1 = m_triangles[tri1];
     const TriangleNode& t2 = m_triangles[tri2];
     
-    // 找到共享�?
+    // 找到共享边
     std::vector<uint32_t> sharedVerts;
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
@@ -232,7 +232,7 @@ float MeshClusterizer::computeEdgeWeight(uint32_t tri1, uint32_t tri2, const Inp
     
     float weight = 1.0f;
     
-    // 共享边长度（边越长，权重越高，倾向于保持在同一 Cluster�?
+    // 共享边长度（边越长，权重越高，倾向于保持在同一 Cluster）
     if (sharedVerts.size() >= 2) {
         const glm::vec3& v0 = mesh.positions[sharedVerts[0]];
         const glm::vec3& v1 = mesh.positions[sharedVerts[1]];
@@ -240,13 +240,13 @@ float MeshClusterizer::computeEdgeWeight(uint32_t tri1, uint32_t tri2, const Inp
         weight *= (1.0f + edgeLength);
     }
     
-    // 法线相似度（法线越相似，权重越高�?
+    // 法线相似度（法线越相似，权重越高）
     float normalDot = glm::dot(t1.normal, t2.normal);
-    float normalWeight = (normalDot + 1.0f) * 0.5f;  // 映射�?[0, 1]
+    float normalWeight = (normalDot + 1.0f) * 0.5f;  // 映射到[0, 1]
     normalWeight = normalWeight * normalWeight;       // 加强差异
     weight *= (0.5f + normalWeight);
     
-    // 面积因子（较大的三角形边权重更高�?
+    // 面积因子（较大的三角形边权重更高）
     float areaFactor = std::sqrt(t1.area * t2.area);
     weight *= (1.0f + areaFactor * 0.1f);
     
@@ -266,14 +266,14 @@ uint32_t MeshClusterizer::calculateTargetClusterCount() const {
 }
 
 // ============================================================================
-// 步骤 2：多级图分区（METIS 风格�?
+// 步骤 2：多级图分区（METIS 风格）
 // ============================================================================
 
 void MeshClusterizer::multilevelPartition() {
     uint32_t targetClusters = calculateTargetClusterCount();
     
     if (targetClusters <= 1) {
-        // 所有三角形放入一�?Cluster
+        // 所有三角形放入一个Cluster
         for (auto& tri : m_triangles) {
             tri.partitionId = 0;
         }
@@ -283,7 +283,7 @@ void MeshClusterizer::multilevelPartition() {
     
     std::cout << "[MeshClusterizer] Target cluster count: " << targetClusters << std::endl;
     
-    // 初始化第一层（原始三角形图�?
+    // 初始化第一层（原始三角形图）
     m_graphHierarchy.clear();
     m_graphHierarchy.emplace_back();
     auto& baseGraph = m_graphHierarchy[0];
@@ -303,23 +303,23 @@ void MeshClusterizer::multilevelPartition() {
     // ========== 粗化阶段 ==========
     // 重复合并节点直到图足够小
     uint32_t level = 0;
-    uint32_t minNodes = targetClusters * 2;  // 最粗图至少�?2 * k 个节�?
+    uint32_t minNodes = targetClusters * 2;  // 最粗图至少需要2 * k 个节点
     
     while (m_graphHierarchy[level].size() > minNodes && 
            level < m_config.coarseningIterations) {
         
         auto& currentGraph = m_graphHierarchy[level];
         
-        // 重边缘匹�?
+        // 重边缘匹配
         heavyEdgeMatching(currentGraph);
         
         // 构建更粗的图
         m_graphHierarchy.emplace_back();
         buildCoarseGraph(currentGraph, m_graphHierarchy[level + 1]);
         
-        // 检查是否有足够的收�?
+        // 检查是否有足够的收缩
         if (m_graphHierarchy[level + 1].size() >= currentGraph.size() * 0.9f) {
-            // 收缩不足，停�?
+            // 收缩不足，停止
             m_graphHierarchy.pop_back();
             break;
         }
@@ -331,7 +331,7 @@ void MeshClusterizer::multilevelPartition() {
     }
     
     // ========== 初始分区阶段 ==========
-    // 在最粗图上进行分�?
+    // 在最粗图上进行分区
     auto& coarsestGraph = m_graphHierarchy.back();
     initialPartition(coarsestGraph, targetClusters);
     
@@ -339,12 +339,12 @@ void MeshClusterizer::multilevelPartition() {
               << " coarse nodes" << std::endl;
     
     // ========== 细化阶段 ==========
-    // 从粗到细，投影分区并进行局部优�?
+    // 从粗到细，投影分区并进行局部优化
     for (int l = static_cast<int>(m_graphHierarchy.size()) - 2; l >= 0; --l) {
         // 投影分区结果
         projectPartition(m_graphHierarchy[l + 1], m_graphHierarchy[l]);
         
-        // 局部细�?
+        // 局部细化
         refinePartition(m_graphHierarchy[l]);
     }
     
@@ -365,7 +365,7 @@ void MeshClusterizer::multilevelPartition() {
 }
 
 void MeshClusterizer::heavyEdgeMatching(std::vector<CoarseNode>& graph) {
-    // 重置匹配状�?
+    // 重置匹配状态
     for (auto& node : graph) {
         node.matchedWith = ~0u;
     }
@@ -378,11 +378,11 @@ void MeshClusterizer::heavyEdgeMatching(std::vector<CoarseNode>& graph) {
     std::mt19937 rng(rd());
     std::shuffle(nodeOrder.begin(), nodeOrder.end(), rng);
     
-    // 贪心匹配：每个未匹配节点选择权重最大的未匹配邻�?
+    // 贪心匹配：每个未匹配节点选择权重最大的未匹配邻居
     for (uint32_t nodeIdx : nodeOrder) {
         CoarseNode& node = graph[nodeIdx];
         
-        if (node.matchedWith != ~0u) continue;  // 已匹�?
+        if (node.matchedWith != ~0u) continue;  // 已匹配
         
         uint32_t bestNeighbor = ~0u;
         float bestWeight = -1.0f;
@@ -391,7 +391,7 @@ void MeshClusterizer::heavyEdgeMatching(std::vector<CoarseNode>& graph) {
             uint32_t neighborIdx = node.neighbors[j];
             const CoarseNode& neighbor = graph[neighborIdx];
             
-            if (neighbor.matchedWith == ~0u) {  // 邻居未匹�?
+            if (neighbor.matchedWith == ~0u) {  // 邻居未匹配
                 float weight = node.edgeWeights[j];
                 if (weight > bestWeight) {
                     bestWeight = weight;
@@ -411,13 +411,13 @@ void MeshClusterizer::buildCoarseGraph(const std::vector<CoarseNode>& fineGraph,
                                         std::vector<CoarseNode>& coarseGraph) {
     coarseGraph.clear();
     
-    // 为每个细粒度节点分配粗粒度索�?
+    // 为每个细粒度节点分配粗粒度索引
     std::vector<uint32_t> fineToCoarse(fineGraph.size(), ~0u);
     
     for (size_t i = 0; i < fineGraph.size(); ++i) {
         const CoarseNode& node = fineGraph[i];
         
-        if (fineToCoarse[i] != ~0u) continue;  // 已处�?
+        if (fineToCoarse[i] != ~0u) continue;  // 已处理
         
         uint32_t coarseIdx = static_cast<uint32_t>(coarseGraph.size());
         coarseGraph.emplace_back();
@@ -441,7 +441,7 @@ void MeshClusterizer::buildCoarseGraph(const std::vector<CoarseNode>& fineGraph,
             fineToCoarse[node.matchedWith] = coarseIdx;
         }
         
-        // 归一化中�?
+        // 归一化中心
         if (coarseNode.totalArea > 0) {
             coarseNode.center /= coarseNode.totalArea;
         }
@@ -452,7 +452,7 @@ void MeshClusterizer::buildCoarseGraph(const std::vector<CoarseNode>& fineGraph,
         CoarseNode& coarseNode = coarseGraph[ci];
         std::unordered_map<uint32_t, float> neighborWeights;
         
-        // 收集所有细粒度节点的邻�?
+        // 收集所有细粒度节点的邻居
         for (size_t fi = 0; fi < fineGraph.size(); ++fi) {
             if (fineToCoarse[fi] != ci) continue;
             
@@ -467,7 +467,7 @@ void MeshClusterizer::buildCoarseGraph(const std::vector<CoarseNode>& fineGraph,
             }
         }
         
-        // 转换为邻接列�?
+        // 转换为邻接列表
         for (const auto& [neighbor, weight] : neighborWeights) {
             coarseNode.neighbors.push_back(neighbor);
             coarseNode.edgeWeights.push_back(weight);
@@ -485,12 +485,12 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
     uint32_t numNodes = static_cast<uint32_t>(coarsestGraph.size());
     numPartitions = std::min(numPartitions, numNodes);
     
-    // 初始�?
+    // 初始化
     for (auto& node : coarsestGraph) {
         node.partitionId = ~0u;
     }
     
-    // 选择种子点（尽量分散�?
+    // 选择种子点（尽量分散）
     std::vector<uint32_t> seeds;
     std::vector<bool> selected(numNodes, false);
     
@@ -501,7 +501,7 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
     selected[seeds[0]] = true;
     coarsestGraph[seeds[0]].partitionId = 0;
     
-    // 后续种子：选择距离已有种子最远的�?
+    // 后续种子：选择距离已有种子最远的点
     for (uint32_t p = 1; p < numPartitions; ++p) {
         uint32_t bestNode = 0;
         float maxMinDist = -1.0f;
@@ -509,7 +509,7 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
         for (uint32_t i = 0; i < numNodes; ++i) {
             if (selected[i]) continue;
             
-            // 计算到所有已选种子的最小距�?
+            // 计算到所有已选种子的最小距离
             float minDist = std::numeric_limits<float>::max();
             for (uint32_t seed : seeds) {
                 float dist = glm::length(coarsestGraph[i].center - coarsestGraph[seed].center);
@@ -575,7 +575,7 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
                 }
             }
             
-            // 如果当前节点还有未分配的邻居，放回队�?
+            // 如果当前节点还有未分配的邻居，放回队列
             bool hasUnassigned = false;
             for (uint32_t neighbor : coarsestGraph[current].neighbors) {
                 if (coarsestGraph[neighbor].partitionId == ~0u) {
@@ -589,7 +589,7 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
         }
     }
     
-    // 处理剩余未分配的节点（分配给最近的分区�?
+    // 处理剩余未分配的节点（分配给最近的分区中
     for (uint32_t i = 0; i < numNodes; ++i) {
         if (coarsestGraph[i].partitionId == ~0u) {
             uint32_t bestPartition = 0;
@@ -610,7 +610,7 @@ void MeshClusterizer::initialPartition(std::vector<CoarseNode>& coarsestGraph,
 
 void MeshClusterizer::projectPartition(const std::vector<CoarseNode>& coarseGraph,
                                         std::vector<CoarseNode>& fineGraph) {
-    // 粗图节点包含细图节点的三角形，投影分�?
+    // 粗图节点包含细图节点的三角形，投影分区
     // 需要建立三角形到细图节点的映射
     
     std::unordered_map<uint32_t, uint32_t> triangleToFineNode;
@@ -620,7 +620,7 @@ void MeshClusterizer::projectPartition(const std::vector<CoarseNode>& coarseGrap
         }
     }
     
-    // 投影：粗节点的分�?-> 包含的三角形 -> 细节�?
+    // 投影：粗节点的分区-> 包含的三角形 -> 细节点
     for (const CoarseNode& coarseNode : coarseGraph) {
         for (uint32_t triIdx : coarseNode.triangles) {
             auto it = triangleToFineNode.find(triIdx);
@@ -632,8 +632,8 @@ void MeshClusterizer::projectPartition(const std::vector<CoarseNode>& coarseGrap
 }
 
 void MeshClusterizer::refinePartition(std::vector<CoarseNode>& graph) {
-    // KL/FM 风格的局部细�?
-    // 尝试移动边界节点来减少切边权�?
+    // KL/FM 风格的局部细化
+    // 尝试移动边界节点来减少切边权重
     
     for (uint32_t iter = 0; iter < m_config.refinementIterations; ++iter) {
         bool improved = false;
@@ -691,9 +691,9 @@ float MeshClusterizer::computeMoveGain(const std::vector<CoarseNode>& graph,
         float weight = node.edgeWeights[j];
         
         if (neighborPart == targetPartition) {
-            gain += weight;  // 增加内部�?
+            gain += weight;  // 增加内部边
         } else if (neighborPart == node.partitionId) {
-            gain -= weight;  // 减少内部�?
+            gain -= weight;  // 减少内部边
         }
     }
     
@@ -701,12 +701,12 @@ float MeshClusterizer::computeMoveGain(const std::vector<CoarseNode>& graph,
 }
 
 // ============================================================================
-// 步骤 3：边界优�?
+// 步骤 3：边界优化
 // ============================================================================
 
 void MeshClusterizer::optimizePartitionBoundaries() {
-    // 进一步优�?Cluster 边界
-    // 目标：减�?Cluster 间共享顶点，使边界更平滑
+    // 进一步优化Cluster 边界
+    // 目标：减少Cluster 间共享顶点，使边界更平滑
     
     for (uint32_t iter = 0; iter < m_config.boundaryOptimizationIterations; ++iter) {
         bool changed = false;
@@ -751,19 +751,19 @@ void MeshClusterizer::optimizePartitionBoundaries() {
 }
 
 // ============================================================================
-// 步骤 4：生�?Cluster 数据
+// 步骤 4：生成Cluster 数据
 // ============================================================================
 
 void MeshClusterizer::generateClusterData(const InputMesh& mesh, ClusterizedMesh& output) {
-    // ============ 验证分区唯一�?============
-    // 确保每个三角形只属于一个分�?
+    // ============ 验证分区唯一性============
+    // 确保每个三角形只属于一个分区
     std::vector<bool> triangleAssigned(m_triangles.size(), false);
     uint32_t unassignedCount = 0;
     uint32_t invalidPartitionCount = 0;
     
     for (size_t i = 0; i < m_triangles.size(); ++i) {
         if (m_triangles[i].partitionId == ~0u) {
-            // 未分配的三角形，分配给分�?0
+            // 未分配的三角形，分配给分区0
             m_triangles[i].partitionId = 0;
             unassignedCount++;
         }
@@ -794,7 +794,7 @@ void MeshClusterizer::generateClusterData(const InputMesh& mesh, ClusterizedMesh
                   << "Expected " << m_triangles.size() << ", got " << totalAssigned << std::endl;
     }
     
-    // 为每个分区创�?Cluster
+    // 为每个分区创建Cluster
     output.clusters.reserve(partitionTriangles.size());
     
     uint32_t clusterIdx = 0;
@@ -828,7 +828,7 @@ void MeshClusterizer::generateClusterData(const InputMesh& mesh, ClusterizedMesh
             }
         }
         
-        // 生成局部索�?
+        // 生成局部索引
         cluster.localIndices.reserve(triIndices.size() * 3);
         for (uint32_t triIdx : triIndices) {
             const TriangleNode& tri = m_triangles[triIdx];
@@ -842,10 +842,10 @@ void MeshClusterizer::generateClusterData(const InputMesh& mesh, ClusterizedMesh
         cluster.vertexCount = static_cast<uint32_t>(cluster.vertices.size());
         cluster.lodLevel = 0;
         
-        // 计算包围�?
+        // 计算包围盒
         cluster.computeBounds();
         
-        // 计算法线�?
+        // 计算法线锥
         if (m_config.computeNormalCones) {
             cluster.computeNormalCone();
         }
@@ -1274,7 +1274,7 @@ void MeshClusterizer::updateClusterHierarchyInfo(ClusterizedMesh& output) {
     std::cout << "  Non-leaf nodes (higher LOD): " << nonLeafCount << std::endl;
     std::cout << "  LOD levels: " << output.lodLevels.size() << std::endl;
     
-    // 打印每个 LOD 级别的详细信�?
+    // 打印每个 LOD 级别的详细信息
     for (size_t lod = 0; lod < output.lodLevels.size(); ++lod) {
         const auto& level = output.lodLevels[lod];
         std::cout << "    LOD " << lod << ": " << level.clusterCount 
@@ -1283,7 +1283,7 @@ void MeshClusterizer::updateClusterHierarchyInfo(ClusterizedMesh& output) {
                   << "]" << std::endl;
     }
     
-    // 打印前几�?cluster 的层级信息以供调�?
+    // 打印前几个cluster 的层级信息以供调试
     std::cout << "  Sample cluster info:" << std::endl;
     for (uint32_t i = 0; i < std::min((uint32_t)output.clusters.size(), 5u); ++i) {
         const auto& cluster = output.clusters[i];
@@ -1294,7 +1294,7 @@ void MeshClusterizer::updateClusterHierarchyInfo(ClusterizedMesh& output) {
                   << std::endl;
     }
     
-    // 也打印一些高 LOD �?cluster（如果有�?
+    // 也打印一些高 LOD 的cluster（如果有）
     if (output.lodLevels.size() > 1) {
         uint32_t lod1Start = output.lodLevels[1].clusterStartIndex;
         std::cout << "  LOD 1 sample clusters:" << std::endl;

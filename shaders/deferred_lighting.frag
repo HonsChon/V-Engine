@@ -20,6 +20,9 @@ layout(binding = 1) uniform sampler2D gPosition;  // 世界空间位置
 layout(binding = 2) uniform sampler2D gNormal;    // 世界空间法线
 layout(binding = 3) uniform sampler2D gAlbedo;    // Albedo (RGB) + Metallic (A)
 
+// SSAO 纹理
+layout(binding = 4) uniform sampler2D gSSAO;      // 环境光遮蔽
+
 const float PI = 3.14159265359;
 
 // Fresnel-Schlick 近似
@@ -115,8 +118,11 @@ void main() {
     float NdotL = max(dot(N, L), 0.0);
     vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
     
-    // 环境光
-    vec3 ambient = ubo.ambientColor.rgb * ubo.ambientColor.a * albedo;
+    // 采样 SSAO 遮蔽值
+    float ao = texture(gSSAO, fragTexCoord).r;
+
+    // 环境光 (受 SSAO 调制)
+    vec3 ambient = ubo.ambientColor.rgb * ubo.ambientColor.a * albedo * ao;
     
     // 最终颜色
     vec3 color = ambient + Lo;

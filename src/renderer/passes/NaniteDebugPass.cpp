@@ -12,7 +12,7 @@
 #include <cstring>
 #include <set>
 
-// UBO 结构�?
+// UBO 结构体
 struct NaniteDebugUBO {
     glm::mat4 view;
     glm::mat4 proj;
@@ -41,7 +41,7 @@ NaniteDebugPass::~NaniteDebugPass() {
 }
 
 // ============================================
-// 初始�?
+// 初始化
 // ============================================
 
 void NaniteDebugPass::initialize(VkRenderPass renderPass) {
@@ -74,7 +74,7 @@ void NaniteDebugPass::cleanup() {
     // 清理 Uniform Buffers
     m_uniformBuffers.clear();
     
-    // 清理描述�?
+    // 清理描述符
     if (m_descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(dev, m_descriptorPool, nullptr);
         m_descriptorPool = VK_NULL_HANDLE;
@@ -199,7 +199,7 @@ void NaniteDebugPass::createGraphicsPipeline(VkRenderPass renderPass) {
     
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
     
-    // 顶点输入 - 使用�?GBuffer 相同的布局
+    // 顶点输入 - 使用和GBuffer 相同的布局
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding = 0;
     bindingDescription.stride = sizeof(float) * 11;  // pos(3) + normal(3) + texCoord(2) + tangent(3)
@@ -250,14 +250,14 @@ void NaniteDebugPass::createGraphicsPipeline(VkRenderPass renderPass) {
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
     
-    // 光栅�?- 禁用背面剔除以正确显�?Cluster
+    // 光栅化- 禁用背面剔除以正确显示Cluster
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // 禁用剔除，显示双�?
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // 禁用剔除，显示双面
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     
@@ -288,7 +288,7 @@ void NaniteDebugPass::createGraphicsPipeline(VkRenderPass renderPass) {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
     
-    // 动态状�?
+    // 动态状态
     std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -329,7 +329,7 @@ void NaniteDebugPass::createGraphicsPipeline(VkRenderPass renderPass) {
 }
 
 // ============================================
-// 描述符资�?
+// 描述符资源
 // ============================================
 
 void NaniteDebugPass::createUniformBuffers() {
@@ -423,7 +423,7 @@ void NaniteDebugPass::buildRenderData() {
         return;
     }
     
-    // 计算总的顶点和索引数�?
+    // 计算总的顶点和索引数量
     m_totalVertexCount = 0;
     m_totalIndexCount = 0;
     m_totalClusterCount = 0;
@@ -446,14 +446,14 @@ void NaniteDebugPass::buildRenderData() {
         }
         m_totalClusterCount += static_cast<uint32_t>(clusterizedMesh->clusters.size());
         
-        // 计算 LOD0 �?cluster 数量
+        // 计算 LOD0 的cluster 数量
         if (!clusterizedMesh->lodLevels.empty()) {
             m_lod0ClusterCount += clusterizedMesh->lodLevels[0].clusterCount;
             std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' LOD0 clusters: " 
                       << clusterizedMesh->lodLevels[0].clusterCount 
                       << " (total LOD levels: " << clusterizedMesh->lodLevels.size() << ")" << std::endl;
         } else {
-            // 如果没有 LOD 信息，假设所�?cluster 都是 LOD0
+            // 如果没有 LOD 信息，假设所有cluster 都是 LOD0
             m_lod0ClusterCount += static_cast<uint32_t>(clusterizedMesh->clusters.size());
             std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' no LOD info, using all " 
                       << clusterizedMesh->clusters.size() << " clusters as LOD0" << std::endl;
@@ -465,7 +465,7 @@ void NaniteDebugPass::buildRenderData() {
         return;
     }
     
-    // 构建顶点数据（与 GBuffer 格式一致：pos(3) + normal(3) + texCoord(2) + tangent(3)�?
+    // 构建顶点数据（与 GBuffer 格式一致：pos(3) + normal(3) + texCoord(2) + tangent(3)）
     std::vector<float> vertexData;
     vertexData.reserve(m_totalVertexCount * 11);
     
@@ -515,7 +515,7 @@ void NaniteDebugPass::buildRenderData() {
                 vertexData.push_back(vertex.tangent.z);
             }
             
-            // 添加索引数据（将局部索引转换为全局索引�?
+            // 添加索引数据（将局部索引转换为全局索引）
             for (uint32_t localIdx : cluster.localIndices) {
                 indexData.push_back(currentVertexOffset + localIdx);
             }
@@ -553,12 +553,12 @@ void NaniteDebugPass::buildRenderData() {
     
     m_renderDataBuilt = true;
     
-    // 输出详细�?LOD 层级统计
+    // 输出详细的LOD 层级统计
     std::cout << "[NaniteDebugPass] Render data built: " 
               << m_totalClusterCount << " clusters, "
               << m_meshRenderInfos.size() << " mesh(es)" << std::endl;
     
-    // 输出每个 mesh �?LOD 分布
+    // 输出每个 mesh 的LOD 分布
     for (const auto& [meshName, clusterizedMesh] : meshesToRender) {
         std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' LOD levels:" << std::endl;
         for (size_t lod = 0; lod < clusterizedMesh->lodLevels.size(); ++lod) {
@@ -616,7 +616,7 @@ void NaniteDebugPass::recordCommands(VkCommandBuffer commandBuffer,
     // 绑定管线
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     
-    // 设置视口和裁�?
+    // 设置视口和裁剪
     VkExtent2D extent = m_swapChain->getExtent();
     
     VkViewport viewport{};
@@ -637,7 +637,7 @@ void NaniteDebugPass::recordCommands(VkCommandBuffer commandBuffer,
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipelineLayout, 0, 1, &m_descriptorSets[frameIndex], 0, nullptr);
     
-    // 绑定顶点和索引缓�?
+    // 绑定顶点和索引缓冲
     VkBuffer vertexBuffers[] = { m_vertexBuffer->getBuffer() };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -646,7 +646,7 @@ void NaniteDebugPass::recordCommands(VkCommandBuffer commandBuffer,
     // 计算法线矩阵
     glm::mat4 normalMatrix = glm::transpose(glm::inverse(modelMatrix));
     
-    // 为每�?Cluster 绘制
+    // 为每个Cluster 绘制
     for (const auto& clusterData : m_clusterRenderData) {
         ClusterDebugPushConstants pushConstants{};
         pushConstants.model = modelMatrix;
@@ -690,7 +690,7 @@ void NaniteDebugPass::recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
     // 绑定管线
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     
-    // 设置视口和裁�?
+    // 设置视口和裁剪
     VkExtent2D extent = m_swapChain->getExtent();
     
     VkViewport viewport{};
@@ -711,7 +711,7 @@ void NaniteDebugPass::recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipelineLayout, 0, 1, &m_descriptorSets[frameIndex], 0, nullptr);
     
-    // 绑定顶点和索引缓�?
+    // 绑定顶点和索引缓冲
     VkBuffer vertexBuffers[] = { m_vertexBuffer->getBuffer() };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -729,7 +729,7 @@ void NaniteDebugPass::recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
         // 计算法线矩阵
         glm::mat4 normalMatrix = glm::transpose(glm::inverse(modelMatrix));
         
-        // 绘制该网格的所�?Cluster
+        // 绘制该网格的所有Cluster
         for (const auto& clusterData : meshInfo.clusters) {
             ClusterDebugPushConstants pushConstants{};
             pushConstants.model = modelMatrix;
@@ -752,7 +752,7 @@ void NaniteDebugPass::recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
 void NaniteDebugPass::resize(uint32_t newWidth, uint32_t newHeight) {
     width = newWidth;
     height = newHeight;
-    // 管线使用动态视口，不需要重�?
+    // 管线使用动态视口，不需要重建
 }
 
 // ============================================
@@ -782,9 +782,9 @@ bool NaniteDebugPass::hasClusterData() const {
 }
 
 void NaniteDebugPass::ensureRenderDataBuilt() {
-    // �?RenderPass 之前调用此方法，确保渲染数据已构�?
-    // buildRenderData() 会使�?VulkanBuffer::uploadData()，这会触�?vkCmdCopyBuffer
-    // 必须�?RenderPass 之前完成
+    // 在RenderPass 之前调用此方法，确保渲染数据已构建
+    // buildRenderData() 会使用VulkanBuffer::uploadData()，这会触发vkCmdCopyBuffer
+    // 必须在RenderPass 之前完成
     if (!m_initialized) {
         return;
     }
@@ -807,7 +807,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
         return;
     }
     
-    // 渲染数据应该�?prepareNaniteCulling() 中通过 ensureRenderDataBuilt() 构建
+    // 渲染数据应该在prepareNaniteCulling() 中通过 ensureRenderDataBuilt() 构建
     // 如果还没有构建，说明调用顺序有问题，输出警告
     if (!m_renderDataBuilt || m_clusterRenderData.empty()) {
         // 不在这里调用 buildRenderData()，因为我们在 RenderPass 内部
@@ -816,22 +816,22 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
     }
     
     // =====================================================
-    // �?ClusterCullingPass 获取 GPU culling 结果
+    // 用ClusterCullingPass 获取 GPU culling 结果
     // 使用双缓冲机制确保数据稳定（1帧延迟）
     // =====================================================
     std::set<uint32_t> visibleSet;
     
     // ========================================================
-    // 调试开关：强制渲染所�?cluster（绕�?GPU culling�?
-    // 用于测试边缘闪烁是否�?culling 结果相关
+    // 调试开关：强制渲染所有cluster（绕过GPU culling）
+    // 用于测试边缘闪烁是否和culling 结果相关
     // ========================================================
     constexpr bool DEBUG_RENDER_ALL_CLUSTERS = false;  // 设为 false 使用 GPU LOD 选择
-    constexpr bool DEBUG_RENDER_LOD0_ONLY = false;     // 已禁用，LOD �?GPU Shader 选择
+    constexpr bool DEBUG_RENDER_LOD0_ONLY = false;     // 已禁用，LOD 由GPU Shader 选择
     
     if (DEBUG_RENDER_ALL_CLUSTERS) {
         if (DEBUG_RENDER_LOD0_ONLY) {
-            // 只渲�?LOD0 �?cluster（避免不�?LOD 级别几何重叠导致 Z-fighting�?
-            // 需要为每个 mesh 分别计算�?LOD0 cluster 的全局索引范围
+            // 只渲染LOD0 的cluster（避免不同LOD 级别几何重叠导致 Z-fighting）
+            // 需要为每个 mesh 分别计算其LOD0 cluster 的全局索引范围
             uint32_t globalClusterOffset = 0;
             
             if (naniteManager) {
@@ -839,25 +839,25 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
                     auto clusterizedMesh = naniteManager->getMesh(meshInfo.meshName);
                     if (!clusterizedMesh) continue;
                     
-                    // 获取�?mesh �?LOD0 cluster 数量
+                    // 获取该mesh 的LOD0 cluster 数量
                     uint32_t lod0Count = 0;
                     if (!clusterizedMesh->lodLevels.empty()) {
                         lod0Count = clusterizedMesh->lodLevels[0].clusterCount;
                     } else {
-                        // 没有 LOD 信息，假设所�?cluster 都是 LOD0
+                        // 没有 LOD 信息，假设所有cluster 都是 LOD0
                         lod0Count = static_cast<uint32_t>(clusterizedMesh->clusters.size());
                     }
                     
-                    // 将该 mesh �?LOD0 cluster 添加到可见列�?
+                    // 将该 mesh 的LOD0 cluster 添加到可见列表
                     for (uint32_t i = 0; i < lod0Count; ++i) {
                         visibleSet.insert(globalClusterOffset + i);
                     }
                     
-                    // 更新全局偏移（包含所�?LOD �?cluster�?
+                    // 更新全局偏移（包含所有LOD 的cluster）
                     globalClusterOffset += static_cast<uint32_t>(clusterizedMesh->clusters.size());
                 }
             } else {
-                // 如果没有 naniteManager，回退到使�?m_lod0ClusterCount
+                // 如果没有 naniteManager，回退到使用m_lod0ClusterCount
                 for (uint32_t i = 0; i < m_lod0ClusterCount; ++i) {
                     visibleSet.insert(i);
                 }
@@ -866,7 +866,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
             std::cout << "[NaniteDebugPass] LOD0 only mode: " << visibleSet.size() 
                       << " clusters visible (total: " << m_totalClusterCount << ")" << std::endl;
         } else {
-            // 渲染所�?LOD �?cluster（会导致 Z-fighting！）
+            // 渲染所有各LOD 的cluster（会导致 Z-fighting！）
             for (uint32_t i = 0; i < m_totalClusterCount; ++i) {
                 visibleSet.insert(i);
             }
@@ -989,7 +989,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
     // 绑定管线
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     
-    // 设置视口和裁�?
+    // 设置视口和裁剪
     VkExtent2D extent = m_swapChain->getExtent();
     
     VkViewport viewport{};
@@ -1010,7 +1010,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipelineLayout, 0, 1, &m_descriptorSets[frameIndex], 0, nullptr);
     
-    // 绑定顶点和索引缓�?
+    // 绑定顶点和索引缓冲
     VkBuffer vertexBuffers[] = { m_vertexBuffer->getBuffer() };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -1056,11 +1056,11 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
         }
     }
     
-    // ======== LOD 追踪和实时输�?========
-    // 统计�?LOD 等级数量（从 GPU visible list 统计�?
+    // ======== LOD 追踪和实时输出========
+    // 统计各LOD 等级数量（从 GPU visible list 统计）
     std::unordered_map<uint32_t, uint32_t> lodClusterCounts;
     
-    // 构建 cluster index -> LOD level 的映�?
+    // 构建 cluster index -> LOD level 的映射
     std::unordered_map<uint32_t, uint32_t> clusterToLOD;
     if (naniteManager) {
         for (const auto& meshInfo : m_meshRenderInfos) {
@@ -1076,7 +1076,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
         }
     }
     
-    // 统计可见 cluster �?LOD 分布
+    // 统计可见 cluster 的LOD 分布
     for (uint32_t idx : visibleSet) {
         auto it = clusterToLOD.find(idx);
         if (it != clusterToLOD.end()) {

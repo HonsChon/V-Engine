@@ -36,6 +36,7 @@ class ForwardPass;
 class SSRPass;
 class WaterPass;
 class NaniteDebugPass;
+class SSAOPass;
 
 // Scene related
 namespace VulkanEngine {
@@ -69,6 +70,7 @@ struct RenderStats {
 struct RenderSettings {
     // Feature toggles
     bool enableSSR = true;
+    bool enableSSAO = true;
     bool enableWater = false;
     bool enableNanite = true;
     bool enableGPUCulling = true;
@@ -142,6 +144,7 @@ public:
 private:
     // Render stages
     void executeGBufferPass(const RenderContext& context);
+    void executeSSAOPass(const RenderContext& context);
     void executeLightingPass(const RenderContext& context);
     void executeForwardPass(const RenderContext& context);
     void executeSSRPass(const RenderContext& context);
@@ -168,6 +171,7 @@ private:
     std::unique_ptr<SSRPass> m_ssrPass;
     std::unique_ptr<WaterPass> m_waterPass;
     std::unique_ptr<NaniteDebugPass> m_naniteDebugPass;
+    std::unique_ptr<SSAOPass> m_ssaoPass;
 
     // Settings and stats
     RenderSettings m_settings;

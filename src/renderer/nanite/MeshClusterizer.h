@@ -1,13 +1,13 @@
 #pragma once
 
 /**
- * MeshClusterizer.h - 基于 UE5 Nanite 风格的网�?Cluster 化算�?
+ * MeshClusterizer.h - 基于 UE5 Nanite 风格的网格Cluster 化算法
  * 
- * 实现思路参�?UE5 Nanite:
- * 1. 使用图分区算法（METIS 风格）将网格划分成均匀�?Cluster
- * 2. 每个 Cluster �?128 个三角形
- * 3. 通过边界优化减少 Cluster 间共享顶�?
- * 4. 支持递归简化生�?LOD DAG
+ * 实现思路参考UE5 Nanite:
+ * 1. 使用图分区算法（METIS 风格）将网格划分成均匀的Cluster
+ * 2. 每个 Cluster 约128 个三角形
+ * 3. 通过边界优化减少 Cluster 间共享顶点
+ * 4. 支持递归简化生成LOD DAG
  */
 
 #include "NaniteCluster.h"
@@ -23,7 +23,7 @@ namespace Nanite {
  * 网格分割配置
  */
 struct ClusterizerConfig {
-    // 每个 Cluster 的目标三角形数量（UE5 默认 128�?
+    // 每个 Cluster 的目标三角形数量（UE5 默认 128）
     uint32_t targetTrianglesPerCluster = CLUSTER_TARGET_TRIANGLES;
     
     // 每个 Cluster 的最大三角形数量
@@ -45,18 +45,18 @@ struct ClusterizerConfig {
     // 是否压缩顶点数据
     bool packVertices = true;
     
-    // 是否计算法线锥（用于背面剔除�?
+    // 是否计算法线锥（用于背面剔除）
     bool computeNormalCones = true;
     
     // ============ METIS 风格分区参数 ============
     
-    // 图粗化时的最大匹配迭代次�?
+    // 图粗化时的最大匹配迭代次数
     uint32_t coarseningIterations = 20;
     
-    // 细化时的最大迭代次�?
+    // 细化时的最大迭代次数
     uint32_t refinementIterations = 10;
     
-    // 分区不平衡容忍度�?.0 = 完全平衡�?
+    // 分区不平衡容忍度（.0 = 完全平衡）
     float imbalanceTolerance = 1.05f;
     
     // 边界优化迭代次数
@@ -64,7 +64,7 @@ struct ClusterizerConfig {
 };
 
 /**
- * 输入的原始网格数�?
+ * 输入的原始网格数据
  */
 struct InputMesh {
     // 顶点数据
@@ -73,7 +73,7 @@ struct InputMesh {
     std::vector<glm::vec2> uvs;
     std::vector<glm::vec4> tangents;
     
-    // 索引数据（三角形列表�?
+    // 索引数据（三角形列表）
     std::vector<uint32_t> indices;
     
     // 网格名称（用于调试）
@@ -93,7 +93,7 @@ struct InputMesh {
     }
     
     /**
-     * �?Mesh 对象创建 InputMesh
+     * 从Mesh 对象创建 InputMesh
      */
     static InputMesh fromMesh(const Mesh& mesh) {
         InputMesh result;
@@ -120,13 +120,13 @@ struct InputMesh {
 };
 
 /**
- * MeshClusterizer - 基于 UE5 Nanite 风格的网�?Cluster 化处理器
+ * MeshClusterizer - 基于 UE5 Nanite 风格的网格Cluster 化处理器
  * 
- * 核心算法�?
+ * 核心算法：
  * 1. 构建三角形邻接图
- * 2. 使用多级图分区（�?METIS）进�?Cluster 划分
+ * 2. 使用多级图分区（类METIS）进行Cluster 划分
  * 3. 边界优化减少共享顶点
- * 4. 递归简化生�?LOD 层级
+ * 4. 递归简化生成LOD 层级
  */
 class MeshClusterizer {
 public:
@@ -137,7 +137,7 @@ public:
     const ClusterizerConfig& getConfig() const { return m_config; }
     
     /**
-     * 将网格分割成 Clusters（主入口�?
+     * 将网格分割成 Clusters（主入口）
      */
     std::unique_ptr<ClusterizedMesh> clusterize(const InputMesh& inputMesh);
     
@@ -150,34 +150,34 @@ public:
     void setProgressCallback(ProgressCallback callback) { m_progressCallback = callback; }
 
 private:
-    // ============== 图数据结�?==============
+    // ============== 图数据结构==============
     
     /**
-     * 三角形节点（图分区的基本单元�?
+     * 三角形节点（图分区的基本单元）
      */
     struct TriangleNode {
         uint32_t indices[3];        // 顶点索引
-        glm::vec3 center;           // 中心�?
+        glm::vec3 center;           // 中心点
         glm::vec3 normal;           // 法线
         float area;                 // 面积（用于权重）
         
-        uint32_t partitionId = ~0u; // 分区 ID（即 Cluster ID�?
+        uint32_t partitionId = ~0u; // 分区 ID（即 Cluster ID）
         
         // 邻接信息
-        std::vector<uint32_t> neighbors;       // 邻居三角形索�?
-        std::vector<float> edgeWeights;        // 与邻居的边权�?
+        std::vector<uint32_t> neighbors;       // 邻居三角形索引
+        std::vector<float> edgeWeights;        // 与邻居的边权重
     };
     
     /**
-     * 粗化图中的超节点（多个三角形合并�?
+     * 粗化图中的超节点（多个三角形合并）
      */
     struct CoarseNode {
         std::vector<uint32_t> triangles;  // 包含的原始三角形
         glm::vec3 center;                  // 质心
-        float totalArea;                   // 总面�?
+        float totalArea;                   // 总面积
         
-        std::vector<uint32_t> neighbors;   // 粗化图中的邻�?
-        std::vector<float> edgeWeights;    // 边权�?
+        std::vector<uint32_t> neighbors;   // 粗化图中的邻居
+        std::vector<float> edgeWeights;    // 边权重
         
         uint32_t partitionId = ~0u;
         uint32_t matchedWith = ~0u;        // 粗化时匹配的节点
@@ -210,26 +210,26 @@ private:
     // ============== 核心算法步骤 ==============
     
     /**
-     * 步骤 1：构建三角形邻接�?
+     * 步骤 1：构建三角形邻接图
      */
     void buildTriangleGraph(const InputMesh& mesh);
     
     /**
-     * 步骤 2：多级图分区（METIS 风格�?
+     * 步骤 2：多级图分区（METIS 风格）
      * - 粗化阶段：重复合并匹配的节点，直到足够小
-     * - 初始分区：在最粗图上进行分�?
+     * - 初始分区：在最粗图上进行分区
      * - 细化阶段：逐层映射回原图并优化
      */
     void multilevelPartition();
     
     /**
-     * 步骤 3：边界优�?
-     * 通过交换边界三角形来优化 Cluster 形状，减少共享顶�?
+     * 步骤 3：边界优化
+     * 通过交换边界三角形来优化 Cluster 形状，减少共享顶点
      */
     void optimizePartitionBoundaries();
     
     /**
-     * 步骤 4：生�?Cluster 数据
+     * 步骤 4：生成Cluster 数据
      */
     void generateClusterData(const InputMesh& mesh, ClusterizedMesh& output);
     
@@ -242,15 +242,15 @@ private:
                           std::vector<CoarseNode>& coarseGraph);
     
     /**
-     * 重边缘匹配（Heavy Edge Matching�?
-     * 选择权重最大的边进行匹�?
+     * 重边缘匹配（Heavy Edge Matching）
+     * 选择权重最大的边进行匹配
      */
     void heavyEdgeMatching(std::vector<CoarseNode>& graph);
     
     // ============== 分区阶段辅助函数 ==============
     
     /**
-     * 初始分区（在最粗图上使�?BFS 或贪心）
+     * 初始分区（在最粗图上使用BFS 或贪心）
      */
     void initialPartition(std::vector<CoarseNode>& coarsestGraph, uint32_t numPartitions);
     
@@ -263,28 +263,28 @@ private:
     // ============== 细化阶段辅助函数 ==============
     
     /**
-     * KL/FM 风格的细�?
-     * 尝试移动边界节点来改善分区质�?
+     * KL/FM 风格的细化
+     * 尝试移动边界节点来改善分区质量
      */
     void refinePartition(std::vector<CoarseNode>& graph);
     
     /**
-     * 计算节点移动的增�?
+     * 计算节点移动的增益
      */
     float computeMoveGain(const std::vector<CoarseNode>& graph, 
                           uint32_t nodeIdx, 
                           uint32_t targetPartition);
     
-    // ============== 边权重计�?==============
+    // ============== 边权重计算==============
     
     /**
-     * 计算两个三角形之间的边权�?
-     * 考虑：共享边长度、法线相似度、面�?
+     * 计算两个三角形之间的边权重
+     * 考虑：共享边长度、法线相似度、面积
      */
     float computeEdgeWeight(uint32_t tri1, uint32_t tri2, const InputMesh& mesh);
     
     /**
-     * 计算三角形面�?
+     * 计算三角形面积
      */
     float computeTriangleArea(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2);
     
@@ -318,13 +318,13 @@ private:
     // 三角形图
     std::vector<TriangleNode> m_triangles;
     
-    // �?-> 三角形映�?
+    // 顶点-> 三角形映射
     std::unordered_map<Edge, std::vector<uint32_t>, EdgeHash> m_edgeToTriangles;
     
-    // 输入网格引用（用于边权重计算�?
+    // 输入网格引用（用于边权重计算）
     const InputMesh* m_inputMesh = nullptr;
     
-    // 多级图层次（用于 METIS 风格分区�?
+    // 多级图层次（用于 METIS 风格分区中
     std::vector<std::vector<CoarseNode>> m_graphHierarchy;
 };
 

@@ -1,0 +1,41 @@
+#version 450
+
+// Reinterleave Compute Shader
+// 将 16 层 AO texture array 重组为全分辨率 AO 纹理
+// 全分辨率坐标 (px, py) 的值取自 AO array 的 layer (py%4)*4 + (px%4) 中坐标 (px/4, py/4)
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// 输入：16 层 AO texture array
+layout(binding = 0) uniform sampler2DArray aoArray;
+
+// 输出：全分辨率 AO 纹理
+layout(binding = 1, r8) uniform writeonly image2D outAO;
+
+// Push Constants
+layout(push_constant) uniform PushConstants {
+    int fullWidth;
+    int fullHeight;
+} pc;
+
+void main() {
+    ivec2 fullCoord = ivec2(gl_GlobalInvocationID.xy);
+    
+    // 范围检查
+    if (fullCoord.x >= pc.fullWidth || fullCoord.y >= pc.fullHeight) {
+        return;
+    }
+    
+    // 计算对应的 layer 和子纹理坐标
+    int offsetX = fullCoord.x % 4;
+    int offsetY = fullCoord.y % 4;
+    int layer = offsetY * 4 + offsetX;
+    
+    ivec2 subCoord = ivec2(fullCoord.x / 4, fullCoord.y / 4);
+    
+    // 从 AO array 中读取
+    float ao = texelFetch(aoArray, ivec3(subCoord, layer), 0).r;
+    
+    // 写入全分辨率纹理
+    imageStore(outAO, fullCoord, vec4(ao, 0.0, 0.0, 0.0));
+}

@@ -31,4 +31,34 @@ else
     exit 1
 fi
 
+# ========== SSAO 着色器 ==========
+echo ""
+echo "编译 SSAO 着色器..."
+
+SSAO_SHADERS=(
+    "ssao/ssao_deinterleave.comp"
+    "ssao/ssao.vert"
+    "ssao/ssao.frag"
+    "ssao/ssao_reinterleave.comp"
+    "ssao/ssao_blur.vert"
+    "ssao/ssao_blur.frag"
+)
+
+mkdir -p shaders/ssao
+
+for SHADER in "${SSAO_SHADERS[@]}"; do
+    NAME=$(basename "$SHADER")
+    # Replace dots with underscores for output name: ssao.vert -> ssao_vert.spv
+    OUT_NAME="${NAME//./_}.spv"
+    echo "编译 $SHADER..."
+    glslc "shaders/$SHADER" -o "shaders/ssao/$OUT_NAME"
+    if [ $? -eq 0 ]; then
+        echo "✓ $SHADER 编译成功 -> ssao/$OUT_NAME"
+    else
+        echo "✗ $SHADER 编译失败"
+        exit 1
+    fi
+done
+
+echo ""
 echo "所有着色器编译完成！"

@@ -137,7 +137,7 @@ void GBufferPass::createAttachments() {
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, NORMAL);
     
-    // Albedo - 反照�+ 金属�
+    // Albedo - 反照率+ 金属度
     createImage(attachmentFormats[ALBEDO],
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, ALBEDO);
@@ -367,7 +367,7 @@ void GBufferPass::beginRenderPass(VkCommandBuffer cmd) {
     
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     
-    // 设置视口和裁�
+    // 设置视口和裁剪
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -390,16 +390,16 @@ void GBufferPass::endRenderPass(VkCommandBuffer cmd) {
 std::array<VkClearValue, 4> GBufferPass::getClearValues() const {
     std::array<VkClearValue, 4> clearValues{};
     
-    // Position - 清除为黑色（远处�
+    // Position - 清除为黑色（远处）
     clearValues[0].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Normal - 清除为黑�
+    // Normal - 清除为黑色
     clearValues[1].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Albedo - 清除为黑�
+    // Albedo - 清除为黑色
     clearValues[2].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
     
-    // Depth - 清除为最�
+    // Depth - 清除为最远
     clearValues[3].depthStencil = { 1.0f, 0 };
     
     return clearValues;
@@ -559,7 +559,7 @@ void GBufferPass::createPipeline() {
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
     
-    // 光栅�
+    // 光栅化
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -585,7 +585,7 @@ void GBufferPass::createPipeline() {
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
     
-    // 颜色混合 - 3个颜色附件，无混�
+    // 颜色混合 - 3个颜色附件，无混合
     std::array<VkPipelineColorBlendAttachmentState, 3> colorBlendAttachments{};
     for (auto& attachment : colorBlendAttachments) {
         attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
@@ -599,7 +599,7 @@ void GBufferPass::createPipeline() {
     colorBlending.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
     colorBlending.pAttachments = colorBlendAttachments.data();
     
-    // 动态状�
+    // 动态状态
     std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -694,20 +694,20 @@ std::vector<char> GBufferPass::readFile(const std::string& filename) {
 // ============================================
 
 void GBufferPass::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // 使用当前存储�context 录制命令
+    // 使用当前存储的context 录制命令
     recordCommands(cmd, currentContext);
 }
 
 void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& context) {
     if (!enabled) return;
     
-    // 开�G-Buffer 渲染通道
+    // 开始G-Buffer 渲染通道
     beginRenderPass(cmd);
     
     // 绑定 G-Buffer Pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     
-    // 绑定描述符集（如果已设置�
+    // 绑定描述符集（如果已设置）
     if (currentDescriptorSet != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
                                pipelineLayout, 0, 1, 
@@ -731,7 +731,7 @@ void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& conte
 }
 
 // ============================================
-// 描述符集创建和更�
+// 描述符集创建和更新
 // ============================================
 
 void GBufferPass::createUniformBuffers() {

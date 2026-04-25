@@ -103,6 +103,7 @@ include_directories(src/RHI)
 include_directories(src/Core)
 include_directories(src/renderer)
 include_directories(src/renderer/passes)
+include_directories(src/renderer/passes/ssao)
 include_directories(src/resources)
 include_directories(src/World)
 include_directories(src/scene)
@@ -179,6 +180,7 @@ set(PASSES_SOURCES
     src/renderer/passes/GPUDrivenRenderer.cpp
     src/renderer/passes/NaniteDebugPass.cpp
     src/renderer/passes/ClusterCullingPass.cpp
+    src/renderer/passes/ssao/SSAOPass.cpp
 )
 
 set(PASSES_HEADERS
@@ -194,6 +196,7 @@ set(PASSES_HEADERS
     src/renderer/passes/GPUDrivenRenderer.h
     src/renderer/passes/NaniteDebugPass.h
     src/renderer/passes/ClusterCullingPass.h
+    src/renderer/passes/ssao/SSAOPass.h
 )
 
 # Renderer - 渲染器
@@ -491,6 +494,16 @@ if(GLSLC)
         deferred_lighting.frag
     )
     
+    # SSAO 着色器（带子目录）
+    set(SSAO_SHADER_SOURCES
+        ssao/ssao_deinterleave.comp
+        ssao/ssao.vert
+        ssao/ssao.frag
+        ssao/ssao_reinterleave.comp
+        ssao/ssao_blur.vert
+        ssao/ssao_blur.frag
+    )
+
     # 计算着色器（带子目录）
     set(COMPUTE_SHADER_SOURCES
         culling/frustum_culling.comp
@@ -520,6 +533,37 @@ if(GLSLC)
         endif()
     endforeach()
     
+    # 编译 SSAO 着色器（保持 ssao/ 子目录结构）
+    foreach(SHADER_FILE ${SSAO_SHADER_SOURCES})
+        set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
+
+        get_filename_component(SHADER_SUBDIR ${SHADER_FILE} DIRECTORY)
+        get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
+
+        if(SHADER_SUBDIR)
+            file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}/${SHADER_SUBDIR}")
+        endif()
+
+        string(REPLACE "." "_" SHADER_OUTPUT_NAME ${SHADER_NAME})
+        set(SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER_SUBDIR}/${SHADER_OUTPUT_NAME}.spv")
+
+        if(EXISTS ${SHADER_SOURCE})
+            set(SHADER_SOURCE_DIR_OUTPUT "${CMAKE_SOURCE_DIR}/shaders/${SHADER_SUBDIR}/${SHADER_OUTPUT_NAME}.spv")
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E copy ${SHADER_OUTPUT} ${SHADER_SOURCE_DIR_OUTPUT}
+                DEPENDS ${SHADER_SOURCE}
+                COMMENT "Compiling SSAO shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv"
+            )
+
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+            message(STATUS "  SSAO Shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv")
+        else()
+            message(WARNING "SSAO shader file not found: ${SHADER_SOURCE}")
+        endif()
+    endforeach()
+
     # 编译计算着色器（保持目录结构）
     foreach(SHADER_FILE ${COMPUTE_SHADER_SOURCES})
         set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
@@ -577,7 +621,7 @@ message(STATUS "  src/Application/ - Engine lifecycle, Window, Input")
 message(STATUS "  src/RHI/         - Vulkan abstraction layer")
 message(STATUS "  src/Core/        - Utilities (no render dependencies)")
 message(STATUS "  src/renderer/    - SceneRenderer, VulkanRenderer")
-message(STATUS "  src/renderer/passes/ - Render passes (GBuffer, SSR, etc.)")
+message(STATUS "  src/renderer/passes/ - Render passes (GBuffer, SSR, SSAO, etc.)")
 message(STATUS "  src/World/       - Camera, Scene objects")
 message(STATUS "  src/resources/   - Mesh, Material")
 message(STATUS "  src/scene/       - ECS scene management")
