@@ -38,13 +38,14 @@ public:
     };
 
     // SSAO UBO 结构（须与 shader 匹配）
+    // Alchemy AO 风格: samples.xy = 单位圆盘方向, samples.z = 径向缩放, w = unused
     struct SSAOParamsUBO {
-        alignas(16) glm::vec4 samples[KERNEL_SIZE];  // xyz: 采样偏移
+        alignas(16) glm::vec4 samples[KERNEL_SIZE];  // xy: 圆盘方向, z: 径向缩放
         alignas(16) glm::mat4 projection;
         alignas(16) glm::mat4 view;
-        alignas(4)  float radius;
-        alignas(4)  float bias;
-        alignas(4)  float power;
+        alignas(4)  float radius;       // view-space 采样半径
+        alignas(4)  float bias;         // 法线偏移量 (防止自遮蔽)
+        alignas(4)  float power;        // 遮蔽强度指数
         alignas(4)  int kernelSize;
     };
 

@@ -1,22 +1,21 @@
 #version 450
 
-// SSAO 采样计算片段着色器
-// 读取 deinterleaved Position/Normal 子纹理层
-// 使用 64 个采样核心 + push constant 传入的层旋转角度计算遮蔽因子
+// SSAO 采样计算片段着色器 (Alchemy AO 风格)
+// 在子纹理 UV 空间偏移采样 → 重建 view-space 3D 坐标 → 几何关系评估
+// 配合 Deinterleaved Texturing: 子纹理中 1 texel 偏移 = 全分辨率 4 texel 偏移
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out float outAO;
 
-// 采样核心 UBO
 #define KERNEL_SIZE 64
 
 layout(binding = 0) uniform SSAOParams {
-    vec4 samples[KERNEL_SIZE];  // xyz: 采样偏移, w: unused
-    mat4 projection;            // 投影矩阵（用于将视图空间转换为屏幕空间）
-    mat4 view;                  // 视图矩阵（用于将世界空间转换为视图空间）
-    float radius;               // 采样半径
-    float bias;                 // 偏移量（防止自遮蔽）
-    float power;                // 遮蔽强度
+    vec4 samples[KERNEL_SIZE];  // xy: 单位圆盘上的 2D 采样方向, z: 径向缩放, w: unused
+    mat4 projection;            // 投影矩阵
+    mat4 view;                  // 视图矩阵（世界空间 → 视图空间）
+    float radius;               // 采样半径 (view-space 单位)
+    float bias;                 // 法线偏移量（防止平面自遮蔽）
+    float power;                // 遮蔽强度指数
     int kernelSize;             // 实际使用的采样数
 } ubo;
 
@@ -27,75 +26,115 @@ layout(binding = 2) uniform sampler2DArray normalArray;
 // Push Constants: 当前层信息
 layout(push_constant) uniform PushConstants {
     int layerIndex;            // 当前处理的层 (0-15)
-    float rotationAngle;       // 当前层的旋转角度
+    float rotationAngle;       // 当前层的旋转角度 (用于打散采样核)
     int subWidth;              // 子纹理宽度
     int subHeight;             // 子纹理高度
 } pc;
 
-// 根据旋转角度构建 TBN 矩阵的旋转向量
-vec3 getRotationVector(float angle) {
-    return vec3(cos(angle), sin(angle), 0.0);
-}
-
 void main() {
-    // 从 deinterleaved 子纹理中采样当前像素的世界空间位置和法线
     vec3 texCoord3D = vec3(fragTexCoord, float(pc.layerIndex));
-    vec3 fragPos = texture(positionArray, texCoord3D).xyz;
-    vec3 normal = normalize(texture(normalArray, texCoord3D).xyz);
-    
-    // 如果位置为零向量，说明是背景，AO = 1.0（无遮蔽）
-    if (length(fragPos) < 0.001) {
+    vec3 fragPosWorld = texture(positionArray, texCoord3D).xyz;
+    vec3 normalWorld = normalize(texture(normalArray, texCoord3D).xyz);
+
+    // 背景像素：无遮蔽
+    if (dot(fragPosWorld, fragPosWorld) < 0.000001) {
         outAO = 1.0;
         return;
     }
-    
-    // 将世界空间位置/法线转换到视图空间
-    vec3 fragPosView = (ubo.view * vec4(fragPos, 1.0)).xyz;
-    vec3 normalView = normalize((ubo.view * vec4(normal, 0.0)).xyz);
-    
-    // 使用固定旋转角度构建旋转向量（替代噪声纹理）
-    vec3 randomVec = getRotationVector(pc.rotationAngle);
-    
-    // 构建 TBN 矩阵（Gram-Schmidt 正交化）
-    vec3 tangent = normalize(randomVec - normalView * dot(randomVec, normalView));
-    vec3 bitangent = cross(normalView, tangent);
-    mat3 TBN = mat3(tangent, bitangent, normalView);
-    
-    // 采样遍历
+
+    // 转换到 view space
+    vec3 P = (ubo.view * vec4(fragPosWorld, 1.0)).xyz;
+    vec3 N = normalize((ubo.view * vec4(normalWorld, 0.0)).xyz);
+
+    // 每层固定旋转角度构建 2D 旋转矩阵，用于打散采样核
+    float cosA = cos(pc.rotationAngle);
+    float sinA = sin(pc.rotationAngle);
+    mat2 rotation = mat2(cosA, -sinA, sinA, cosA);
+
+    // 根据当前像素深度计算屏幕空间采样半径 (texel 单位)
+    // 使用投影矩阵的焦距: focalLen = projection[0][0] (水平) 和 projection[1][1] (垂直)
+    // 屏幕空间半径 = (worldRadius / |P.z|) * focalLen * 0.5 * subTextureSize
+    float screenRadiusX = (ubo.radius / abs(P.z)) * ubo.projection[0][0] * 0.5 * float(pc.subWidth);
+    float screenRadiusY = (ubo.radius / abs(P.z)) * ubo.projection[1][1] * 0.5 * float(pc.subHeight);
+
+    // 限制最小/最大屏幕空间半径 (以 texel 为单位)
+    float avgScreenRadius = (screenRadiusX + screenRadiusY) * 0.5;
+    if (avgScreenRadius < 1.0) {
+        outAO = 1.0;
+        return;
+    }
+
+    // texel → UV 的转换系数
+    vec2 texelSize = vec2(1.0 / float(pc.subWidth), 1.0 / float(pc.subHeight));
+
     float occlusion = 0.0;
     int actualKernelSize = min(ubo.kernelSize, KERNEL_SIZE);
-    
+    int validSamples = 0;
+
     for (int i = 0; i < actualKernelSize; ++i) {
-        // 获取采样点（切线空间 -> 视图空间）
-        vec3 samplePos = TBN * ubo.samples[i].xyz;
-        samplePos = fragPosView + samplePos * ubo.radius;
-        
-        // 将采样点投影到屏幕空间
-        vec4 offset = ubo.projection * vec4(samplePos, 1.0);
-        offset.xyz /= offset.w;                    // 透视除法
-        offset.xyz = offset.xyz * 0.5 + 0.5;       // 变换到 [0, 1]
-        
-        // 在子纹理中采样对应位置的深度（需要转换到子纹理 UV）
-        // 注意：这里直接用投影后的 UV 采样子纹理（子纹理覆盖同一视口范围）
-        vec3 sampleTexCoord = vec3(offset.xy, float(pc.layerIndex));
-        
+        // samples[i].xy: 单位圆盘方向, samples[i].z: 径向缩放 (靠近中心密度高)
+        vec2 diskDir = rotation * ubo.samples[i].xy;
+        float radialScale = ubo.samples[i].z;
+
+        // 屏幕空间偏移 (texel 单位) → UV 偏移
+        vec2 uvOffset = diskDir * radialScale * vec2(screenRadiusX, screenRadiusY) * texelSize;
+        vec2 sampleUV = fragTexCoord + uvOffset;
+
         // 边界检查
-        if (offset.x < 0.0 || offset.x > 1.0 || offset.y < 0.0 || offset.y > 1.0) {
+        if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) {
             continue;
         }
-        
-        // 获取采样点处的实际世界位置，转到视图空间取深度
-        vec3 sampledPos = texture(positionArray, sampleTexCoord).xyz;
-        float sampleDepth = (ubo.view * vec4(sampledPos, 1.0)).z;
-        
-        // 范围检查（确保采样点在有效范围内）
-        float rangeCheck = smoothstep(0.0, 1.0, ubo.radius / abs(fragPosView.z - sampleDepth));
-        
-        // 比较深度：如果采样深度 >= 当前片段深度 + bias，则被遮蔽
-        occlusion += (sampleDepth >= samplePos.z + ubo.bias ? 1.0 : 0.0) * rangeCheck;
+
+        // 从子纹理采样该位置的世界坐标 → 重建 view-space 3D 坐标
+        vec3 samplePosWorld = texture(positionArray, vec3(sampleUV, float(pc.layerIndex))).xyz;
+
+        // 跳过无效采样（背景像素）
+        if (dot(samplePosWorld, samplePosWorld) < 0.000001) {
+            continue;
+        }
+
+        vec3 S = (ubo.view * vec4(samplePosWorld, 1.0)).xyz;
+
+        // ---- Alchemy AO 几何关系评估 ----
+        // V: 从当前像素 P 指向采样点 S 的向量
+        vec3 V = S - P;
+        float distSq = dot(V, V);
+        float radiusSq = ubo.radius * ubo.radius;
+
+        // 距离超出采样半径 → 跳过
+        if (distSq > radiusSq) {
+            continue;
+        }
+
+        // 法线·方向 评估: dot(N, normalize(V)) 反映 S 是否在 P 的法线半球内
+        // 等价于 dot(N, V) / |V|，用 dot(N,V) / sqrt(distSq) 避免额外 normalize
+        float NdotV = dot(N, V);
+
+        // 只有当 S 在法线半球内 (NdotV > bias * |V|) 才计入遮蔽
+        // bias 用于防止平面自遮蔽
+        float dist = sqrt(distSq);
+        float cosAngle = NdotV / (dist + 0.0001);
+
+        if (cosAngle <= ubo.bias) {
+            validSamples++;
+            continue;
+        }
+
+        // 距离衰减: 越近遮蔽越强，越远衰减到 0
+        // 使用 1 - distSq/radiusSq 的平滑衰减
+        float falloff = 1.0 - distSq / radiusSq;
+        falloff = falloff * falloff;  // 更平滑的二次衰减
+
+        // AO 贡献 = 法线对齐度 × 距离衰减
+        occlusion += cosAngle * falloff;
+        validSamples++;
     }
-    
-    // 计算最终 AO 值
-    occlusion = 1.0 - (occlusion / float(actualKernelSize));
-    outAO = pow(occlusion, ubo.power);
+
+    // 归一化并输出
+    if (validSamples > 0) {
+        occlusion /= float(validSamples);
+    }
+
+    float ao = 1.0 - clamp(occlusion, 0.0, 1.0);
+    outAO = pow(ao, ubo.power);
 }

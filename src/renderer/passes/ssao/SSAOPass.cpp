@@ -101,24 +101,22 @@ void SSAOPass::cleanup() {
 // ============================================================
 
 void SSAOPass::generateKernel() {
+    // Alchemy AO 风格: 生成 2D 单位圆盘上的采样方向 + 径向缩放
+    // samples[i].xy = 单位圆盘方向, samples[i].z = 径向缩放 (0,1], w = unused
     std::default_random_engine rng(42);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * 3.14159265358979f);
+    std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
 
     for (int i = 0; i < KERNEL_SIZE; ++i) {
-        glm::vec3 sample(
-            dist(rng) * 2.0f - 1.0f,
-            dist(rng) * 2.0f - 1.0f,
-            dist(rng)  // z in [0,1] for hemisphere
-        );
-        sample = glm::normalize(sample);
-        sample *= dist(rng);
+        // 均匀分布在单位圆盘上的方向
+        float angle = angleDist(rng);
+        glm::vec2 dir(std::cos(angle), std::sin(angle));
 
-        // Accelerating interpolation: more samples near origin
-        float scale = float(i) / float(KERNEL_SIZE);
+        // 径向缩放: 加速插值使采样密度靠近中心更高
+        float scale = float(i + 1) / float(KERNEL_SIZE);
         scale = 0.1f + scale * scale * (1.0f - 0.1f); // lerp(0.1, 1.0, scale^2)
-        sample *= scale;
 
-        m_kernel[i] = glm::vec4(sample, 0.0f);
+        m_kernel[i] = glm::vec4(dir.x, dir.y, scale, 0.0f);
     }
 }
 
