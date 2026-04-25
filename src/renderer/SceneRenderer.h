@@ -1,33 +1,28 @@
 /**
  * @file SceneRenderer.h
- * @brief Scene Renderer - responsible for actual scene rendering
+ * @brief Scene Renderer - 调度所有渲染 Pass
  * 
- * Responsibilities:
- * 1. Manage render passes (GBuffer, Lighting, Forward, etc.)
- * 2. Coordinate rendering order
- * 3. Handle render-related Uniform updates
- * 4. Manage render targets
- * 
- * Design Philosophy:
- * - High-level render coordinator, doesn't directly handle Vulkan commands
- * - Each Pass is independent, SceneRenderer schedules their execution order
- * - Prepared for future Render Graph implementation
+ * 从 VulkanRenderer 迁移过来的渲染调度器。
+ * 管理 Forward/Deferred/SSAO/SSR/Water/Nanite 等所有 Pass 的生命周期和执行。
  */
 
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <glm/glm.hpp>
 #include <memory>
 #include <vector>
 #include <string>
+#include <set>
 #include <unordered_map>
-#include "RenderContext.h"
+#include <chrono>
+
+#include "RenderSettings.h"
 
 // Forward declarations
 class VulkanDevice;
 class VulkanSwapChain;
 class Camera;
-class FrameResources;
 
 // Render Pass classes
 class GBufferPass;
@@ -35,13 +30,25 @@ class LightingPass;
 class ForwardPass;
 class SSRPass;
 class WaterPass;
-class NaniteDebugPass;
 class SSAOPass;
+class GPUDrivenRenderer;
+class NaniteDebugPass;
+struct GPUInstanceData;
 
-// Scene related
+// Nanite
+namespace Nanite {
+    class NaniteManager;
+}
+
+// Scene & ECS
 namespace VulkanEngine {
     class Scene;
+    class RenderSystem;
 }
+
+// UI
+class ImGuiLayer;
+class UIManager;
 
 /**
  * @brief Render statistics
@@ -50,10 +57,8 @@ struct RenderStats {
     uint32_t drawCalls = 0;
     uint32_t triangles = 0;
     uint32_t vertices = 0;
-    float gpuTime = 0.0f;      // GPU time (milliseconds)
-    float cpuTime = 0.0f;      // CPU render preparation time
-    
-    // Nanite related
+    float gpuTime = 0.0f;
+    float cpuTime = 0.0f;
     uint32_t naniteClusters = 0;
     uint32_t naniteTriangles = 0;
     
@@ -65,28 +70,7 @@ struct RenderStats {
 };
 
 /**
- * @brief Render settings
- */
-struct RenderSettings {
-    // Feature toggles
-    bool enableSSR = true;
-    bool enableSSAO = true;
-    bool enableWater = false;
-    bool enableNanite = true;
-    bool enableGPUCulling = true;
-    
-    // Debug options
-    bool showClusterVisualization = false;
-    int clusterDebugMode = 0;  // 0: Off, 1: LOD, 2: Cluster ID
-    
-    // Quality settings
-    int shadowQuality = 2;     // 0: Off, 1: Low, 2: Medium, 3: High
-    int ssaoQuality = 1;
-    float renderScale = 1.0f;
-};
-
-/**
- * @brief Scene Renderer
+ * @brief Scene Renderer — 调度所有渲染 Pass
  */
 class SceneRenderer {
 public:
@@ -97,88 +81,127 @@ public:
     SceneRenderer(const SceneRenderer&) = delete;
     SceneRenderer& operator=(const SceneRenderer&) = delete;
 
-    /**
-     * @brief Initialize all render passes
-     */
+    // ========== 生命周期 ==========
+    
+    /** 初始化（创建 ForwardPass） */
     void initialize();
-
-    /**
-     * @brief Render a frame
-     * @param context Render context
-     */
-    void render(const RenderContext& context);
-
-    /**
-     * @brief Handle window resize
-     */
-    void onResize(uint32_t width, uint32_t height);
-
-    /**
-     * @brief Handle swap chain recreation
-     */
-    void onSwapChainRecreated(VulkanSwapChain* newSwapChain);
-
-    /**
-     * @brief Cleanup resources
-     */
+    
+    /** 清理所有资源 */
     void cleanup();
 
-    // ========== Settings ==========
+    // ========== 延迟渲染（按需初始化）==========
+    
+    /** 初始化延迟渲染资源（GBuffer/Lighting/SSR/Water/SSAO） */
+    void initDeferredShading();
+    
+    /** 清理延迟渲染资源 */
+    void cleanupDeferredShading();
+    
+    bool isDeferredInitialized() const { return m_deferredInitialized; }
+
+    // ========== 命令录制 ==========
+    
+    /**
+     * 在给定 command buffer 上录制完整渲染命令
+     * @param cmd 命令缓冲区
+     * @param imageIndex swapchain image index
+     * @param frameIndex 帧槽索引（0 or 1）
+     */
+    void recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
+
+    /** 更新所有 Uniform（每帧调用一次） */
+    void updateUniforms(uint32_t frameIndex);
+
+    // ========== 窗口 resize ==========
+    
+    void onResize(uint32_t width, uint32_t height);
+    void onSwapChainRecreated(VulkanSwapChain* newSwapChain);
+
+    // ========== GPU Culling ==========
+    
+    void initGPUDrivenRendering();
+    void cleanupGPUDrivenRendering();
+    void prepareGPUCullingData();
+
+    // ========== Nanite ==========
+    
+    void initNanite();
+    void cleanupNanite();
+    void testNaniteClustering();
+    void initNaniteDebugPass();
+
+    // ========== UI ==========
+    
+    void updateUI();
+    void renderUI(VkCommandBuffer cmd);
+
+    // ========== 设置 & 状态 ==========
 
     RenderSettings& getSettings() { return m_settings; }
     const RenderSettings& getSettings() const { return m_settings; }
-
+    const RenderStats& getStats() const { return m_stats; }
+    
     void setScene(VulkanEngine::Scene* scene) { m_scene = scene; }
     void setCamera(Camera* camera) { m_camera = camera; }
+    void setRenderSystem(VulkanEngine::RenderSystem* rs) { m_renderSystem = rs; }
+    void setImGuiLayer(ImGuiLayer* layer) { m_imguiLayer = layer; }
+    void setUIManager(UIManager* mgr) { m_uiManager = mgr; }
 
-    // ========== Statistics ==========
-
-    const RenderStats& getStats() const { return m_stats; }
-
-    // ========== Pass access (for UI debugging, etc.) ==========
-
-    GBufferPass* getGBufferPass() const { return m_gBufferPass.get(); }
-    LightingPass* getLightingPass() const { return m_lightingPass.get(); }
+    // Pass 访问
     ForwardPass* getForwardPass() const { return m_forwardPass.get(); }
+    GBufferPass* getGBufferPass() const { return m_gbuffer.get(); }
+    LightingPass* getLightingPass() const { return m_lightingPass.get(); }
+    Nanite::NaniteManager* getNaniteManager() const { return m_naniteManager.get(); }
+
+    static const int MAX_FRAMES_IN_FLIGHT = 2;
 
 private:
-    // Render stages
-    void executeGBufferPass(const RenderContext& context);
-    void executeSSAOPass(const RenderContext& context);
-    void executeLightingPass(const RenderContext& context);
-    void executeForwardPass(const RenderContext& context);
-    void executeSSRPass(const RenderContext& context);
-    void executeWaterPass(const RenderContext& context);
-    void executeNanitePass(const RenderContext& context);
-    void executeDebugPass(const RenderContext& context);
+    // ========== 命令录制子方法 ==========
+    void recordForwardCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageIndex);
+    void recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imageIndex);
 
-    // Create render passes
-    void createPasses();
-    void destroyPasses();
+    // ========== 资源创建 ==========
+    void createSceneColorImage();
+    void cleanupSceneColorImage();
 
-    // Device references
+    // ========== 引用（不拥有）==========
     VulkanDevice* m_device = nullptr;
     VulkanSwapChain* m_swapChain = nullptr;
-
-    // Scene and camera references
     VulkanEngine::Scene* m_scene = nullptr;
     Camera* m_camera = nullptr;
+    VulkanEngine::RenderSystem* m_renderSystem = nullptr;
+    ImGuiLayer* m_imguiLayer = nullptr;
+    UIManager* m_uiManager = nullptr;
 
-    // Render Passes
-    std::unique_ptr<GBufferPass> m_gBufferPass;
-    std::unique_ptr<LightingPass> m_lightingPass;
+    // ========== 拥有的 Pass ==========
     std::unique_ptr<ForwardPass> m_forwardPass;
+    std::unique_ptr<GBufferPass> m_gbuffer;
+    std::unique_ptr<LightingPass> m_lightingPass;
+    std::unique_ptr<SSAOPass> m_ssaoPass;
     std::unique_ptr<SSRPass> m_ssrPass;
     std::unique_ptr<WaterPass> m_waterPass;
+    std::unique_ptr<GPUDrivenRenderer> m_gpuDrivenRenderer;
     std::unique_ptr<NaniteDebugPass> m_naniteDebugPass;
-    std::unique_ptr<SSAOPass> m_ssaoPass;
+    std::unique_ptr<Nanite::NaniteManager> m_naniteManager;
 
-    // Settings and stats
+    // ========== 场景颜色纹理（SSR 采样）==========
+    VkImage m_sceneColorImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_sceneColorMemory = VK_NULL_HANDLE;
+    VkImageView m_sceneColorView = VK_NULL_HANDLE;
+    VkSampler m_sceneColorSampler = VK_NULL_HANDLE;
+
+    // ========== 状态 ==========
     RenderSettings m_settings;
     RenderStats m_stats;
-
     bool m_initialized = false;
+    bool m_deferredInitialized = false;
     
-    // Constants
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    // Nanite 状态
+    bool m_naniteInitialized = false;
+    std::string m_lastClusterizedMeshPath;
+
+    // 时间
+    float m_totalTime = 0.0f;
 };

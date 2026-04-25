@@ -1,7 +1,7 @@
 
 #include "DebugPanel.h"
 #include "imgui.h"
-#include "SceneRenderer.h"  // for RenderSettings
+#include "RenderSettings.h"
 
 DebugPanel::DebugPanel() {
     // 初始区FPS 历史记录

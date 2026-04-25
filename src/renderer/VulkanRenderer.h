@@ -26,7 +26,7 @@
 #include "RayPicker.h"
 #include "GPUDrivenRenderer.h"
 #include "NaniteDebugPass.h"
-#include "SceneRenderer.h"  // for RenderSettings
+#include "RenderSettings.h"
 #include "ssao/SSAOPass.h"
 #include "nanite/Nanite.h"
 #include "nanite/NaniteManager.h"
