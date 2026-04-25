@@ -67,7 +67,7 @@ void SceneRenderer::createPasses() {
     {
         uint32_t w = m_swapChain->getExtent().width;
         uint32_t h = m_swapChain->getExtent().height;
-        m_ssaoPass = std::make_unique<SSAOPass>(m_device, w, h);
+        m_ssaoPass = std::make_unique<SSAOPass>(deviceShared, w, h);
         m_ssaoPass->init();
         std::cout << "[SceneRenderer] SSAOPass created (" << w << "x" << h << ")\n";
     }
@@ -201,6 +201,7 @@ void SceneRenderer::executeSSAOPass(const RenderContext& context) {
         // The actual G-Buffer image views come from GBufferPass
         m_ssaoPass->execute(
             context.commandBuffer,
+            m_gBufferPass.get(),
             context.frameIndex,
             context.projectionMatrix,
             context.viewMatrix
@@ -209,8 +210,8 @@ void SceneRenderer::executeSSAOPass(const RenderContext& context) {
         // After SSAO, bind the blurred result to LightingPass
         if (m_lightingPass) {
             m_lightingPass->setSSAOTexture(
-                m_ssaoPass->getOutputImageView(),
-                m_ssaoPass->getOutputSampler()
+                m_ssaoPass->getOutputAOView(),
+                m_ssaoPass->getOutputAOSampler()
             );
         }
     }
@@ -281,7 +282,7 @@ void SceneRenderer::onResize(uint32_t width, uint32_t height) {
     
     // Recreate SSAOPass with new dimensions
     if (m_ssaoPass) {
-        m_ssaoPass->onResize(width, height);
+        m_ssaoPass->resize(width, height);
     }
 
     // Recreate ForwardPass with new dimensions

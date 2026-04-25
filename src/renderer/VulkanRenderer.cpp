@@ -1382,6 +1382,18 @@ void VulkanRenderer::recreateSwapChain() {
         forwardPass->recreate(swapChain->getRenderPass(), width, height);
     }
     
+    // 更新 SSAOPass 的尺寸
+    if (ssaoPass) {
+        ssaoPass->resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+        // 重新绑定 SSAO 结果到 LightingPass（纹理视图可能变了）
+        if (lightingPass) {
+            lightingPass->setSSAOTexture(
+                ssaoPass->getOutputAOView(),
+                ssaoPass->getOutputAOSampler()
+            );
+        }
+    }
+    
     // 通知 ImGui 窗口大小改变
     if (imguiLayer) {
         imguiLayer->onResize(static_cast<uint32_t>(width), 
@@ -1430,6 +1442,9 @@ void VulkanRenderer::initUI() {
         if (uiManager->getSceneHierarchyPanel() && scene) {
             uiManager->getSceneHierarchyPanel()->setScene(scene.get());
         }
+        
+        // 将渲染选项传递给 UI，用于 SSAO 等开关控制
+        uiManager->setRenderSettings(&renderSettings);
         
         std::cout << "UI system initialized!" << std::endl;
         
@@ -1568,6 +1583,14 @@ void VulkanRenderer::initWaterScene() {
         lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
         std::cout << "  LightingPass created" << std::endl;
         
+        // 6.5. 创建 SSAOPass（屏幕空间环境光遮蔽）
+        {
+            auto deviceShared = std::shared_ptr<VulkanDevice>(device.get(), [](VulkanDevice*){});
+            ssaoPass = std::make_unique<SSAOPass>(deviceShared, width, height);
+            ssaoPass->init();
+            std::cout << "  SSAOPass created (" << width << "x" << height << ")" << std::endl;
+        }
+        
         // 7. 设置 LightingPass 的G-Buffer 输入
         if (gbuffer) {
             lightingPass->setGBufferInputs(
@@ -1577,6 +1600,15 @@ void VulkanRenderer::initWaterScene() {
                 gbuffer->getSampler()
             );
             std::cout << "  LightingPass G-Buffer inputs set" << std::endl;
+        }
+        
+        // 7.5. 将 SSAO 结果绑定到 LightingPass
+        if (ssaoPass && lightingPass) {
+            lightingPass->setSSAOTexture(
+                ssaoPass->getOutputAOView(),
+                ssaoPass->getOutputAOSampler()
+            );
+            std::cout << "  LightingPass SSAO texture bound" << std::endl;
         }
         
         // 8. 更新 WaterPass 的描述符集（绑定 G-Buffer 用于内置 SSR：
@@ -1622,6 +1654,7 @@ void VulkanRenderer::cleanupWaterScene() {
     // 清理渲染通道
     waterPass.reset();
     ssrPass.reset();
+    ssaoPass.reset();
     lightingPass.reset();
     gbuffer.reset();
 }
@@ -1880,6 +1913,57 @@ void VulkanRenderer::recordWaterSceneCommandBuffer(VkCommandBuffer commandBuffer
         vkCmdPipelineBarrier(commandBuffer,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // ========================================
+    // Pass 1.8: SSAO Pass - 屏幕空间环境光遮蔽
+    // ========================================
+    if (ssaoPass && gbuffer) {
+        if (renderSettings.enableSSAO) {
+            device->beginDebugLabel(commandBuffer, "SSAO Pass", 0.6f, 0.4f, 0.8f, 1.0f);
+            
+            // 计算相机矩阵
+            auto extent = swapChain->getExtent();
+            float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+            glm::mat4 projection = glm::perspective(
+                glm::radians(camera ? camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f);
+            projection[1][1] *= -1; // Vulkan Y-flip
+            glm::mat4 view = camera ? camera->getViewMatrix() : glm::mat4(1.0f);
+            
+            ssaoPass->execute(commandBuffer, gbuffer.get(), currentFrame, projection, view);
+            
+            device->endDebugLabel(commandBuffer);
+        } else {
+            // SSAO 关闭时，将输出纹理清除为白色 (ao=1.0)，确保环境光不被遮挡
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = ssaoPass->getOutputAOImage();
+            barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            
+            vkCmdPipelineBarrier(commandBuffer,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+            
+            VkClearColorValue white = {{ 1.0f, 1.0f, 1.0f, 1.0f }};
+            VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            vkCmdClearColorImage(commandBuffer, ssaoPass->getOutputAOImage(),
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &white, 1, &range);
+            
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            
+            vkCmdPipelineBarrier(commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
     }
 
     // ========================================

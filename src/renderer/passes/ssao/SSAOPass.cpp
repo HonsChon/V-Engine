@@ -410,8 +410,8 @@ void SSAOPass::createAOTextures() {
     createImage2D(width, height, VK_FORMAT_R8_UNORM, fullAOUsage, m_fullAOImage, m_fullAOMemory);
     m_fullAOView = createImageView2D(m_fullAOImage, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    // Blurred AO (R8_UNORM) — final output
-    VkImageUsageFlags blurUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    // Blurred AO (R8_UNORM) — final output (TRANSFER_DST needed for vkCmdClearColorImage when SSAO disabled)
+    VkImageUsageFlags blurUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     createImage2D(width, height, VK_FORMAT_R8_UNORM, blurUsage, m_blurredAOImage, m_blurredAOMemory);
     m_blurredAOView = createImageView2D(m_blurredAOImage, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 }
@@ -473,7 +473,7 @@ void SSAOPass::createDeinterleaveDescriptorSets() {
 
 void SSAOPass::createDeinterleavePipeline() {
     VkDevice vkDev = device->getDevice();
-    auto compCode = readFile("shaders/ssao/ssao_deinterleave.comp.spv");
+    auto compCode = readFile("shaders/ssao/ssao_deinterleave_comp.spv");
     VkShaderModule compModule = createShaderModule(compCode);
 
     VkPipelineShaderStageCreateInfo stageInfo{};
@@ -846,7 +846,7 @@ void SSAOPass::createReinterleaveDescriptorSets() {
 
 void SSAOPass::createReinterleavePipeline() {
     VkDevice vkDev = device->getDevice();
-    auto compCode = readFile("shaders/ssao/ssao_reinterleave.comp.spv");
+    auto compCode = readFile("shaders/ssao/ssao_reinterleave_comp.spv");
     VkShaderModule compModule = createShaderModule(compCode);
 
     VkPipelineShaderStageCreateInfo stageInfo{};

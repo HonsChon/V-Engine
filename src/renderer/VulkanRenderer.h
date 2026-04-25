@@ -26,6 +26,8 @@
 #include "RayPicker.h"
 #include "GPUDrivenRenderer.h"
 #include "NaniteDebugPass.h"
+#include "SceneRenderer.h"  // for RenderSettings
+#include "ssao/SSAOPass.h"
 #include "nanite/Nanite.h"
 #include "nanite/NaniteManager.h"
 
@@ -123,6 +125,9 @@ private:
     // Lighting Pass（延迟渲染光照阶段）
     std::unique_ptr<LightingPass> lightingPass;
     
+    // SSAO Pass（屏幕空间环境光遮蔽）
+    std::unique_ptr<SSAOPass> ssaoPass;
+    
     // 使用延迟渲染（默认false 使用前向渲染）
     bool useDeferredShading = false;
     
@@ -166,6 +171,9 @@ private:
     
     // UI 是否显示
     bool showUI = true;
+    
+    // 渲染选项（SSAO 等开关由 UI 控制）
+    RenderSettings renderSettings;
     
     // ========== GPU-Driven Rendering (Nanite-like) ==========
     std::unique_ptr<GPUDrivenRenderer> gpuDrivenRenderer;

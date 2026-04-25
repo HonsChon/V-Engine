@@ -76,6 +76,11 @@ public:
     SSAOPass& operator=(const SSAOPass&) = delete;
 
     /**
+     * 初始化所有资源（纹理、管线、描述符等）
+     */
+    void init();
+
+    /**
      * 执行完整的 SSAO 流程
      * @param cmd 命令缓冲
      * @param gbuffer GBuffer Pass（提供 Position/Normal 纹理）
@@ -106,7 +111,6 @@ public:
 
 private:
     // ========== 初始化方法 ==========
-    void init();
     void cleanup();
 
     // 资源创建

@@ -110,6 +110,12 @@ void Engine::initializeSubsystems() {
         
         m_uiManager = std::make_unique<UIManager>();
         m_uiManager->setScene(m_scene.get());
+
+        // 将 SceneRenderer 的渲染选项传递给 UI，用于 SSAO 等开关控制
+        if (m_renderer) {
+            m_uiManager->setRenderSettings(&m_renderer->getSettings());
+        }
+
         std::cout << "[Engine] ImGui layer created\n";
     }
 
