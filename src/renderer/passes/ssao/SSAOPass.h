@@ -34,6 +34,7 @@ public:
         float radius = 0.5f;
         float bias = 0.025f;
         float power = 1.0f;
+        float amount = 1.5f;        // AO 强度乘数 (参照 NVIDIA ComputeAO)
         int kernelSize = KERNEL_SIZE;
     };
 
@@ -46,6 +47,7 @@ public:
         alignas(4)  float radius;       // view-space 采样半径
         alignas(4)  float bias;         // 法线偏移量 (防止自遮蔽)
         alignas(4)  float power;        // 遮蔽强度指数
+        alignas(4)  float amount;       // AO 强度乘数 (参照 NVIDIA ComputeAO)
         alignas(4)  int kernelSize;
     };
 

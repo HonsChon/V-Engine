@@ -1090,6 +1090,7 @@ void SSAOPass::execute(VkCommandBuffer cmd, GBufferPass* gbuffer, uint32_t frame
     ubo.radius = m_settings.radius;
     ubo.bias = m_settings.bias;
     ubo.power = m_settings.power;
+    ubo.amount = m_settings.amount;
     ubo.kernelSize = m_settings.kernelSize;
     memcpy(m_ssaoUBOMapped[frameIndex], &ubo, sizeof(ubo));
 
