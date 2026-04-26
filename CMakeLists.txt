@@ -50,6 +50,11 @@ message(STATUS "Vcpkg triplet: ${VCPKG_TARGET_TRIPLET}")
 # ============================================================
 # 项目配置
 # ============================================================
+# macOS: 设置最低部署目标，必须在 project() 之前
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment target")
+endif()
+
 project(VulkanPBR VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)

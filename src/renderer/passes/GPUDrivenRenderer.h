@@ -13,21 +13,24 @@ class Camera;
  * 整合所有GPU Culling 和Indirect Drawing 功能。
  * 这是 Nanite 风格渲染的核心入口。
  */
+struct GPUDrivenRendererConfig {
+    uint32_t maxInstances = 100000;      // 最大实例数
+    bool enableFrustumCulling = true;    // 启用视锥剔除
+    bool enableOcclusionCulling = false; // 启用遮挡剔除（后续实现）
+    bool enableLODSelection = true;      // 启用 LOD 选择（已实现：
+};
+
+struct GPUDrivenRendererStatistics {
+    uint32_t totalInstances = 0;
+    uint32_t visibleInstances = 0;
+    uint32_t culledInstances = 0;
+    float cullingTimeMs = 0.0f;
+};
+
 class GPUDrivenRenderer {
 public:
-    struct Config {
-        uint32_t maxInstances = 100000;      // 最大实例数
-        bool enableFrustumCulling = true;    // 启用视锥剔除
-        bool enableOcclusionCulling = false; // 启用遮挡剔除（后续实现）
-        bool enableLODSelection = true;      // 启用 LOD 选择（已实现：
-    };
-
-    struct Statistics {
-        uint32_t totalInstances = 0;
-        uint32_t visibleInstances = 0;
-        uint32_t culledInstances = 0;
-        float cullingTimeMs = 0.0f;
-    };
+    using Config = GPUDrivenRendererConfig;
+    using Statistics = GPUDrivenRendererStatistics;
 
 public:
     GPUDrivenRenderer(std::shared_ptr<VulkanDevice> device, const Config& config = Config{});

@@ -28,15 +28,17 @@ namespace VulkanEngine {
     class RenderSystem;
 }
 
+struct EngineConfig {
+    std::string title = "Vulkan PBR Renderer";
+    uint32_t width = 1280;
+    uint32_t height = 720;
+    bool enableValidation = true;
+    bool enableUI = true;
+};
+
 class Engine {
 public:
-    struct Config {
-        std::string title = "Vulkan PBR Renderer";
-        uint32_t width = 1280;
-        uint32_t height = 720;
-        bool enableValidation = true;
-        bool enableUI = true;
-    };
+    using Config = EngineConfig;
 
     Engine(const Config& config = Config{});
     ~Engine();
