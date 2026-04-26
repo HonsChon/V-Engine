@@ -1,0 +1,50 @@
+#version 450
+
+// Deinterleave Compute Shader
+// 将全分辨率 GBuffer Position/Normal 按 4×4 模式拆分为 16 层 texture array
+// layer i (i=0..15) 对应原始纹理中坐标 (x*4 + i%4, y*4 + i/4) 的像素
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// 输入：全分辨率 GBuffer 纹理
+layout(binding = 0) uniform sampler2D gPosition;
+layout(binding = 1) uniform sampler2D gNormal;
+
+// 输出：16 层 texture array
+layout(binding = 2, rgba16f) uniform writeonly image2DArray outPosition;
+layout(binding = 3, rgba16f) uniform writeonly image2DArray outNormal;
+
+// Push Constants: 全分辨率尺寸
+layout(push_constant) uniform PushConstants {
+    int fullWidth;
+    int fullHeight;
+} pc;
+
+void main() {
+    // 当前线程在子纹理中的坐标
+    ivec2 subCoord = ivec2(gl_GlobalInvocationID.xy);
+    int layer = int(gl_GlobalInvocationID.z);
+    
+    // 子纹理尺寸
+    int subWidth = (pc.fullWidth + 3) / 4;
+    int subHeight = (pc.fullHeight + 3) / 4;
+    
+    // 范围检查
+    if (subCoord.x >= subWidth || subCoord.y >= subHeight || layer >= 16) {
+        return;
+    }
+    
+    // 计算在原始全分辨率纹理中的坐标
+    int offsetX = layer % 4;
+    int offsetY = layer / 4;
+    int srcX = subCoord.x * 4 + offsetX;
+    int srcY = subCoord.y * 4 + offsetY;
+    
+    // 使用 texelFetch 精确读取（避免插值）
+    vec4 position = texelFetch(gPosition, ivec2(srcX, srcY), 0);
+    vec4 normal = texelFetch(gNormal, ivec2(srcX, srcY), 0);
+    
+    // 写入对应 layer
+    imageStore(outPosition, ivec3(subCoord, layer), position);
+    imageStore(outNormal, ivec3(subCoord, layer), normal);
+}

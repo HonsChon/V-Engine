@@ -7,16 +7,16 @@
 namespace Nanite {
 
 // ============================================
-// Quadric 最优位置计�?
+// Quadric 最优位置计算
 // ============================================
 
 bool MeshSimplifier::Quadric::computeOptimalPosition(glm::dvec3& outPos) const {
-    // 我们需要求�?Ax = b，其�?
+    // 我们需要求解Ax = b，其中
     // A = [a b c]    b = [-d]
     //     [b e f]        [-g]
     //     [c f h]        [-i]
     
-    // 使用克莱默法则求�?
+    // 使用克莱默法则求解
     double det = a * (e * h - f * f) 
                - b * (b * h - c * f) 
                + c * (b * f - c * e);
@@ -48,14 +48,14 @@ bool MeshSimplifier::Quadric::computeOptimalPosition(glm::dvec3& outPos) const {
 }
 
 // ============================================
-// 构造函�?
+// 构造函数
 // ============================================
 
 MeshSimplifier::MeshSimplifier() {
 }
 
 // ============================================
-// 主接�?
+// 主接口
 // ============================================
 
 std::unique_ptr<SimplifiedMesh> MeshSimplifier::simplify(
@@ -79,7 +79,7 @@ std::unique_ptr<SimplifiedMesh> MeshSimplifier::simplify(
     // 保存锁定顶点集合
     m_lockedVertices = config.lockedVertices;
     
-    // 步骤 1: 初始化数据结�?
+    // 步骤 1: 初始化数据结构
     initialize(vertices, indices);
     
     if (m_progressCallback) m_progressCallback(0.1f);
@@ -94,17 +94,17 @@ std::unique_ptr<SimplifiedMesh> MeshSimplifier::simplify(
     
     if (m_progressCallback) m_progressCallback(0.3f);
     
-    // 步骤 4: 识别边界�?
+    // 步骤 4: 识别边界顶
     identifyBoundaryEdges();
     
     if (m_progressCallback) m_progressCallback(0.4f);
     
-    // 步骤 5: 初始化折叠队�?
+    // 步骤 5: 初始化折叠队列
     initializeCollapseQueue();
     
     if (m_progressCallback) m_progressCallback(0.5f);
     
-    // 步骤 6: 执行简�?
+    // 步骤 6: 执行简化
     performSimplification(config);
     
     if (m_progressCallback) m_progressCallback(0.9f);
@@ -139,7 +139,7 @@ std::unique_ptr<Cluster> MeshSimplifier::simplifyCluster(
     const Cluster& cluster,
     uint32_t targetTriangles)
 {
-    // �?Cluster 数据转换为简化器输入格式
+    // 将Cluster 数据转换为简化器输入格式
     std::vector<uint32_t> indices;
     indices.reserve(cluster.localIndices.size());
     for (uint32_t idx : cluster.localIndices) {
@@ -159,9 +159,9 @@ std::unique_ptr<Cluster> MeshSimplifier::simplifyCluster(
     auto newCluster = std::make_unique<Cluster>();
     newCluster->vertices = simplified->vertices;
     newCluster->lodLevel = cluster.lodLevel + 1;
-    newCluster->bounds = cluster.bounds;  // 暂时保留原始包围�?
+    newCluster->bounds = cluster.bounds;  // 暂时保留原始包围盒
     
-    // 转换索引为局部索�?
+    // 转换索引为局部索引
     newCluster->localIndices.reserve(simplified->indices.size());
     for (uint32_t idx : simplified->indices) {
         newCluster->localIndices.push_back(idx);
@@ -170,21 +170,21 @@ std::unique_ptr<Cluster> MeshSimplifier::simplifyCluster(
     newCluster->triangleCount = static_cast<uint32_t>(simplified->indices.size() / 3);
     newCluster->vertexCount = static_cast<uint32_t>(simplified->vertices.size());
     
-    // 重新计算包围�?
+    // 重新计算包围盒
     newCluster->computeBounds();
     
     return newCluster;
 }
 
 // ============================================
-// 初始�?
+// 初始化
 // ============================================
 
 void MeshSimplifier::initialize(
     const std::vector<Vertex>& vertices, 
     const std::vector<uint32_t>& indices) 
 {
-    // 初始化顶�?
+    // 初始化顶点
     m_vertices.resize(vertices.size());
     for (size_t i = 0; i < vertices.size(); i++) {
         m_vertices[i].position = glm::dvec3(vertices[i].position);
@@ -202,7 +202,7 @@ void MeshSimplifier::initialize(
         m_faces[i].v[2] = indices[i * 3 + 2];
         m_faces[i].isValid = true;
         
-        // 计算三角形法�?
+        // 计算三角形法线
         glm::dvec3 p0 = m_vertices[m_faces[i].v[0]].position;
         glm::dvec3 p1 = m_vertices[m_faces[i].v[1]].position;
         glm::dvec3 p2 = m_vertices[m_faces[i].v[2]].position;
@@ -229,14 +229,14 @@ void MeshSimplifier::buildAdjacency() {
             uint32_t v = face.v[j];
             m_vertices[v].adjacentFaces.push_back(faceIdx);
             
-            // 创建�?
+            // 创建边
             uint32_t v0 = face.v[j];
             uint32_t v1 = face.v[(j + 1) % 3];
             uint32_t edgeIdx = getOrCreateEdge(v0, v1);
             
             m_edges[edgeIdx].adjacentFaces.push_back(faceIdx);
             
-            // 添加到顶点的邻接边列�?
+            // 添加到顶点的邻接边列表
             auto& adj0 = m_vertices[v0].adjacentEdges;
             if (std::find(adj0.begin(), adj0.end(), edgeIdx) == adj0.end()) {
                 adj0.push_back(edgeIdx);
@@ -282,7 +282,7 @@ void MeshSimplifier::computeInitialQuadrics() {
         // 创建 Quadric
         Quadric q = Quadric::fromPlane(pa, pb, pc, pd);
         
-        // 添加到三角形的三个顶�?
+        // 添加到三角形的三个顶点
         const auto& face = m_faces[faceIdx];
         for (int j = 0; j < 3; j++) {
             m_vertices[face.v[j]].quadric += q;
@@ -314,7 +314,7 @@ void MeshSimplifier::computeFacePlane(uint32_t faceIndex,
 }
 
 // ============================================
-// 识别边界�?
+// 识别边界顶
 // ============================================
 
 void MeshSimplifier::identifyBoundaryEdges() {
@@ -337,7 +337,7 @@ void MeshSimplifier::identifyBoundaryEdges() {
 }
 
 // ============================================
-// 初始化折叠队�?
+// 初始化折叠队列
 // ============================================
 
 void MeshSimplifier::initializeCollapseQueue() {
@@ -345,7 +345,7 @@ void MeshSimplifier::initializeCollapseQueue() {
         if (!m_edges[edgeIdx].isValid) continue;
         
         EdgeCollapse collapse = computeEdgeCollapse(edgeIdx);
-        if (collapse.error >= 0) {  // 有效的折�?
+        if (collapse.error >= 0) {  // 有效的折叠
             m_collapseQueue.push(collapse);
         }
     }
@@ -423,11 +423,11 @@ MeshSimplifier::EdgeCollapse MeshSimplifier::computeEdgeCollapse(uint32_t edgeIn
 }
 
 // ============================================
-// 执行简�?
+// 执行简化
 // ============================================
 
 void MeshSimplifier::performSimplification(const SimplifierConfig& config) {
-    // 计算目标三角形数�?
+    // 计算目标三角形数量
     uint32_t targetTriangles;
     if (config.targetTriangleCount > 0) {
         targetTriangles = config.targetTriangleCount;
@@ -450,7 +450,7 @@ void MeshSimplifier::performSimplification(const SimplifierConfig& config) {
             continue;
         }
         
-        // 检查误差限�?
+        // 检查误差限制
         if (collapse.error > config.maxError) {
             break;
         }
@@ -479,12 +479,12 @@ void MeshSimplifier::performSimplification(const SimplifierConfig& config) {
 }
 
 bool MeshSimplifier::isCollapseValid(const EdgeCollapse& collapse) {
-    // 检查顶点是否有�?
+    // 检查顶点是否有效
     if (!m_vertices[collapse.v0].isValid || !m_vertices[collapse.v1].isValid) {
         return false;
     }
     
-    // 检查折叠后是否会产生翻转的三角�?
+    // 检查折叠后是否会产生翻转的三角形
     const auto& v0 = m_vertices[collapse.v0];
     const auto& v1 = m_vertices[collapse.v1];
     
@@ -493,7 +493,7 @@ bool MeshSimplifier::isCollapseValid(const EdgeCollapse& collapse) {
     for (uint32_t faceIdx : v0.adjacentFaces) {
         if (m_faces[faceIdx].isValid) {
             const auto& face = m_faces[faceIdx];
-            // 检查这个三角形是否同时包含 v0 �?v1（将被删除）
+            // 检查这个三角形是否同时包含 v0 和v1（将被删除）
             bool hasV1 = (face.v[0] == collapse.v1 || 
                          face.v[1] == collapse.v1 || 
                          face.v[2] == collapse.v1);
@@ -511,13 +511,13 @@ bool MeshSimplifier::isCollapseValid(const EdgeCollapse& collapse) {
         glm::dvec3 positions[3];
         for (int j = 0; j < 3; j++) {
             if (face.v[j] == collapse.v0) {
-                positions[j] = collapse.optimalPos;  // 使用新位�?
+                positions[j] = collapse.optimalPos;  // 使用新位置
             } else {
                 positions[j] = m_vertices[face.v[j]].position;
             }
         }
         
-        // 计算新法�?
+        // 计算新法线
         glm::dvec3 e1 = positions[1] - positions[0];
         glm::dvec3 e2 = positions[2] - positions[0];
         glm::dvec3 newNormal = glm::cross(e1, e2);
@@ -542,10 +542,10 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
     uint32_t v0 = collapse.v0;
     uint32_t v1 = collapse.v1;
     
-    // 更新 v0 的位置和属�?
+    // 更新 v0 的位置和属性
     m_vertices[v0].position = collapse.optimalPos;
     
-    // 混合法线�?UV（简单平均）
+    // 混合法线和UV（简单平均）
     m_vertices[v0].normal = glm::normalize(
         m_vertices[v0].normal + m_vertices[v1].normal
     );
@@ -561,7 +561,7 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
     m_vertices[v1].isValid = false;
     m_currentVertexCount--;
     
-    // 收集需要删除的三角形和需要更新的三角�?
+    // 收集需要删除的三角形和需要更新的三角形
     std::vector<uint32_t> facesToRemove;
     std::vector<uint32_t> facesToUpdate;
     
@@ -581,12 +581,12 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
             // 这个三角形同时包含两个端点，将被删除
             facesToRemove.push_back(faceIdx);
         } else if (hasV1) {
-            // 需要将 v1 替换�?v0
+            // 需要将 v1 替换为v0
             facesToUpdate.push_back(faceIdx);
         }
     }
     
-    // 删除三角�?
+    // 删除三角形
     for (uint32_t faceIdx : facesToRemove) {
         m_faces[faceIdx].isValid = false;
         m_currentTriangleCount--;
@@ -597,7 +597,7 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
             uint64_t key = makeEdgeKey(face.v[j], face.v[(j + 1) % 3]);
             auto it = m_edgeMap.find(key);
             if (it != m_edgeMap.end()) {
-                // 从边的邻接列表中移除这个三角�?
+                // 从边的邻接列表中移除这个三角形
                 auto& adjFaces = m_edges[it->second].adjacentFaces;
                 adjFaces.erase(
                     std::remove(adjFaces.begin(), adjFaces.end(), faceIdx),
@@ -607,14 +607,14 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
         }
     }
     
-    // 更新三角�?
+    // 更新三角形
     for (uint32_t faceIdx : facesToUpdate) {
         auto& face = m_faces[faceIdx];
         
-        // �?v1 替换�?v0
+        // 将v1 替换为v0
         for (int j = 0; j < 3; j++) {
             if (face.v[j] == v1) {
-                // 更新边映�?
+                // 更新边映射
                 uint32_t vPrev = face.v[(j + 2) % 3];
                 uint32_t vNext = face.v[(j + 1) % 3];
                 
@@ -622,7 +622,7 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
                 uint64_t oldKey1 = makeEdgeKey(v1, vPrev);
                 uint64_t oldKey2 = makeEdgeKey(v1, vNext);
                 
-                // 创建新边（如果不存在�?
+                // 创建新边（如果不存在）
                 uint32_t newEdge1 = getOrCreateEdge(v0, vPrev);
                 uint32_t newEdge2 = getOrCreateEdge(v0, vNext);
                 
@@ -652,7 +652,7 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
         glm::dvec3 e2 = p2 - p0;
         face.normal = glm::normalize(glm::cross(e1, e2));
         
-        // 添加�?v0 的邻接三角形
+        // 添加到v0 的邻接三角形
         if (std::find(m_vertices[v0].adjacentFaces.begin(),
                      m_vertices[v0].adjacentFaces.end(),
                      faceIdx) == m_vertices[v0].adjacentFaces.end()) {
@@ -663,14 +663,14 @@ void MeshSimplifier::collapseEdge(const EdgeCollapse& collapse) {
     // 使原始边无效
     m_edges[collapse.edgeIndex].isValid = false;
     
-    // �?v1 的邻接边转移�?v0，并更新折叠队列
+    // 将v1 的邻接边转移到v0，并更新折叠队列
     updateAffectedEdges(v0);
 }
 
 void MeshSimplifier::updateAffectedEdges(uint32_t vertexIndex) {
     auto& vertex = m_vertices[vertexIndex];
     
-    // 收集需要更新的�?
+    // 收集需要更新的边
     std::unordered_set<uint32_t> edgesToUpdate;
     
     for (uint32_t faceIdx : vertex.adjacentFaces) {
@@ -686,7 +686,7 @@ void MeshSimplifier::updateAffectedEdges(uint32_t vertexIndex) {
         }
     }
     
-    // 重新计算这些边的折叠代价并加入队�?
+    // 重新计算这些边的折叠代价并加入队列
     for (uint32_t edgeIdx : edgesToUpdate) {
         EdgeCollapse collapse = computeEdgeCollapse(edgeIdx);
         if (collapse.error >= 0) {
@@ -702,7 +702,7 @@ void MeshSimplifier::updateAffectedEdges(uint32_t vertexIndex) {
 std::unique_ptr<SimplifiedMesh> MeshSimplifier::buildOutput() {
     auto result = std::make_unique<SimplifiedMesh>();
     
-    // 重映射顶点索�?
+    // 重映射顶点索引
     uint32_t newIndex = 0;
     for (auto& vertex : m_vertices) {
         if (vertex.isValid) {
@@ -723,7 +723,7 @@ std::unique_ptr<SimplifiedMesh> MeshSimplifier::buildOutput() {
         }
     }
     
-    // 输出三角�?
+    // 输出三角形
     for (const auto& face : m_faces) {
         if (face.isValid) {
             for (int j = 0; j < 3; j++) {

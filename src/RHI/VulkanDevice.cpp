@@ -20,12 +20,8 @@ const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
 
-const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
-#ifdef __APPLE__
-    , "VK_KHR_portability_subset"  // Required on macOS
-#endif
-};
+// Note: device extensions are defined as a member variable in VulkanDevice.h
+// (including VK_KHR_portability_subset on macOS)
 
 #ifdef NDEBUG
     const bool enableValidationLayers = false;
@@ -406,8 +402,11 @@ void VulkanDevice::createLogicalDevice() {
         queueCreateInfos.push_back(queueCreateInfo);
     }
 
+    VkPhysicalDeviceFeatures supportedFeatures;
+    vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
+    
     VkPhysicalDeviceFeatures deviceFeatures{};
-    deviceFeatures.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -485,8 +484,9 @@ std::vector<const char*> VulkanDevice::getRequiredExtensions() {
     }
 
 #ifdef __APPLE__
-    // Add macOS specific extensions
+    // macOS: MoltenVK 需要 portability enumeration 和 physical device properties 2
     extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
 
     return extensions;
@@ -506,7 +506,12 @@ bool VulkanDevice::isDeviceSuitable(VkPhysicalDevice device) {
     VkPhysicalDeviceFeatures supportedFeatures;
     vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
+#ifdef __APPLE__
+    // MoltenVK: samplerAnisotropy 在某些 Apple 设备上可能不支持，不作为硬性要求
+    return indices.isComplete() && extensionsSupported && swapChainAdequate;
+#else
     return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+#endif
 }
 
 bool VulkanDevice::checkDeviceExtensionSupport(VkPhysicalDevice device) {

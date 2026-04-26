@@ -1,12 +1,12 @@
 #pragma once
 
 /**
- * NaniteManager.h - Nanite 系统管理�?
+ * NaniteManager.h - Nanite 系统管理器
  * 
- * 负责�?
- * - 网格�?Cluster 化处�?
- * - Cluster 数据�?GPU 上传
- * - 运行�?Cluster 剔除
+ * 负责：
+ * - 网格的Cluster 化处理
+ * - Cluster 数据向GPU 上传
+ * - 运行的Cluster 剔除
  * - 统计信息收集
  */
 
@@ -31,7 +31,7 @@ public:
     ~NaniteManager();
     
     /**
-     * 初始�?Nanite 系统
+     * 初始化Nanite 系统
      */
     void initialize();
     
@@ -41,10 +41,10 @@ public:
     void cleanup();
     
     /**
-     * 处理网格，生�?Cluster 化数�?
+     * 处理网格，生成Cluster 化数量
      * @param mesh 输入网格
-     * @param meshName 网格名称（用作缓存键�?
-     * @return Cluster 化后的网格（共享所有权�?
+     * @param meshName 网格名称（用作缓存键值
+     * @return Cluster 化后的网格（共享所有权）
      */
     std::shared_ptr<ClusterizedMesh> processMesh(const InputMesh& mesh, 
                                                   const std::string& meshName);
@@ -52,12 +52,12 @@ public:
     /**
      * 获取已处理的网格
      * @param meshName 网格名称
-     * @return Cluster 化后的网格，如果不存在返�?nullptr
+     * @return Cluster 化后的网格，如果不存在返回nullptr
      */
     std::shared_ptr<ClusterizedMesh> getMesh(const std::string& meshName) const;
     
     /**
-     * 获取所有已处理的网格名�?
+     * 获取所有已处理的网格名称
      * @return 网格名称列表
      */
     std::vector<std::string> getAllMeshNames() const;
@@ -73,14 +73,14 @@ public:
     glm::vec3 getLastCameraPosition() const { return m_lastCameraPosition; }
     
     /**
-     * 上传 Cluster 数据�?GPU
+     * 上传 Cluster 数据向GPU
      * 在所有网格处理完成后调用
      */
     void uploadToGPU();
     
     /**
      * 执行 Cluster 剔除（在 Compute Pass 中调用）
-     * @param commandBuffer 命令缓冲�?
+     * @param commandBuffer 命令缓冲区
      * @param viewMatrix 视图矩阵
      * @param projMatrix 投影矩阵
      * @param cameraPosition 相机世界坐标
@@ -93,8 +93,8 @@ public:
                        uint32_t frameIndex = 0);
     
     /**
-     * 读取可见 Cluster 列表（GPU -> CPU�?
-     * @return 可见 Cluster 的索引列�?
+     * 读取可见 Cluster 列表（GPU -> CPU）
+     * @return 可见 Cluster 的索引列表
      */
     const std::vector<uint32_t>& getVisibleClusters();
     
@@ -110,24 +110,24 @@ public:
     const NaniteConfig& getConfig() const { return m_config; }
     
     /**
-     * 获取�?Cluster 数量
+     * 获取总Cluster 数量
      */
     uint32_t getTotalClusterCount() const { return m_totalClusterCount; }
     
     /**
-     * 获取 Cluster 数据缓冲区（用于渲染�?
+     * 获取 Cluster 数据缓冲区（用于渲染）
      */
     VkBuffer getClusterDataBuffer() const;
     VkBuffer getVisibleIndicesBuffer() const;
 
 private:
-    // GPU 缓冲�?
+    // GPU 缓冲区
     void createGPUBuffers();
     void updateUniformBuffer(const glm::mat4& viewMatrix,
                             const glm::mat4& projMatrix,
                             const glm::vec3& cameraPosition);
     
-    // 从视图投影矩阵提取视锥平�?
+    // 从视图投影矩阵提取视锥平面
     static void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     
     std::shared_ptr<VulkanDevice> m_device;
@@ -138,28 +138,28 @@ private:
     // 已处理的网格缓存
     std::unordered_map<std::string, std::shared_ptr<ClusterizedMesh>> m_meshCache;
     
-    // GPU 缓冲�?
-    std::unique_ptr<VulkanBuffer> m_clusterDataBuffer;      // 所�?Cluster �?GPUClusterData
+    // GPU 缓冲区
+    std::unique_ptr<VulkanBuffer> m_clusterDataBuffer;      // 所属Cluster 的GPUClusterData
     std::unique_ptr<VulkanBuffer> m_transformBuffer;        // 变换矩阵
     std::unique_ptr<VulkanBuffer> m_uniformBuffer;          // Uniform 数据
     std::unique_ptr<VulkanBuffer> m_visibleIndicesBuffer;   // 可见 Cluster 索引
-    std::unique_ptr<VulkanBuffer> m_counterBuffer;          // 原子计数�?
-    std::unique_ptr<VulkanBuffer> m_readbackBuffer;         // CPU 读取缓冲�?
+    std::unique_ptr<VulkanBuffer> m_counterBuffer;          // 原子计数量
+    std::unique_ptr<VulkanBuffer> m_readbackBuffer;         // CPU 读取缓冲区
     
     // GPU Cluster Culling Pass
     std::unique_ptr<ClusterCullingPass> m_cullingPass;
     
-    // 统计和状�?
+    // 统计和状态
     NaniteConfig m_config;
     NaniteStats m_stats;
     uint32_t m_totalClusterCount = 0;
     std::vector<uint32_t> m_visibleClustersCPU;
     
-    // 屏幕参数（用�?LOD 选择�?
+    // 屏幕参数（用于LOD 选择）
     float m_screenWidth = 1920.0f;
     float m_screenHeight = 1080.0f;
     
-    // 缓存的矩阵（用于 uniform 更新�?
+    // 缓存的矩阵（用于 uniform 更新）
     glm::mat4 m_lastViewMatrix{1.0f};
     glm::mat4 m_lastProjMatrix{1.0f};
     
@@ -171,7 +171,7 @@ private:
     glm::vec3 m_lastCameraPosition{0.0f};
     
 public:
-    // 设置屏幕尺寸（用�?LOD 计算�?
+    // 设置屏幕尺寸（用于LOD 计算）
     void setScreenSize(float width, float height) {
         m_screenWidth = width;
         m_screenHeight = height;
@@ -192,14 +192,14 @@ public:
     // 获取 GPU 可见 Cluster 数量
     uint32_t getVisibleClusterCount() const;
     
-    // 获取 GPU 可见 Cluster 索引列表（同步读取，谨慎使用�?
+    // 获取 GPU 可见 Cluster 索引列表（同步读取，谨慎使用）
     const std::vector<uint32_t>& getVisibleClusterIndices();
     
-    // 获取 ClusterCullingPass（用于访�?GPU 选择结果�?
+    // 获取 ClusterCullingPass（用于访问GPU 选择结果）
     ClusterCullingPass* getCullingPass() const { return m_cullingPass.get(); }
     
     // 帧结束后读取 GPU 数据（在 vkWaitForFences 之后、命令录制之前调用）
-    // @param frameIndex 当前帧索引（与渲染器�?currentFrame 对应�?
+    // @param frameIndex 当前帧索引（与渲染器的currentFrame 对应）
     void readbackCullingResults(uint32_t frameIndex) {
         if (m_cullingPass) {
             m_cullingPass->readbackData(frameIndex);

@@ -5,6 +5,9 @@
 #include <string>
 #include <cstdint>
 
+// Forward declaration
+struct RenderSettings;
+
 /**
  * DebugPanel - 调试信息面板
  * 
@@ -38,6 +41,9 @@ public:
     void setObjectCount(int count) { objectCount = count; }
     void setRenderMode(const std::string& mode) { renderMode = mode; }
 
+    // 设置渲染选项（用于 SSAO 等控制）
+    void setRenderSettings(RenderSettings* settings) { renderSettings = settings; }
+
 private:
     // 渲染统计
     float fps = 0.0f;
@@ -61,4 +67,7 @@ private:
     std::string sceneName = "Untitled";
     int objectCount = 0;
     std::string renderMode = "Forward";
+
+    // 渲染选项引用（可选）
+    RenderSettings* renderSettings = nullptr;
 };

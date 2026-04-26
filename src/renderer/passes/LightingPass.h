@@ -40,6 +40,9 @@ public:
     void setGBufferInputs(VkImageView positionView, VkImageView normalView,
                           VkImageView albedoView, VkSampler sampler);
 
+    // 设置 SSAO 纹理
+    void setSSAOTexture(VkImageView ssaoView, VkSampler ssaoSampler);
+
     // 更新光照参数
     void updateUniforms(uint32_t frameIndex, const glm::vec3& viewPos,
                         const glm::vec3& lightPos, const glm::vec3& lightColor,
@@ -98,6 +101,10 @@ private:
     VkImageView cachedNormalView = VK_NULL_HANDLE;
     VkImageView cachedAlbedoView = VK_NULL_HANDLE;
     VkSampler cachedSampler = VK_NULL_HANDLE;
+
+    // SSAO 纹理
+    VkImageView cachedSSAOView = VK_NULL_HANDLE;
+    VkSampler cachedSSAOSampler = VK_NULL_HANDLE;
 
     // 光照参数
     glm::vec3 ambientColor = glm::vec3(0.03f);

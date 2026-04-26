@@ -120,6 +120,12 @@ void UIManager::updateSceneInfo(const SceneInfo& info) {
     }
 }
 
+void UIManager::setRenderSettings(RenderSettings* settings) {
+    if (debugPanel) {
+        debugPanel->setRenderSettings(settings);
+    }
+}
+
 void UIManager::setDebugPanelVisible(bool visible) { showDebugPanel = visible; }
 void UIManager::setSceneHierarchyVisible(bool visible) { showSceneHierarchy = visible; }
 void UIManager::setInspectorVisible(bool visible) { showInspector = visible; }

@@ -1,6 +1,7 @@
 
 #include "DebugPanel.h"
 #include "imgui.h"
+#include "RenderSettings.h"
 
 DebugPanel::DebugPanel() {
     // 初始区FPS 历史记录
@@ -84,6 +85,22 @@ void DebugPanel::render() {
             ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "%s", renderMode.c_str());
         } else {
             ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.3f, 1.0f), "%s", renderMode.c_str());
+        }
+    }
+
+    ImGui::Spacing();
+
+    // === SSAO 设置 ===
+    if (renderSettings) {
+        if (ImGui::CollapsingHeader("SSAO", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enable SSAO", &renderSettings->enableSSAO);
+
+            // 质量预设: 0=Low(32 samples), 1=Medium(64), 2=High(128)
+            const char* qualityLabels[] = { "Low (32)", "Medium (64)", "High (128)" };
+            int quality = renderSettings->ssaoQuality;
+            if (ImGui::Combo("Quality", &quality, qualityLabels, IM_ARRAYSIZE(qualityLabels))) {
+                renderSettings->ssaoQuality = quality;
+            }
         }
     }
 

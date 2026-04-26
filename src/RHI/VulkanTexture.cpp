@@ -85,8 +85,56 @@ void VulkanTexture::createTextureImage(const std::string& filepath) {
     height = static_cast<uint32_t>(texHeight);
     
     std::cout << "Loaded texture: " << filepath << " (" << width << "x" << height << ")" << std::endl;
+
+#ifdef __APPLE__
+    // macOS (Metal/MoltenVK) 最大纹理尺寸为 16384，超出需要缩放
+    const uint32_t maxTextureSize = 16384;
+    stbi_uc* resizedPixels = nullptr;
     
+    if (width > maxTextureSize || height > maxTextureSize) {
+        float scale = std::min(static_cast<float>(maxTextureSize) / width,
+                               static_cast<float>(maxTextureSize) / height);
+        uint32_t newWidth = static_cast<uint32_t>(width * scale);
+        uint32_t newHeight = static_cast<uint32_t>(height * scale);
+        // 确保至少为 1
+        newWidth = std::max(newWidth, 1u);
+        newHeight = std::max(newHeight, 1u);
+        
+        std::cout << "[macOS] Texture exceeds Metal limit (" << maxTextureSize 
+                  << "), resizing from " << width << "x" << height 
+                  << " to " << newWidth << "x" << newHeight << std::endl;
+        
+        // 简单的 box filter 缩放 (RGBA 4通道)
+        resizedPixels = static_cast<stbi_uc*>(malloc(newWidth * newHeight * 4));
+        float xRatio = static_cast<float>(width) / newWidth;
+        float yRatio = static_cast<float>(height) / newHeight;
+        
+        for (uint32_t y = 0; y < newHeight; ++y) {
+            for (uint32_t x = 0; x < newWidth; ++x) {
+                // 采样源图像中对应区域的中心像素
+                uint32_t srcX = std::min(static_cast<uint32_t>(x * xRatio), width - 1);
+                uint32_t srcY = std::min(static_cast<uint32_t>(y * yRatio), height - 1);
+                uint32_t srcIdx = (srcY * width + srcX) * 4;
+                uint32_t dstIdx = (y * newWidth + x) * 4;
+                resizedPixels[dstIdx + 0] = pixels[srcIdx + 0];
+                resizedPixels[dstIdx + 1] = pixels[srcIdx + 1];
+                resizedPixels[dstIdx + 2] = pixels[srcIdx + 2];
+                resizedPixels[dstIdx + 3] = pixels[srcIdx + 3];
+            }
+        }
+        
+        texWidth = static_cast<int>(newWidth);
+        texHeight = static_cast<int>(newHeight);
+        width = newWidth;
+        height = newHeight;
+    }
+    
+    createTextureImageFromMemory(resizedPixels ? resizedPixels : pixels, texWidth, texHeight, 4);
+    
+    free(resizedPixels);  // free(nullptr) is safe
+#else
     createTextureImageFromMemory(pixels, texWidth, texHeight, 4);
+#endif
     
     stbi_image_free(pixels);
 }
@@ -274,8 +322,11 @@ void VulkanTexture::createTextureSampler() {
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    // 检查设备是否支持各向异性过滤
+    VkPhysicalDeviceFeatures supportedFeatures;
+    vkGetPhysicalDeviceFeatures(device->getPhysicalDevice(), &supportedFeatures);
+    samplerInfo.anisotropyEnable = supportedFeatures.samplerAnisotropy;
+    samplerInfo.maxAnisotropy = supportedFeatures.samplerAnisotropy ? properties.limits.maxSamplerAnisotropy : 1.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;

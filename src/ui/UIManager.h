@@ -14,6 +14,7 @@ class SceneHierarchyPanel;
 class InspectorPanel;
 class AssetBrowserPanel;
 class Camera;
+struct RenderSettings;
 
 namespace VulkanEngine {
     class Scene;
@@ -97,6 +98,11 @@ public:
     void toggleSceneHierarchy();
     void toggleInspector();
     void toggleAssetBrowser();
+
+    /**
+     * 设置渲染选项指针（SSAO 等开关控制）
+     */
+    void setRenderSettings(RenderSettings* settings);
 
     // 获取面板引用（用于外部访问面板数据）
     DebugPanel* getDebugPanel() { return debugPanel.get(); }

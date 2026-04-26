@@ -79,7 +79,7 @@ void LightingPass::cleanup() {
 }
 
 void LightingPass::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
 
     // binding 0: UBO
     bindings[0].binding = 0;
@@ -109,6 +109,13 @@ void LightingPass::createDescriptorSetLayout() {
     bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     bindings[3].pImmutableSamplers = nullptr;
 
+    // binding 4: SSAO texture
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[4].pImmutableSamplers = nullptr;
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -124,7 +131,7 @@ void LightingPass::createDescriptorPool() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 3;  // 3 G-Buffer textures
+    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 4;  // 3 G-Buffer textures + 1 SSAO
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -220,6 +227,29 @@ void LightingPass::setGBufferInputs(VkImageView positionView, VkImageView normal
 
         vkUpdateDescriptorSets(device->getDevice(), static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
+    }
+}
+
+void LightingPass::setSSAOTexture(VkImageView ssaoView, VkSampler ssaoSampler) {
+    cachedSSAOView = ssaoView;
+    cachedSSAOSampler = ssaoSampler;
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorImageInfo ssaoInfo{};
+        ssaoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        ssaoInfo.imageView = ssaoView;
+        ssaoInfo.sampler = ssaoSampler;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = descriptorSets[i];
+        write.dstBinding = 4;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &ssaoInfo;
+
+        vkUpdateDescriptorSets(device->getDevice(), 1, &write, 0, nullptr);
     }
 }
 

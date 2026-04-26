@@ -15,15 +15,17 @@
 #include <string>
 #include <functional>
 
+struct WindowConfig {
+    std::string title = "Vulkan Application";
+    uint32_t width = 1280;
+    uint32_t height = 720;
+    bool resizable = true;
+    bool fullscreen = false;
+};
+
 class Window {
 public:
-    struct Config {
-        std::string title = "Vulkan Application";
-        uint32_t width = 1280;
-        uint32_t height = 720;
-        bool resizable = true;
-        bool fullscreen = false;
-    };
+    using Config = WindowConfig;
 
     // 回调函数类型
     using ResizeCallback = std::function<void(uint32_t width, uint32_t height)>;

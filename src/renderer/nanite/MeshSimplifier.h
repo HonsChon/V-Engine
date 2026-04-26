@@ -1,16 +1,16 @@
 #pragma once
 
 /**
- * MeshSimplifier.h - QEM (Quadric Error Metrics) 网格简化算�?
+ * MeshSimplifier.h - QEM (Quadric Error Metrics) 网格简化算法
  * 
- * 基于 Michael Garland �?Paul Heckbert �?"Surface Simplification Using Quadric Error Metrics" (1997)
+ * 基于 Michael Garland 和Paul Heckbert 的"Surface Simplification Using Quadric Error Metrics" (1997)
  * 
- * 核心思想�?
- * 1. 为每个顶点计算误差二次曲�?(Quadric)
+ * 核心思想：
+ * 1. 为每个顶点计算误差二次曲面(Quadric)
  * 2. 为每条边计算折叠后的最优位置和误差
  * 3. 按误差从小到大折叠边，直到达到目标三角形数量
  * 
- * 这是 Nanite LOD 生成的核心算法�?
+ * 这是 Nanite LOD 生成的核心算法：
  */
 
 #include "NaniteCluster.h"
@@ -25,19 +25,19 @@
 namespace Nanite {
 
 /**
- * 简化配�?
+ * 简化配置
  */
 struct SimplifierConfig {
-    // 目标三角形比�?(0.0 - 1.0)
+    // 目标三角形比例(0.0 - 1.0)
     float targetRatio = 0.5f;
     
     // 或者目标三角形数量 (0 表示使用 ratio)
     uint32_t targetTriangleCount = 0;
     
-    // 最大几何误�?(超过此值停止简�?
+    // 最大几何误差(超过此值停止简化
     float maxError = FLT_MAX;
     
-    // 是否保护边界�?(不折叠边�?
+    // 是否保护边界顶(不折叠边界
     bool preserveBoundary = true;
     
     // 边界边的惩罚权重
@@ -46,8 +46,8 @@ struct SimplifierConfig {
     // 是否保护法线突变的边
     bool preserveNormalSeams = true;
     
-    // 法线阈�?(法线夹角超过此值认为是接缝)
-    float normalSeamAngle = 30.0f;  // �?
+    // 法线阈值(法线夹角超过此值认为是接缝)
+    float normalSeamAngle = 30.0f;  // 度
     
     // 是否保护 UV 接缝
     bool preserveUVSeams = true;
@@ -62,7 +62,7 @@ struct SimplifierConfig {
 };
 
 /**
- * 简化统计信�?
+ * 简化统计信息
  */
 struct SimplificationStats {
     uint32_t originalVertices = 0;
@@ -76,12 +76,12 @@ struct SimplificationStats {
 };
 
 /**
- * 简化输�?
+ * 简化输出
  */
 struct SimplifiedMesh {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    float geometricError = 0.0f;  // 简化引入的最大几何误�?
+    float geometricError = 0.0f;  // 简化引入的最大几何误差
     SimplificationStats stats;
 };
 
@@ -94,11 +94,11 @@ public:
     ~MeshSimplifier() = default;
     
     /**
-     * 简化网�?
+     * 简化网格
      * @param vertices 输入顶点
-     * @param indices 输入索引（三角形列表�?
-     * @param config 简化配�?
-     * @return 简化后的网�?
+     * @param indices 输入索引（三角形列表）
+     * @param config 简化配置
+     * @return 简化后的网格
      */
     std::unique_ptr<SimplifiedMesh> simplify(
         const std::vector<Vertex>& vertices,
@@ -107,10 +107,10 @@ public:
     );
     
     /**
-     * 简�?Cluster
+     * 简化Cluster
      * @param cluster 输入 Cluster
-     * @param targetTriangles 目标三角形数�?
-     * @return 简化后�?Cluster
+     * @param targetTriangles 目标三角形数量
+     * @return 简化后的Cluster
      */
     std::unique_ptr<Cluster> simplifyCluster(
         const Cluster& cluster,
@@ -128,13 +128,13 @@ private:
     
     /**
      * Quadric - 误差二次曲面
-     * 表示�?4x4 对称矩阵的上三角部分 (10 个元�?
+     * 表示为4x4 对称矩阵的上三角部分 (10 个元素
      * Q = [a b c d]
      *     [b e f g]
      *     [c f h i]
      *     [d g i j]
      * 
-     * 误差 = v^T * Q * v，其�?v = [x, y, z, 1]
+     * 误差 = v^T * Q * v，其中v = [x, y, z, 1]
      */
     struct Quadric {
         double a, b, c, d;
@@ -144,7 +144,7 @@ private:
         
         Quadric() : a(0), b(0), c(0), d(0), e(0), f(0), g(0), h(0), i(0), j(0) {}
         
-        // 从平面方程创�?Quadric
+        // 从平面方程创建Quadric
         // 平面: ax + by + cz + d = 0 (其中 a^2 + b^2 + c^2 = 1)
         static Quadric fromPlane(double px, double py, double pz, double pd) {
             Quadric q;
@@ -209,7 +209,7 @@ private:
                  + j;
         }
         
-        // 计算最优顶点位�?(最小化误差)
+        // 计算最优顶点位置(最小化误差)
         // 返回 false 如果矩阵奇异
         bool computeOptimalPosition(glm::dvec3& outPos) const;
     };
@@ -224,16 +224,16 @@ private:
         glm::dvec4 tangent;
         
         Quadric quadric;
-        std::vector<uint32_t> adjacentFaces;  // 邻接三角�?
-        std::vector<uint32_t> adjacentEdges;  // 邻接�?
+        std::vector<uint32_t> adjacentFaces;  // 邻接三角形
+        std::vector<uint32_t> adjacentEdges;  // 邻接图
         
         bool isValid = true;      // 是否有效（未被删除）
-        bool isBoundary = false;  // 是否是边界顶�?
-        uint32_t remappedIndex = ~0u;  // 输出时的重映射索�?
+        bool isBoundary = false;  // 是否是边界顶点
+        uint32_t remappedIndex = ~0u;  // 输出时的重映射索引
     };
     
     /**
-     * 内部三角形表�?
+     * 内部三角形表示
      */
     struct InternalFace {
         uint32_t v[3];  // 顶点索引
@@ -242,12 +242,12 @@ private:
     };
     
     /**
-     * 边折叠候�?
+     * 边折叠候选
      */
     struct EdgeCollapse {
         uint32_t edgeIndex;
         uint32_t v0, v1;          // 端点 (v0 将被保留, v1 将被删除)
-        glm::dvec3 optimalPos;    // 折叠后的最优位�?
+        glm::dvec3 optimalPos;    // 折叠后的最优位置
         double error;             // 折叠误差
         
         // 优先队列比较（误差小的优先）
@@ -257,7 +257,7 @@ private:
     };
     
     /**
-     * �?
+     * 边
      */
     struct InternalEdge {
         uint32_t v0, v1;
@@ -282,22 +282,22 @@ private:
     // 计算三角形的平面方程
     void computeFacePlane(uint32_t faceIndex, double& a, double& b, double& c, double& d);
     
-    // 计算边折叠的误差和最优位�?
+    // 计算边折叠的误差和最优位置
     EdgeCollapse computeEdgeCollapse(uint32_t edgeIndex);
     
-    // 执行边折�?
+    // 执行边折叠
     void collapseEdge(const EdgeCollapse& collapse);
     
     // 更新折叠后受影响的边
     void updateAffectedEdges(uint32_t vertexIndex);
     
-    // 检查边折叠是否会导致拓扑问题（如翻转三角形�?
+    // 检查边折叠是否会导致拓扑问题（如翻转三角形）
     bool isCollapseValid(const EdgeCollapse& collapse);
     
     // 获取或创建边索引
     uint32_t getOrCreateEdge(uint32_t v0, uint32_t v1);
     
-    // 创建边的�?
+    // 创建边的键
     static uint64_t makeEdgeKey(uint32_t v0, uint32_t v1) {
         if (v0 > v1) std::swap(v0, v1);
         return (static_cast<uint64_t>(v0) << 32) | v1;
@@ -315,7 +315,7 @@ private:
     // 锁定的顶点集合（不允许折叠或移动）
     std::unordered_set<uint32_t> m_lockedVertices;
     
-    // 边折叠优先队�?
+    // 边折叠优先队列
     std::priority_queue<EdgeCollapse, std::vector<EdgeCollapse>, std::greater<EdgeCollapse>> m_collapseQueue;
     
     // 统计
