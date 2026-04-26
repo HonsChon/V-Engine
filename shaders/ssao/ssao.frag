@@ -1,7 +1,7 @@
 #version 450
 
-// SSAO 采样计算片段着色器 (Alchemy AO 风格)
-// 在子纹理 UV 空间偏移采样 → 重建 view-space 3D 坐标 → 几何关系评估
+// SSAO 采样计算片段着色器 (参照 NVIDIA Donut ComputeAO)
+// 在子纹理 UV 空间偏移采样 → 重建 view-space 3D 坐标 → Alchemy AO 几何关系评估
 // 配合 Deinterleaved Texturing: 子纹理中 1 texel 偏移 = 全分辨率 4 texel 偏移
 
 layout(location = 0) in vec2 fragTexCoord;
@@ -16,6 +16,7 @@ layout(binding = 0) uniform SSAOParams {
     float radius;               // 采样半径 (view-space 单位)
     float bias;                 // 法线偏移量（防止平面自遮蔽）
     float power;                // 遮蔽强度指数
+    float amount;               // AO 强度乘数 (参照 NVIDIA ComputeAO)
     int kernelSize;             // 实际使用的采样数
 } ubo;
 
@@ -30,6 +31,18 @@ layout(push_constant) uniform PushConstants {
     int subWidth;              // 子纹理宽度
     int subHeight;             // 子纹理高度
 } pc;
+
+// ---- 参照 NVIDIA ComputeAO ----
+// V = 未归一化向量 (从当前像素 P 指向采样点 S)
+// N = 当前像素法线 (view-space)
+// InvR2 = 1.0 / (radius * radius)
+float ComputeAO(vec3 V, vec3 N, float InvR2) {
+    float VdotV = dot(V, V);
+    float NdotV = dot(N, V) * inversesqrt(VdotV);    // = dot(N, normalize(V))
+    float lambertian = clamp(NdotV - ubo.bias, 0.0, 1.0);
+    float falloff = clamp(1.0 - VdotV * InvR2, 0.0, 1.0);
+    return clamp(lambertian * falloff * ubo.amount, 0.0, 1.0);
+}
 
 void main() {
     vec3 texCoord3D = vec3(fragTexCoord, float(pc.layerIndex));
@@ -52,12 +65,11 @@ void main() {
     mat2 rotation = mat2(cosA, -sinA, sinA, cosA);
 
     // 根据当前像素深度计算屏幕空间采样半径 (texel 单位)
-    // 使用投影矩阵的焦距: focalLen = projection[0][0] (水平) 和 projection[1][1] (垂直)
-    // 屏幕空间半径 = (worldRadius / |P.z|) * focalLen * 0.5 * subTextureSize
-    float screenRadiusX = (ubo.radius / abs(P.z)) * ubo.projection[0][0] * 0.5 * float(pc.subWidth);
-    float screenRadiusY = (ubo.radius / abs(P.z)) * ubo.projection[1][1] * 0.5 * float(pc.subHeight);
+    // 注意: Vulkan 翻转 Y 轴后 projection[1][1] 为负，需取 abs
+    float screenRadiusX = (ubo.radius / abs(P.z)) * abs(ubo.projection[0][0]) * 0.5 * float(pc.subWidth);
+    float screenRadiusY = (ubo.radius / abs(P.z)) * abs(ubo.projection[1][1]) * 0.5 * float(pc.subHeight);
 
-    // 限制最小/最大屏幕空间半径 (以 texel 为单位)
+    // 如果屏幕空间半径 < 1 texel，无意义
     float avgScreenRadius = (screenRadiusX + screenRadiusY) * 0.5;
     if (avgScreenRadius < 1.0) {
         outAO = 1.0;
@@ -67,9 +79,10 @@ void main() {
     // texel → UV 的转换系数
     vec2 texelSize = vec2(1.0 / float(pc.subWidth), 1.0 / float(pc.subHeight));
 
-    float occlusion = 0.0;
+    float InvR2 = 1.0 / (ubo.radius * ubo.radius);
+    float result = 0.0;
     int actualKernelSize = min(ubo.kernelSize, KERNEL_SIZE);
-    int validSamples = 0;
+    float numValidSamples = 0.0;
 
     for (int i = 0; i < actualKernelSize; ++i) {
         // samples[i].xy: 单位圆盘方向, samples[i].z: 径向缩放 (靠近中心密度高)
@@ -95,46 +108,18 @@ void main() {
 
         vec3 S = (ubo.view * vec4(samplePosWorld, 1.0)).xyz;
 
-        // ---- Alchemy AO 几何关系评估 ----
-        // V: 从当前像素 P 指向采样点 S 的向量
+        // 参照 NVIDIA ComputeAO: V = S - P (未归一化)
         vec3 V = S - P;
-        float distSq = dot(V, V);
-        float radiusSq = ubo.radius * ubo.radius;
-
-        // 距离超出采样半径 → 跳过
-        if (distSq > radiusSq) {
-            continue;
-        }
-
-        // 法线·方向 评估: dot(N, normalize(V)) 反映 S 是否在 P 的法线半球内
-        // 等价于 dot(N, V) / |V|，用 dot(N,V) / sqrt(distSq) 避免额外 normalize
-        float NdotV = dot(N, V);
-
-        // 只有当 S 在法线半球内 (NdotV > bias * |V|) 才计入遮蔽
-        // bias 用于防止平面自遮蔽
-        float dist = sqrt(distSq);
-        float cosAngle = NdotV / (dist + 0.0001);
-
-        if (cosAngle <= ubo.bias) {
-            validSamples++;
-            continue;
-        }
-
-        // 距离衰减: 越近遮蔽越强，越远衰减到 0
-        // 使用 1 - distSq/radiusSq 的平滑衰减
-        float falloff = 1.0 - distSq / radiusSq;
-        falloff = falloff * falloff;  // 更平滑的二次衰减
-
-        // AO 贡献 = 法线对齐度 × 距离衰减
-        occlusion += cosAngle * falloff;
-        validSamples++;
+        result += ComputeAO(V, N, InvR2);
+        numValidSamples += 1.0;
     }
 
-    // 归一化并输出
-    if (validSamples > 0) {
-        occlusion /= float(validSamples);
+    // 归一化
+    if (numValidSamples > 0.0) {
+        result /= numValidSamples;
     }
 
-    float ao = 1.0 - clamp(occlusion, 0.0, 1.0);
+    // 输出: 1.0 = 无遮蔽, 0.0 = 完全遮蔽
+    float ao = 1.0 - result;
     outAO = pow(ao, ubo.power);
 }
