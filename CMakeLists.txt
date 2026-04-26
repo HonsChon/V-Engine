@@ -3,14 +3,48 @@ cmake_minimum_required(VERSION 3.16)
 # ============================================================
 # vcpkg 配置 (必须在 project() 之前)
 # ============================================================
-# 设置 vcpkg triplet
-set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "Vcpkg target triplet")
+# 自动检测平台设置 vcpkg triplet
+if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+    if(APPLE)
+        # macOS: 检测 ARM64 (Apple Silicon) vs x86_64
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE HOST_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(HOST_ARCH STREQUAL "arm64")
+            set(VCPKG_TARGET_TRIPLET "arm64-osx" CACHE STRING "Vcpkg target triplet")
+        else()
+            set(VCPKG_TARGET_TRIPLET "x64-osx" CACHE STRING "Vcpkg target triplet")
+        endif()
+    elseif(WIN32)
+        set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "Vcpkg target triplet")
+    elseif(UNIX)
+        set(VCPKG_TARGET_TRIPLET "x64-linux" CACHE STRING "Vcpkg target triplet")
+    endif()
+endif()
 
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg-master/scripts/buildsystems/vcpkg.cmake"
-        CACHE STRING "Vcpkg toolchain file")
+    # 尝试从环境变量 VCPKG_ROOT 查找
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            CACHE STRING "Vcpkg toolchain file")
+    elseif(WIN32)
+        set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg-master/scripts/buildsystems/vcpkg.cmake"
+            CACHE STRING "Vcpkg toolchain file")
+    elseif(APPLE)
+        # macOS 常见 vcpkg 安装路径
+        if(EXISTS "$ENV{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+            set(CMAKE_TOOLCHAIN_FILE "$ENV{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+                CACHE STRING "Vcpkg toolchain file")
+        elseif(EXISTS "/opt/vcpkg/scripts/buildsystems/vcpkg.cmake")
+            set(CMAKE_TOOLCHAIN_FILE "/opt/vcpkg/scripts/buildsystems/vcpkg.cmake"
+                CACHE STRING "Vcpkg toolchain file")
+        endif()
+    endif()
 endif()
-message(STATUS "Using vcpkg toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+
+if(CMAKE_TOOLCHAIN_FILE)
+    message(STATUS "Using vcpkg toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+else()
+    message(STATUS "No vcpkg toolchain found - using system packages")
+endif()
 message(STATUS "Vcpkg triplet: ${VCPKG_TARGET_TRIPLET}")
 
 # ============================================================
@@ -45,7 +79,7 @@ endif()
 find_package(glfw3 CONFIG QUIET)
 
 if(NOT glfw3_FOUND)
-    # 方法2: 手动指定 GLFW 路径 (用户需要根据实际情况修改)
+    # 方法2: 手动指定 GLFW 路径
     message(STATUS "glfw3 not found via find_package, trying manual configuration...")
     
     # 用户可以设置 GLFW_DIR 环境变量或 CMake 变量
@@ -55,13 +89,29 @@ if(NOT glfw3_FOUND)
     
     if(GLFW_DIR)
         set(GLFW_INCLUDE_DIR "${GLFW_DIR}/include")
-        set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2022/glfw3.lib")
-        
-        if(NOT EXISTS ${GLFW_LIBRARY})
-            set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2019/glfw3.lib")
+        if(WIN32)
+            set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2022/glfw3.lib")
+            if(NOT EXISTS ${GLFW_LIBRARY})
+                set(GLFW_LIBRARY "${GLFW_DIR}/lib-vc2019/glfw3.lib")
+            endif()
+        elseif(APPLE)
+            set(GLFW_LIBRARY "${GLFW_DIR}/lib/libglfw3.a")
+            if(NOT EXISTS ${GLFW_LIBRARY})
+                set(GLFW_LIBRARY "${GLFW_DIR}/lib/libglfw.dylib")
+            endif()
+        else()
+            set(GLFW_LIBRARY "${GLFW_DIR}/lib/libglfw3.a")
         endif()
-        
         message(STATUS "Using GLFW from: ${GLFW_DIR}")
+    elseif(APPLE)
+        # macOS: 尝试 Homebrew 安装路径
+        find_library(GLFW_LIBRARY glfw HINTS /opt/homebrew/lib /usr/local/lib)
+        find_path(GLFW_INCLUDE_DIR GLFW/glfw3.h HINTS /opt/homebrew/include /usr/local/include)
+        if(GLFW_LIBRARY AND GLFW_INCLUDE_DIR)
+            message(STATUS "Found GLFW via Homebrew: ${GLFW_LIBRARY}")
+        else()
+            message(FATAL_ERROR "GLFW not found! Please install GLFW: brew install glfw")
+        endif()
     else()
         message(FATAL_ERROR "GLFW not found! Please install GLFW or set GLFW_DIR")
     endif()
@@ -70,8 +120,32 @@ endif()
 # ============================================================
 # EnTT 配置 (ECS库)
 # ============================================================
-find_package(EnTT CONFIG REQUIRED)
-message(STATUS "Found EnTT via vcpkg")
+find_package(EnTT CONFIG QUIET)
+if(NOT EnTT_FOUND)
+    # 尝试非 CONFIG 模式
+    find_package(EnTT QUIET)
+endif()
+if(EnTT_FOUND)
+    message(STATUS "Found EnTT")
+else()
+    # 尝试 Homebrew / pkg-config 路径
+    find_path(ENTT_INCLUDE_DIR entt/entt.hpp
+        HINTS /opt/homebrew/include /usr/local/include
+    )
+    if(ENTT_INCLUDE_DIR)
+        message(STATUS "Found EnTT headers at: ${ENTT_INCLUDE_DIR}")
+        # 创建一个 INTERFACE target 以兼容 target_link_libraries
+        add_library(EnTT::EnTT INTERFACE IMPORTED)
+        set_target_properties(EnTT::EnTT PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${ENTT_INCLUDE_DIR}"
+        )
+    else()
+        message(FATAL_ERROR "EnTT not found! Please install EnTT:\n"
+            "  vcpkg: vcpkg install entt\n"
+            "  Homebrew: brew install entt\n"
+            "  Or set ENTT_INCLUDE_DIR manually")
+    endif()
+endif()
 
 # ============================================================
 # GLM 配置
@@ -422,19 +496,23 @@ if(WIN32)
     endif()
     
 elseif(APPLE)
-    # macOS 平台配置
+    # macOS 平台配置 (MoltenVK / Vulkan SDK for macOS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        VK_USE_PLATFORM_MACOS_MVK
+        VK_USE_PLATFORM_METAL_EXT
         GLFW_INCLUDE_VULKAN
     )
     
+    # 编译选项
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wno-unused-function -Wno-missing-braces)
+    
     target_link_libraries(${PROJECT_NAME} PRIVATE
         "-framework Cocoa"
-        "-framework OpenGL" 
         "-framework IOKit"
         "-framework CoreVideo"
         "-framework CoreGraphics"
         "-framework CoreFoundation"
+        "-framework QuartzCore"
+        "-framework Metal"
     )
     
 elseif(UNIX)
@@ -463,7 +541,12 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # ============================================================
 # 编译 Shaders (可选)
 # ============================================================
-find_program(GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin")
+find_program(GLSLC glslc HINTS
+    "$ENV{VULKAN_SDK}/bin"          # macOS/Linux (lowercase bin)
+    "$ENV{VULKAN_SDK}/Bin"          # Windows (uppercase Bin)
+    "/opt/homebrew/bin"             # macOS Homebrew
+    "/usr/local/bin"                # macOS/Linux common
+)
 
 if(GLSLC)
     message(STATUS "Found glslc: ${GLSLC}")

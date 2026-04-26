@@ -274,8 +274,11 @@ void VulkanTexture::createTextureSampler() {
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    // 检查设备是否支持各向异性过滤
+    VkPhysicalDeviceFeatures supportedFeatures;
+    vkGetPhysicalDeviceFeatures(device->getPhysicalDevice(), &supportedFeatures);
+    samplerInfo.anisotropyEnable = supportedFeatures.samplerAnisotropy;
+    samplerInfo.maxAnisotropy = supportedFeatures.samplerAnisotropy ? properties.limits.maxSamplerAnisotropy : 1.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
