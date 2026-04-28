@@ -8,13 +8,21 @@
 #include <vector>
 
 class VulkanDevice;
-class VulkanBuffer;
 class GBufferPass;
+class RHIDevice;
+class RHITexture;
+class RHISampler;
+class RHIRenderPass;
+class RHIFramebuffer;
+class RHIPipeline;
+class RHIBuffer;
+class RHIBindingLayout;
 
 /**
- * SSRPass - 屏幕空间反射渲染通道
+ * SSRPass - 屏幕空间反射渲染通道 (RHI)
  * 
  * 基于 G-Buffer 信息进行光线步进，计算屏幕空间反射
+ * 使用 Hybrid Descriptor 策略：UBO 使用 RHI，G-Buffer 纹理使用 native 描述符写入
  */
 class SSRPass : public RenderPassBase {
 public:
@@ -35,7 +43,8 @@ public:
         alignas(8)  float padding[2];         // 对齐填充
     };
 
-    SSRPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
+    SSRPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice,
+            uint32_t width, uint32_t height);
     ~SSRPass();
 
     // 禁止拷贝
@@ -58,54 +67,49 @@ public:
     void execute(VkCommandBuffer cmd, GBufferPass* gbuffer, 
                  VkImageView sceneColorView, uint32_t frameIndex);
 
-    // 获取输出纹理
-    VkImageView getOutputView() const { return outputImageView; }
-    VkImage getOutputImage() const { return outputImage; }
+    // 获取输出纹理 — native handle accessors (compatibility)
+    VkImageView getOutputView() const;
+    VkImage getOutputImage() const;
+    VkSampler getOutputSampler() const;
     
-    VkRenderPass getRenderPass() const { return renderPass; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
+    VkRenderPass getRenderPass() const;
+    VkPipeline getPipeline() const;
+    VkPipelineLayout getPipelineLayout() const;
 
 private:
-    void createOutputImage();
-    void createRenderPass();
-    void createFramebuffer();
-    void createDescriptorSetLayout();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    void createOutputTexture();
+    void createOutputSampler();
+    void createRHIRenderPass();
+    void createRHIFramebuffer();
+    void createBindingLayout();
     void createPipeline();
     void createUniformBuffers();
+    void createDescriptorSets();
     void cleanup();
-    
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
-    std::shared_ptr<VulkanDevice> device;
+    // RHI device
+    RHIDevice* rhiDevice_ = nullptr;
+    std::shared_ptr<VulkanDevice> vulkanDevice_;
+
+    uint32_t width_;
+    uint32_t height_;
     
-    uint32_t width;
-    uint32_t height;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
     // SSR 参数
     SSRParams params;
 
-    // 输出图像
-    VkImage outputImage = VK_NULL_HANDLE;
-    VkDeviceMemory outputImageMemory = VK_NULL_HANDLE;
-    VkImageView outputImageView = VK_NULL_HANDLE;
-    VkSampler outputSampler = VK_NULL_HANDLE;
+    // RHI resources
+    std::unique_ptr<RHITexture>     outputTexture_;
+    std::unique_ptr<RHISampler>     outputSampler_;
+    std::unique_ptr<RHIRenderPass>  renderPass_;
+    std::unique_ptr<RHIFramebuffer> framebuffer_;
+    std::unique_ptr<RHIPipeline>    pipeline_;
+    std::unique_ptr<RHIBindingLayout> bindingLayout_;
 
-    // Vulkan 资源
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    
-    // 描述符
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptorSets;
-    
-    // Uniform Buffers
-    std::vector<std::unique_ptr<VulkanBuffer>> uniformBuffers;
-    std::vector<void*> uniformBuffersMapped;
-    
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    // Per-frame UBOs (RHI)
+    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
+
+    // Descriptor sets (native Vulkan — hybrid approach for G-Buffer textures)
+    std::vector<VkDescriptorSet> descriptorSets_;
 };

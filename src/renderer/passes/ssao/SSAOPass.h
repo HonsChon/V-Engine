@@ -10,6 +10,7 @@
 
 class VulkanDevice;
 class GBufferPass;
+class RHIDevice;
 
 /**
  * SSAOPass - 屏幕空间环境遮蔽渲染通道
@@ -71,7 +72,8 @@ public:
         int fullHeight;
     };
 
-    SSAOPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
+    SSAOPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice,
+             uint32_t width, uint32_t height);
     ~SSAOPass();
 
     // 禁止拷贝
@@ -178,6 +180,9 @@ private:
                                uint32_t layerCount = 1);
 
     // ========== 成员变量 ==========
+    // RHI device (stored for future migration, not yet used internally)
+    RHIDevice* rhiDevice_ = nullptr;
+
     SSAOSettings m_settings;
     
     // 子纹理尺寸

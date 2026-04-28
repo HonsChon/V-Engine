@@ -36,7 +36,7 @@ struct alignas(16) ClusterCullingUniforms {
  */
 class ClusterCullingPass : public ComputePassBase {
 public:
-    ClusterCullingPass(std::shared_ptr<VulkanDevice> device);
+    ClusterCullingPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice = nullptr);
     ~ClusterCullingPass() override;
 
     void init() override;
@@ -109,6 +109,9 @@ private:
     void createBuffers();
     void createDescriptorSet();
     void updateDescriptorSet();
+
+    // Legacy compute pipeline (transitional — will be replaced by RHI Compute Pipeline Builder)
+    std::unique_ptr<ComputePipeline> pipeline;
 
     // 外部 buffer 引用
     VkBuffer m_clusterBuffer = VK_NULL_HANDLE;

@@ -179,6 +179,7 @@ include_directories(${Vulkan_INCLUDE_DIRS})
 include_directories(src)
 include_directories(src/Application)
 include_directories(src/RHI)
+include_directories(src/RHI/Vulkan)
 include_directories(src/Core)
 include_directories(src/renderer)
 include_directories(src/renderer/passes)
@@ -217,7 +218,7 @@ set(APPLICATION_HEADERS
     src/Application/Input.h
 )
 
-# RHI - 渲染硬件接口层：Vulkan封装
+# RHI - 渲染硬件接口层：Vulkan封装（旧代码）+ 新 RHI 抽象层
 set(RHI_SOURCES
     src/RHI/VulkanDevice.cpp
     src/RHI/VulkanSwapChain.cpp
@@ -226,6 +227,18 @@ set(RHI_SOURCES
     src/RHI/VulkanPipeline.cpp
     src/RHI/ComputePipeline.cpp
     src/RHI/FrameResources.cpp
+    # New RHI abstraction layer
+    src/RHI/RHI.cpp
+    src/RHI/Vulkan/VulkanRHIDevice.cpp
+    src/RHI/Vulkan/VulkanRHIBuffer.cpp
+    src/RHI/Vulkan/VulkanRHITexture.cpp
+    src/RHI/Vulkan/VulkanRHISampler.cpp
+    src/RHI/Vulkan/VulkanRHIShader.cpp
+    src/RHI/Vulkan/VulkanRHIDescriptor.cpp
+    src/RHI/Vulkan/VulkanRHIPipeline.cpp
+    src/RHI/Vulkan/VulkanRHIRenderPass.cpp
+    src/RHI/Vulkan/VulkanRHICommandBuffer.cpp
+    src/RHI/Vulkan/VulkanRHISwapChain.cpp
 )
 
 set(RHI_HEADERS
@@ -236,6 +249,30 @@ set(RHI_HEADERS
     src/RHI/VulkanPipeline.h
     src/RHI/ComputePipeline.h
     src/RHI/FrameResources.h
+    # New RHI abstraction headers
+    src/RHI/RHI.h
+    src/RHI/RHITypes.h
+    src/RHI/RHIDevice.h
+    src/RHI/RHIBuffer.h
+    src/RHI/RHITexture.h
+    src/RHI/RHISampler.h
+    src/RHI/RHIShader.h
+    src/RHI/RHIDescriptor.h
+    src/RHI/RHIPipeline.h
+    src/RHI/RHIRenderPass.h
+    src/RHI/RHICommandBuffer.h
+    src/RHI/RHISwapChain.h
+    src/RHI/Vulkan/VulkanRHIDevice.h
+    src/RHI/Vulkan/VulkanRHIBuffer.h
+    src/RHI/Vulkan/VulkanRHITexture.h
+    src/RHI/Vulkan/VulkanRHISampler.h
+    src/RHI/Vulkan/VulkanRHIShader.h
+    src/RHI/Vulkan/VulkanRHIDescriptor.h
+    src/RHI/Vulkan/VulkanRHIPipeline.h
+    src/RHI/Vulkan/VulkanRHIRenderPass.h
+    src/RHI/Vulkan/VulkanRHICommandBuffer.h
+    src/RHI/Vulkan/VulkanRHISwapChain.h
+    src/RHI/Vulkan/VulkanTypeConversions.h
 )
 
 # Core - 核心工具层：与渲染无关的基础设施

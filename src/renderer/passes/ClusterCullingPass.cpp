@@ -11,8 +11,8 @@
 
 namespace Nanite {
 
-ClusterCullingPass::ClusterCullingPass(std::shared_ptr<VulkanDevice> dev)
-    : ComputePassBase(std::move(dev), "ClusterCulling")
+ClusterCullingPass::ClusterCullingPass(std::shared_ptr<VulkanDevice> dev, RHIDevice* rhiDevice)
+    : ComputePassBase(std::move(dev), rhiDevice, "ClusterCulling")
 {
 }
 

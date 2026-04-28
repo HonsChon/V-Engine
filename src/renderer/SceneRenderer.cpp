@@ -27,6 +27,9 @@
 #include "nanite/Nanite.h"
 #include "nanite/NaniteManager.h"
 
+// RHI
+#include "VulkanRHIDevice.h"
+
 // UI
 #include "ImGuiLayer.h"
 #include "UIManager.h"
@@ -60,9 +63,17 @@ void SceneRenderer::initialize() {
     uint32_t w = m_swapChain->getExtent().width;
     uint32_t h = m_swapChain->getExtent().height;
 
-    // 创建 ForwardPass（始终可用）
-    m_forwardPass = std::make_unique<ForwardPass>(deviceShared, m_swapChain->getRenderPass(), w, h);
-    std::cout << "[SceneRenderer] ForwardPass created\n";
+    // 创建 RHI 设备（过渡期：包装现有 VulkanDevice）
+    if (!m_rhiDevice) {
+        m_rhiDevice = std::make_unique<VulkanRHIDevice>(deviceShared);
+        std::cout << "[SceneRenderer] RHI Device created (Vulkan backend)\n";
+    }
+
+    // 创建 ForwardPass（始终可用）— 现在使用 RHI 接口
+    m_forwardPass = std::make_unique<ForwardPass>(
+        deviceShared, m_rhiDevice.get(),
+        m_swapChain->getRenderPass(), w, h, MAX_FRAMES_IN_FLIGHT);
+    std::cout << "[SceneRenderer] ForwardPass created (RHI)\n";
 
     m_initialized = true;
     std::cout << "[SceneRenderer] Initialized\n";
@@ -76,7 +87,8 @@ void SceneRenderer::cleanup() {
     cleanupNanite();
     cleanupGPUDrivenRendering();
     cleanupDeferredShading();
-    m_forwardPass.reset();
+    m_forwardPass.reset();       // Must be released before m_rhiDevice
+    m_rhiDevice.reset();         // Release RHI device (descriptor pools, etc.)
     m_initialized = false;
     
     std::cout << "[SceneRenderer] Cleaned up\n";
@@ -96,16 +108,16 @@ void SceneRenderer::initDeferredShading() {
     uint32_t h = m_swapChain->getExtent().height;
 
     try {
-        // 1. GBuffer
-        m_gbuffer = std::make_unique<GBufferPass>(deviceShared, w, h);
-        std::cout << "  GBuffer created\n";
+        // 1. GBuffer (now uses RHI)
+        m_gbuffer = std::make_unique<GBufferPass>(deviceShared, m_rhiDevice.get(), w, h, MAX_FRAMES_IN_FLIGHT);
+        std::cout << "  GBuffer created (RHI)\n";
 
         // 2. SSR
-        m_ssrPass = std::make_unique<SSRPass>(deviceShared, w, h);
+        m_ssrPass = std::make_unique<SSRPass>(deviceShared, m_rhiDevice.get(), w, h);
         std::cout << "  SSR Pass created\n";
 
         // 3. Water
-        m_waterPass = std::make_unique<WaterPass>(deviceShared, w, h, m_swapChain->getRenderPass());
+        m_waterPass = std::make_unique<WaterPass>(deviceShared, m_rhiDevice.get(), w, h, m_swapChain->getRenderPass());
         m_waterPass->setWaterHeight(-1.5f);
         m_waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created\n";
@@ -121,12 +133,14 @@ void SceneRenderer::initDeferredShading() {
         }
 
         // 6. LightingPass
-        m_lightingPass = std::make_unique<LightingPass>(deviceShared, w, h, m_swapChain->getRenderPass());
+        m_lightingPass = std::make_unique<LightingPass>(
+            deviceShared, m_rhiDevice.get(), w, h,
+            m_swapChain->getRenderPass(), MAX_FRAMES_IN_FLIGHT);
         m_lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
         std::cout << "  LightingPass created\n";
 
         // 7. SSAOPass
-        m_ssaoPass = std::make_unique<SSAOPass>(deviceShared, w, h);
+        m_ssaoPass = std::make_unique<SSAOPass>(deviceShared, m_rhiDevice.get(), w, h);
         m_ssaoPass->init();
         std::cout << "  SSAOPass created (" << w << "x" << h << ")\n";
 
@@ -747,7 +761,7 @@ void SceneRenderer::initNaniteDebugPass() {
         auto swapChainShared = std::shared_ptr<VulkanSwapChain>(m_swapChain, [](VulkanSwapChain*){});
         auto naniteShared = std::shared_ptr<Nanite::NaniteManager>(m_naniteManager.get(), [](Nanite::NaniteManager*){});
 
-        m_naniteDebugPass = std::make_unique<NaniteDebugPass>(deviceShared, swapChainShared, naniteShared);
+        m_naniteDebugPass = std::make_unique<NaniteDebugPass>(deviceShared, m_rhiDevice.get(), swapChainShared, naniteShared);
         m_naniteDebugPass->initialize(m_swapChain->getRenderPass());
         m_naniteDebugPass->setClusterCullingPass(m_naniteManager->getCullingPass());
 

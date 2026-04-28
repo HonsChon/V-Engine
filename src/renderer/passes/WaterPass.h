@@ -8,9 +8,12 @@
 #include <vector>
 
 class VulkanDevice;
-class VulkanBuffer;
-class Mesh;
 class GBufferPass;
+class Mesh;
+class RHIDevice;
+class RHIBuffer;
+class RHIPipeline;
+class RHIBindingLayout;
 
 namespace VulkanEngine {
     class Entity;
@@ -18,10 +21,13 @@ namespace VulkanEngine {
 }
 
 /**
- * WaterPass - 水面渲染通道（内置SSR：
+ * WaterPass - 水面渲染通道（内置SSR）(RHI)
  * 
  * 直接对水面mesh 进行 SSR 光线步进，只计算水面覆盖的像素
  * 比全屏SSR 后处理效率更高
+ * 
+ * 注意：WaterPass 不拥有自己的 RenderPass/Framebuffer，
+ * 它渲染到外部提供的 RenderPass（通常是 SwapChain 的 final pass）
  */
 class WaterPass : public RenderPassBase {
 public:
@@ -39,8 +45,8 @@ public:
         alignas(16) glm::vec4 ssrParams;      // x: maxDistance, y: maxSteps, z: thickness（线性深度空间）, w: reserved
     };
 
-    WaterPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height,
-              VkRenderPass renderPass);
+    WaterPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice,
+              uint32_t width, uint32_t height, VkRenderPass externalRenderPass);
     ~WaterPass();
 
     // 禁止拷贝
@@ -78,48 +84,29 @@ public:
     // 获取水面网格
     Mesh* getWaterMesh() const { return waterMesh.get(); }
     
-    /**
-     * @brief 设置水面 Entity
-     * 从给定的 Entity 获取充MeshRendererComponent，然后使用其 mesh 作为水面
-     * @param entity 要作为水面的实体
-     * @return true 如果成功设置，false 如果 entity 无效或没有mesh
-     */
     bool setWaterEntity(const VulkanEngine::Entity& entity);
-    
-    /**
-     * @brief 设置水面网格 (通过 GPUMesh)
-     * 直接使用已有的GPUMesh 作为水面
-     * @param gpuMesh 指向 GPUMesh 的共享指针
-     * @return true 如果成功设置，false 如果 gpuMesh 无效
-     */
     bool setWaterMesh(std::shared_ptr<VulkanEngine::GPUMesh> gpuMesh);
-    
-    /**
-     * @brief 清除外部设置的水面网格，恢复使用内置网格
-     */
     void clearExternalMesh();
-    
-    /**
-     * @brief 检查是否正在使用外部网格
-     */
     bool isUsingExternalMesh() const { return useExternalMesh; }
 
 private:
     void createWaterMesh();
-    void createVertexBuffer();
-    void createIndexBuffer();
-    void createDescriptorSetLayout();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    void createVertexAndIndexBuffers();
+    void createBindingLayout();
     void createPipeline();
     void createUniformBuffers();
+    void createDescriptorSets();
     void cleanup();
 
-    std::shared_ptr<VulkanDevice> device;
-    
-    uint32_t width;
-    uint32_t height;
-    VkRenderPass renderPass;
+    // RHI device
+    RHIDevice* rhiDevice_ = nullptr;
+    std::shared_ptr<VulkanDevice> vulkanDevice_;
+
+    uint32_t width_;
+    uint32_t height_;
+    VkRenderPass externalRenderPass_ = VK_NULL_HANDLE;  // NOT owned
+
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
     // 水面参数
     glm::vec3 waterColor = glm::vec3(0.0f, 0.3f, 0.5f);
@@ -130,31 +117,27 @@ private:
     float waterHeight = 0.0f;
     
     // SSR 参数
-    float ssrMaxDistance = 30.0f;   // 最大光线步进距离（世界单位：
-    float ssrMaxSteps = 2048.0f;     // 最大步进次数
-    float ssrThickness = 0.03f;     // 厚度阈值（线性深度空间，世界单位：
+    float ssrMaxDistance = 30.0f;
+    float ssrMaxSteps = 2048.0f;
+    float ssrThickness = 0.03f;
 
     // 水面网格 (内置)
     std::unique_ptr<Mesh> waterMesh;
-    std::unique_ptr<VulkanBuffer> vertexBuffer;
-    std::unique_ptr<VulkanBuffer> indexBuffer;
+    std::unique_ptr<RHIBuffer> vertexBuffer_;
+    std::unique_ptr<RHIBuffer> indexBuffer_;
+    uint32_t indexCount_ = 0;
     
     // 外部水面网格
     std::shared_ptr<VulkanEngine::GPUMesh> externalMesh;
     bool useExternalMesh = false;
 
-    // Vulkan 资源
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    
-    // 描述符
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptorSets;
-    
-    // Uniform Buffers
-    std::vector<std::unique_ptr<VulkanBuffer>> uniformBuffers;
-    std::vector<void*> uniformBuffersMapped;
-    
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    // RHI resources
+    std::unique_ptr<RHIPipeline>       pipeline_;
+    std::unique_ptr<RHIBindingLayout>  bindingLayout_;
+
+    // Per-frame UBOs (RHI)
+    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
+
+    // Descriptor sets (native Vulkan — hybrid approach for G-Buffer textures)
+    std::vector<VkDescriptorSet> descriptorSets_;
 };

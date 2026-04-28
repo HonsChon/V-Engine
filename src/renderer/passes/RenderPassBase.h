@@ -5,18 +5,28 @@
 #include <string>
 
 class VulkanDevice;
+class RHIDevice;
+class RHICommandBuffer;
 
 /**
  * RenderPassBase - 渲染通道基类
  * 
- * 所有渲染通道的抽象基类，定义统一接口：
- * - recordCommands: 录制命令到命令缓冲
- * - resize: 窗口大小改变时重建资源
+ * 所有渲染通道的抽象基类，定义统一接口。
+ * 
+ * 兼容层说明：
+ * - 同时持有 VulkanDevice (旧) 和 RHIDevice* (新) 引用
+ * - recordCommands 提供 VkCommandBuffer 和 RHICommandBuffer* 两套接口
+ * - 各 Pass 逐步迁移到 RHI 接口后，旧接口将被删除
  */
 class RenderPassBase {
 public:
+    // 旧构造函数（兼容现有代码）
     RenderPassBase(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height)
-        : device(device), width(width), height(height) {}
+        : device(device), rhiDevice_(nullptr), width(width), height(height) {}
+
+    // 新构造函数（使用 RHIDevice）
+    RenderPassBase(RHIDevice* rhiDevice, uint32_t width, uint32_t height)
+        : device(nullptr), rhiDevice_(rhiDevice), width(width), height(height) {}
     
     virtual ~RenderPassBase() = default;
     
@@ -25,25 +35,26 @@ public:
     RenderPassBase& operator=(const RenderPassBase&) = delete;
     
     /**
-     * 录制渲染命令（可选实现）
-     * 
-     * 注意：并非所有Pass 都适合这个简单接口。
-     * 例如 SSRPass 需要GBuffer 和SceneColor 作为输入：
-     * 应该使用它自己的 execute() 方法。
-     * 
-     * @param cmd 命令缓冲
-     * @param frameIndex 当前帧索引
+     * 录制渲染命令（旧接口 — VkCommandBuffer）
+     * 已迁移的 Pass 可以不重写此方法
      */
     virtual void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
+        (void)cmd;
+        (void)frameIndex;
+    }
+
+    /**
+     * 录制渲染命令（新接口 — RHICommandBuffer）
+     * 正在迁移中的 Pass 应重写此方法
+     */
+    virtual void recordCommands(RHICommandBuffer* cmd, uint32_t frameIndex) {
         (void)cmd;
         (void)frameIndex;
         // 默认空实现，子类可以选择是否重写
     }
     
     /**
-     * 重建资源（窗口大小改变时调用：
-     * @param newWidth 新宽度
-     * @param newHeight 新高度
+     * 重建资源（窗口大小改变时调用）
      */
     virtual void resize(uint32_t newWidth, uint32_t newHeight) {
         width = newWidth;
@@ -59,8 +70,12 @@ public:
     bool isEnabled() const { return enabled; }
     void setEnabled(bool enable) { enabled = enable; }
 
+    // RHI 访问器
+    RHIDevice* getRHIDevice() const { return rhiDevice_; }
+
 protected:
-    std::shared_ptr<VulkanDevice> device;
+    std::shared_ptr<VulkanDevice> device;      // 旧：Vulkan 设备
+    RHIDevice* rhiDevice_ = nullptr;           // 新：RHI 设备
     uint32_t width;
     uint32_t height;
     std::string passName = "Unnamed Pass";

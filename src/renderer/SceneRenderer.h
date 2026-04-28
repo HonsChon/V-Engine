@@ -19,6 +19,9 @@
 
 #include "RenderSettings.h"
 
+// RHI forward declarations
+class RHIDevice;
+
 // Forward declarations
 class VulkanDevice;
 class VulkanSwapChain;
@@ -153,7 +156,7 @@ public:
     LightingPass* getLightingPass() const { return m_lightingPass.get(); }
     Nanite::NaniteManager* getNaniteManager() const { return m_naniteManager.get(); }
 
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 private:
     // ========== 命令录制子方法 ==========
@@ -174,6 +177,9 @@ private:
     VulkanEngine::RenderSystem* m_renderSystem = nullptr;
     ImGuiLayer* m_imguiLayer = nullptr;
     UIManager* m_uiManager = nullptr;
+
+    // ========== RHI 设备（过渡期：从 VulkanDevice 创建）==========
+    std::unique_ptr<RHIDevice> m_rhiDevice;
 
     // ========== 拥有的 Pass ==========
     std::unique_ptr<ForwardPass> m_forwardPass;

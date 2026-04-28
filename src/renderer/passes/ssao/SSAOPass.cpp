@@ -12,8 +12,10 @@
 // Constructor / Destructor
 // ============================================================
 
-SSAOPass::SSAOPass(std::shared_ptr<VulkanDevice> deviceIn, uint32_t width, uint32_t height)
+SSAOPass::SSAOPass(std::shared_ptr<VulkanDevice> deviceIn, RHIDevice* rhiDevice,
+                   uint32_t width, uint32_t height)
     : RenderPassBase(deviceIn, width, height)
+    , rhiDevice_(rhiDevice)
 {
     passName = "SSAO Pass";
     init();

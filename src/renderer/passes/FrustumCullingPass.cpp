@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include <array>
 
-FrustumCullingPass::FrustumCullingPass(std::shared_ptr<VulkanDevice> device)
-    : ComputePassBase(device, "FrustumCulling") {
+FrustumCullingPass::FrustumCullingPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice)
+    : ComputePassBase(device, rhiDevice, "FrustumCulling") {
 }
 
 FrustumCullingPass::~FrustumCullingPass() {

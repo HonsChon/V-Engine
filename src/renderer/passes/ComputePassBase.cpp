@@ -1,10 +1,12 @@
 #include "ComputePassBase.h"
 #include "VulkanDevice.h"
-#include "ComputePipeline.h"
+#include "RHIDevice.h"
+#include "RHIPipeline.h"
+#include "RHIDescriptor.h"
 #include <iostream>
 
-ComputePassBase::ComputePassBase(std::shared_ptr<VulkanDevice> device, const std::string& name)
-    : device(device), name(name) {
+ComputePassBase::ComputePassBase(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice, const std::string& name)
+    : device(device), rhiDevice_(rhiDevice), name(name) {
 }
 
 ComputePassBase::~ComputePassBase() {
@@ -12,27 +14,13 @@ ComputePassBase::~ComputePassBase() {
 }
 
 void ComputePassBase::cleanup() {
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device->getDevice(), descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
-    
-    pipeline.reset();
+    if (rhiDevice_) rhiDevice_->waitIdle();
+
+    descriptorSet_ = VK_NULL_HANDLE;
+    pipeline_.reset();
+    bindingLayout_.reset();
 }
 
-void ComputePassBase::createDescriptorPool(const std::vector<VkDescriptorPoolSize>& poolSizes, 
-                                           uint32_t maxSets) {
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = maxSets;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-
-    if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create descriptor pool for " + name);
-    }
-}
 
 void ComputePassBase::insertMemoryBarrier(VkCommandBuffer commandBuffer,
                                           VkPipelineStageFlags srcStage,
@@ -44,15 +32,8 @@ void ComputePassBase::insertMemoryBarrier(VkCommandBuffer commandBuffer,
     memoryBarrier.srcAccessMask = srcAccess;
     memoryBarrier.dstAccessMask = dstAccess;
 
-    vkCmdPipelineBarrier(
-        commandBuffer,
-        srcStage,
-        dstStage,
-        0,
-        1, &memoryBarrier,
-        0, nullptr,
-        0, nullptr
-    );
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0,
+                         1, &memoryBarrier, 0, nullptr, 0, nullptr);
 }
 
 void ComputePassBase::insertBufferBarrier(VkCommandBuffer commandBuffer,
@@ -72,13 +53,6 @@ void ComputePassBase::insertBufferBarrier(VkCommandBuffer commandBuffer,
     bufferBarrier.offset = 0;
     bufferBarrier.size = size;
 
-    vkCmdPipelineBarrier(
-        commandBuffer,
-        srcStage,
-        dstStage,
-        0,
-        0, nullptr,
-        1, &bufferBarrier,
-        0, nullptr
-    );
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0,
+                         0, nullptr, 1, &bufferBarrier, 0, nullptr);
 }

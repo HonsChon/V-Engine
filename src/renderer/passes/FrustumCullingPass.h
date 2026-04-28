@@ -46,7 +46,7 @@ struct alignas(16) CullingUniforms {
  */
 class FrustumCullingPass : public ComputePassBase {
 public:
-    FrustumCullingPass(std::shared_ptr<VulkanDevice> device);
+    FrustumCullingPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice = nullptr);
     ~FrustumCullingPass() override;
 
     void init() override;
@@ -100,6 +100,10 @@ private:
 
     // 从GPU 回读计数器
     void readbackCounter();
+
+    // Legacy compute pipeline (transitional — will be replaced by RHI Compute Pipeline Builder)
+    std::unique_ptr<ComputePipeline> pipeline;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
     // 缓冲区
     std::unique_ptr<VulkanBuffer> instanceBuffer;        // 输入：所有实例数据

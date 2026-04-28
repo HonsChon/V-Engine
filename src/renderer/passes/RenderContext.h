@@ -6,6 +6,7 @@
 class VulkanBuffer;
 class Mesh;
 class Camera;
+class RHICommandBuffer;
 
 namespace VulkanEngine {
     class Scene;
@@ -16,10 +17,13 @@ namespace VulkanEngine {
  * 
  * 在各个渲染通道之间传递共享数据
  * 包括：相机矩阵、光照信息、当前帧索引、共享资源等
+ * 
+ * 兼容层：同时保留 VkCommandBuffer 和 RHICommandBuffer* 字段
  */
 struct RenderContext {
-    // 命令缓冲区
+    // 命令缓冲区（旧 + 新兼容）
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    RHICommandBuffer* rhiCommandBuffer = nullptr;
     
     // 帧信息
     uint32_t frameIndex = 0;
@@ -42,7 +46,7 @@ struct RenderContext {
     glm::vec3 lightPosition = glm::vec3(0.0f, 5.0f, 5.0f);
     glm::vec3 lightColor = glm::vec3(300.0f);
     
-    // 场景网格（用于场景渲染）
+    // 场景网格（用于场景渲染）— 旧接口
     VkBuffer sceneVertexBuffer = VK_NULL_HANDLE;
     VkBuffer sceneIndexBuffer = VK_NULL_HANDLE;
     uint32_t sceneIndexCount = 0;
