@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -19,12 +18,18 @@
 
 #include "RenderSettings.h"
 
+// Vulkan forward declaration (for recordCommands / renderUI signatures — transitional)
+typedef struct VkCommandBuffer_T* VkCommandBuffer;
+
 // RHI forward declarations
 class RHIDevice;
+class RHISwapChain;
+class RHIRenderPass;
+class RHICommandBuffer;
+class RHITexture;
+class RHISampler;
 
 // Forward declarations
-class VulkanDevice;
-class VulkanSwapChain;
 class Camera;
 
 // Render Pass classes
@@ -77,7 +82,7 @@ struct RenderStats {
  */
 class SceneRenderer {
 public:
-    SceneRenderer(VulkanDevice* device, VulkanSwapChain* swapChain);
+    SceneRenderer(RHIDevice* device, RHISwapChain* swapChain);
     ~SceneRenderer();
 
     // Non-copyable
@@ -118,7 +123,7 @@ public:
     // ========== 窗口 resize ==========
     
     void onResize(uint32_t width, uint32_t height);
-    void onSwapChainRecreated(VulkanSwapChain* newSwapChain);
+    void onSwapChainRecreated(RHISwapChain* newSwapChain);
 
     // ========== GPU Culling ==========
     
@@ -155,6 +160,7 @@ public:
     GBufferPass* getGBufferPass() const { return m_gbuffer.get(); }
     LightingPass* getLightingPass() const { return m_lightingPass.get(); }
     Nanite::NaniteManager* getNaniteManager() const { return m_naniteManager.get(); }
+    RHIDevice* getRHIDevice() const { return m_rhiDevice; }
 
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -170,16 +176,13 @@ private:
     void cleanupSceneColorImage();
 
     // ========== 引用（不拥有）==========
-    VulkanDevice* m_device = nullptr;
-    VulkanSwapChain* m_swapChain = nullptr;
+    RHIDevice* m_rhiDevice = nullptr;
+    RHISwapChain* m_swapChain = nullptr;
     VulkanEngine::Scene* m_scene = nullptr;
     Camera* m_camera = nullptr;
     VulkanEngine::RenderSystem* m_renderSystem = nullptr;
     ImGuiLayer* m_imguiLayer = nullptr;
     UIManager* m_uiManager = nullptr;
-
-    // ========== RHI 设备（过渡期：从 VulkanDevice 创建）==========
-    std::unique_ptr<RHIDevice> m_rhiDevice;
 
     // ========== 拥有的 Pass ==========
     std::unique_ptr<ForwardPass> m_forwardPass;
@@ -193,10 +196,8 @@ private:
     std::unique_ptr<Nanite::NaniteManager> m_naniteManager;
 
     // ========== 场景颜色纹理（SSR 采样）==========
-    VkImage m_sceneColorImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_sceneColorMemory = VK_NULL_HANDLE;
-    VkImageView m_sceneColorView = VK_NULL_HANDLE;
-    VkSampler m_sceneColorSampler = VK_NULL_HANDLE;
+    std::unique_ptr<RHITexture> m_sceneColorTexture;
+    std::unique_ptr<RHISampler> m_sceneColorSampler;
 
     // ========== 状态 ==========
     RenderSettings m_settings;

@@ -1,6 +1,6 @@
-
 #include "ImGuiLayer.h"
-#include "VulkanDevice.h"
+#include "RHIDevice.h"
+#include "RHISwapChain.h"
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -13,24 +13,39 @@ ImGuiLayer::ImGuiLayer() {
 }
 
 ImGuiLayer::ImGuiLayer(GLFWwindow* window,
-                       VkInstance instance,
-                       VkPhysicalDevice physicalDevice,
-                       VkDevice logicalDevice,
-                       uint32_t queueFamily,
-                       VkQueue queue,
-                       VkRenderPass renderPass,
-                       uint32_t imageCount)
-    : logicalDevice_(logicalDevice)
+                       RHIDevice* rhiDevice,
+                       RHISwapChain* rhiSwapChain)
 {
+    init(window, rhiDevice, rhiSwapChain);
+}
+
+ImGuiLayer::~ImGuiLayer() {
+    cleanup();
+}
+
+void ImGuiLayer::init(GLFWwindow* window,
+                      RHIDevice* rhiDevice,
+                      RHISwapChain* rhiSwapChain) {
     if (initialized) {
         std::cout << "ImGuiLayer already initialized" << std::endl;
         return;
     }
 
-    // 创建 ImGui 专用的描述符池
-    createDescriptorPoolDirect();
+    // Get native handles from RHI
+    VkInstance instance = static_cast<VkInstance>(rhiDevice->getNativeInstance());
+    VkPhysicalDevice physicalDevice = static_cast<VkPhysicalDevice>(rhiDevice->getNativePhysicalDevice());
+    VkDevice device = static_cast<VkDevice>(rhiDevice->getNativeDevice());
+    uint32_t queueFamily = rhiDevice->getGraphicsQueueFamilyIndex();
+    VkQueue queue = static_cast<VkQueue>(rhiDevice->getNativeGraphicsQueue());
+    VkRenderPass renderPass = static_cast<VkRenderPass>(rhiSwapChain->getNativeRenderPass());
+    uint32_t imageCount = rhiSwapChain->getImageCount();
 
-    // 初始区ImGui 上下文
+    logicalDevice_ = device;
+
+    // 创建 ImGui 专用的描述符池
+    createDescriptorPool();
+
+    // 初始化 ImGui 上下文
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     
@@ -53,12 +68,12 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
-    // 初始区Vulkan 后端 (适配 2025/09+ 版本的新 API)
+    // 初始化 Vulkan 后端
     ImGui_ImplVulkan_InitInfo initInfo = {};
     initInfo.ApiVersion = VK_API_VERSION_1_0;
     initInfo.Instance = instance;
     initInfo.PhysicalDevice = physicalDevice;
-    initInfo.Device = logicalDevice;
+    initInfo.Device = device;
     initInfo.QueueFamily = queueFamily;
     initInfo.Queue = queue;
     initInfo.PipelineCache = VK_NULL_HANDLE;
@@ -68,7 +83,6 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
     initInfo.Allocator = nullptr;
     initInfo.CheckVkResultFn = nullptr;
     
-    // 文API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain 与
     initInfo.PipelineInfoMain.RenderPass = renderPass;
     initInfo.PipelineInfoMain.Subpass = 0;
     initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
@@ -80,84 +94,7 @@ ImGuiLayer::ImGuiLayer(GLFWwindow* window,
     ImGui_ImplVulkan_Init(&initInfo);
 
     initialized = true;
-    std::cout << "ImGui initialized successfully (direct constructor)" << std::endl;
-}
-
-ImGuiLayer::~ImGuiLayer() {
-    cleanup();
-}
-
-void ImGuiLayer::init(GLFWwindow* window,
-                      std::shared_ptr<VulkanDevice> deviceIn,
-                      VkRenderPass renderPass,
-                      uint32_t imageCount) {
-    if (initialized) {
-        std::cout << "ImGuiLayer already initialized" << std::endl;
-        return;
-    }
-
-    device = deviceIn;
-
-    // 创建 ImGui 专用的描述符池
-    createDescriptorPool();
-
-    // 初始区ImGui 上下文
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // 启用键盘导航
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;   // 启用手柄导航
-    
-    if (dockingEnabled) {
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // 启用 Docking
-        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // 启用多视取
-    }
-
-    // 设置样式
-    setupStyle();
-
-    // 如果启用了多视口，调整样式
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        ImGuiStyle& style = ImGui::GetStyle();
-        style.WindowRounding = 0.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-    }
-
-    // 初始区GLFW 后端
-    ImGui_ImplGlfw_InitForVulkan(window, true);
-
-    // 初始区Vulkan 后端 (适配 2025/09+ 版本的新 API)
-    ImGui_ImplVulkan_InitInfo initInfo = {};
-    initInfo.ApiVersion = VK_API_VERSION_1_0;  // 或你的Vulkan API 版本
-    initInfo.Instance = device->getInstance();
-    initInfo.PhysicalDevice = device->getPhysicalDevice();
-    initInfo.Device = device->getDevice();
-    initInfo.QueueFamily = device->getGraphicsQueueFamilyIndex();
-    initInfo.Queue = device->getGraphicsQueue();
-    initInfo.PipelineCache = VK_NULL_HANDLE;
-    initInfo.DescriptorPool = imguiPool;
-    initInfo.MinImageCount = imageCount;
-    initInfo.ImageCount = imageCount;
-    initInfo.Allocator = nullptr;
-    initInfo.CheckVkResultFn = nullptr;
-    
-    // 文API: RenderPass, Subpass, MSAASamples 移到 PipelineInfoMain 与
-    initInfo.PipelineInfoMain.RenderPass = renderPass;
-    initInfo.PipelineInfoMain.Subpass = 0;
-    initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    
-    // 多视口配置
-    initInfo.PipelineInfoForViewports.Subpass = 0;
-    initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-
-    ImGui_ImplVulkan_Init(&initInfo);
-
-    // 注意：新版本的ImGui Vulkan 后端会自动创建字体纹理
-    // 不再需要手动调用ImGui_ImplVulkan_CreateFontsTexture()
-
-    initialized = true;
-    std::cout << "ImGui initialized successfully" << std::endl;
+    std::cout << "ImGui initialized successfully (via RHI)" << std::endl;
 }
 
 void ImGuiLayer::cleanup() {
@@ -165,24 +102,16 @@ void ImGuiLayer::cleanup() {
         return;
     }
 
-    // 等待设备空闲
-    VkDevice deviceToUse = VK_NULL_HANDLE;
-    if (device) {
-        deviceToUse = device->getDevice();
-    } else if (logicalDevice_ != VK_NULL_HANDLE) {
-        deviceToUse = logicalDevice_;
-    }
-    
-    if (deviceToUse != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(deviceToUse);
+    if (logicalDevice_ != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(logicalDevice_);
     }
 
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    if (imguiPool != VK_NULL_HANDLE && deviceToUse != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(deviceToUse, imguiPool, nullptr);
+    if (imguiPool != VK_NULL_HANDLE && logicalDevice_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(logicalDevice_, imguiPool, nullptr);
         imguiPool = VK_NULL_HANDLE;
     }
 
@@ -224,19 +153,19 @@ void ImGuiLayer::beginFrame() {
         ImGui::End();
     }
 
-    // 显示 Demo 窗口（调试用：
+    // 显示 Demo 窗口（调试用）
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
 }
 
-void ImGuiLayer::endFrame(VkCommandBuffer commandBuffer) {
+void ImGuiLayer::endFrame(void* commandBuffer) {
     if (!initialized) return;
 
     ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(commandBuffer));
 
-    // 处理多视取
+    // 处理多视口
     ImGuiIO& io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         ImGui::UpdatePlatformWindows();
@@ -244,22 +173,14 @@ void ImGuiLayer::endFrame(VkCommandBuffer commandBuffer) {
     }
 }
 
-void ImGuiLayer::onResize(uint32_t width, uint32_t height, VkRenderPass renderPass) {
+void ImGuiLayer::onResize(uint32_t width, uint32_t height) {
     if (!initialized) return;
     
     // 当窗口大小为 0 时（最小化），不做任何操作
     if (width == 0 || height == 0) return;
     
-    // 如果提供了新的RenderPass，需要重新设置ImGui 的渲染管线
-    // 新版本的 ImGui Vulkan 后端会在 NewFrame 时自动处理大部分情况
-    // 但为了安全起见，我们可以通知 ImGui 更新视口大小
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
-    
-    // 注意：如果RenderPass 结构发生变化（attachments 不同），
-    // 可能需要重新初始化 ImGui Vulkan 后端
-    // 但通常交换链重建不会改取RenderPass 的attachment 结构
-    (void)renderPass;  // 目前未使用，保留参数以备将来扩展
 }
 
 bool ImGuiLayer::wantCaptureMouse() const {
@@ -295,36 +216,8 @@ void ImGuiLayer::createDescriptorPool() {
     poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
     poolInfo.pPoolSizes = poolSizes;
 
-    if (vkCreateDescriptorPool(device->getDevice(), &poolInfo, nullptr, &imguiPool) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create ImGui descriptor pool!");
-    }
-}
-
-void ImGuiLayer::createDescriptorPoolDirect() {
-    // 使用 logicalDevice_ 直接创建描述符池
-    VkDescriptorPoolSize poolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
-    };
-
-    VkDescriptorPoolCreateInfo poolInfo = {};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = 1000;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
-    poolInfo.pPoolSizes = poolSizes;
-
     if (vkCreateDescriptorPool(logicalDevice_, &poolInfo, nullptr, &imguiPool) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create ImGui descriptor pool (direct)!");
+        throw std::runtime_error("Failed to create ImGui descriptor pool!");
     }
 }
 
@@ -348,15 +241,15 @@ void ImGuiLayer::setupStyle() {
     colors[ImGuiCol_FrameBgHovered] = ImVec4(0.30f, 0.30f, 0.35f, 0.40f);
     colors[ImGuiCol_FrameBgActive] = ImVec4(0.40f, 0.40f, 0.45f, 0.67f);
     
-    // 标题标
+    // 标题栏
     colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
     colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
     colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
     
-    // 菜单标
+    // 菜单栏
     colors[ImGuiCol_MenuBarBg] = ImVec4(0.14f, 0.14f, 0.16f, 1.00f);
     
-    // 滚动杆
+    // 滚动条
     colors[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
     colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
@@ -374,12 +267,12 @@ void ImGuiLayer::setupStyle() {
     colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.50f, 0.80f, 1.00f);
     colors[ImGuiCol_ButtonActive] = ImVec4(0.20f, 0.40f, 0.90f, 1.00f);
     
-    // 头部（如 TreeNode, CollapsingHeader：
+    // 头部（如 TreeNode, CollapsingHeader）
     colors[ImGuiCol_Header] = ImVec4(0.20f, 0.40f, 0.70f, 0.31f);
     colors[ImGuiCol_HeaderHovered] = ImVec4(0.30f, 0.50f, 0.80f, 0.80f);
     colors[ImGuiCol_HeaderActive] = ImVec4(0.30f, 0.50f, 0.90f, 1.00f);
     
-    // 分隔第
+    // 分隔线
     colors[ImGuiCol_Separator] = ImVec4(0.30f, 0.30f, 0.35f, 0.50f);
     colors[ImGuiCol_SeparatorHovered] = ImVec4(0.40f, 0.55f, 0.80f, 0.78f);
     colors[ImGuiCol_SeparatorActive] = ImVec4(0.40f, 0.55f, 0.90f, 1.00f);

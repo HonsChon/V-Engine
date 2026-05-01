@@ -1,7 +1,6 @@
 #include "GBufferPass.h"
-#include "VulkanDevice.h"
 
-// RHI headers
+// RHI headers (Pure RHI — no backend includes)
 #include "RHIDevice.h"
 #include "RHIBuffer.h"
 #include "RHITexture.h"
@@ -9,15 +8,7 @@
 #include "RHIDescriptor.h"
 #include "RHIPipeline.h"
 #include "RHIRenderPass.h"
-
-// Vulkan backend headers — for downcast to get native handles (compatibility layer)
-#include "VulkanRHIDevice.h"
-#include "VulkanRHIPipeline.h"
-#include "VulkanRHIDescriptor.h"
-#include "VulkanRHIBuffer.h"
-#include "VulkanRHITexture.h"
-#include "VulkanRHISampler.h"
-#include "VulkanRHIRenderPass.h"
+#include "RHICommandBuffer.h"
 
 #include <stdexcept>
 #include <iostream>
@@ -27,13 +18,11 @@
 // Constructor / Destructor
 // =============================================================================
 
-GBufferPass::GBufferPass(std::shared_ptr<VulkanDevice> device,
-                         RHIDevice* rhiDevice,
+GBufferPass::GBufferPass(RHIDevice* rhiDevice,
                          uint32_t width, uint32_t height,
                          uint32_t maxFramesInFlight)
-    : RenderPassBase(device, width, height)
+    : RenderPassBase(rhiDevice, width, height)
     , rhiDevice_(rhiDevice)
-    , vulkanDevice_(device)
     , width_(width)
     , height_(height)
     , maxFramesInFlight_(maxFramesInFlight)
@@ -102,7 +91,7 @@ void GBufferPass::createAttachments() {
         desc.width = width_;
         desc.height = height_;
         desc.format = RHIFormat::R16G16B16A16_SFLOAT;
-        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
         attachmentTextures_[POSITION] = rhiDevice_->createTexture(desc);
     }
 
@@ -112,7 +101,7 @@ void GBufferPass::createAttachments() {
         desc.width = width_;
         desc.height = height_;
         desc.format = RHIFormat::R16G16B16A16_SFLOAT;
-        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
         attachmentTextures_[NORMAL] = rhiDevice_->createTexture(desc);
     }
 
@@ -122,7 +111,7 @@ void GBufferPass::createAttachments() {
         desc.width = width_;
         desc.height = height_;
         desc.format = RHIFormat::R8G8B8A8_UNORM;
-        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+        desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
         attachmentTextures_[ALBEDO] = rhiDevice_->createTexture(desc);
     }
 
@@ -241,10 +230,8 @@ void GBufferPass::createPipeline() {
     constexpr uint32_t vertexStride = sizeof(float) * 11;
 
     auto builder = rhiDevice_->createGraphicsPipelineBuilder();
-    auto* vkBuilder = static_cast<VulkanGraphicsPipelineBuilder*>(builder.get());
 
-    vkBuilder
-        ->setVertexShader("shaders/gbuffer_vert.spv")
+    builder->setVertexShader("shaders/gbuffer_vert.spv")
         .setFragmentShader("shaders/gbuffer_frag.spv")
         .addVertexBinding(0, vertexStride, RHIVertexInputRate::Vertex)
         .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0)                      // Position
@@ -263,7 +250,7 @@ void GBufferPass::createPipeline() {
         .addPushConstant(RHIShaderStage::Vertex, 0, sizeof(PushConstantData))
         .setRenderPass(renderPass_.get());
 
-    pipeline_ = vkBuilder->build();
+    pipeline_ = builder->build();
 
     std::cout << "GBuffer pipeline created (RHI Pipeline Builder)" << std::endl;
 }
@@ -332,7 +319,10 @@ GBufferPass::MaterialDescriptor* GBufferPass::allocateMaterialDescriptor(const s
     }
 
     MaterialDescriptor descriptor;
-    descriptor.nativeSets.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    descriptor.groups.resize(maxFramesInFlight_);
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+        descriptor.groups[i] = rhiDevice_->allocateBindingGroup(materialLayout_.get());
+    }
     descriptor.valid = false;
 
     materialDescriptorCache_[materialId] = std::move(descriptor);
@@ -350,227 +340,70 @@ GBufferPass::MaterialDescriptor* GBufferPass::getMaterialDescriptor(const std::s
 }
 
 void GBufferPass::updateMaterialTextures(MaterialDescriptor* material,
-                                          VkImageView albedoView, VkSampler albedoSampler,
-                                          VkImageView normalView, VkSampler normalSampler,
-                                          VkImageView specularView, VkSampler specularSampler) {
+                                          RHITexture* albedoTex, RHISampler* albedoSampler,
+                                          RHITexture* normalTex, RHISampler* normalSampler,
+                                          RHITexture* specularTex, RHISampler* specularSampler) {
     if (!material) return;
 
-    // COMPATIBILITY: Material system still provides raw Vulkan handles.
-    auto* vkLayout = static_cast<VulkanRHIBindingLayout*>(materialLayout_.get());
-    auto* vkDevice = static_cast<VulkanRHIDevice*>(rhiDevice_);
-
     for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        VkDescriptorSet ds = vkDevice->allocateDescriptorSet(vkLayout->getVkDescriptorSetLayout());
-
-        std::array<VkDescriptorImageInfo, 3> imageInfos{};
-        imageInfos[0] = { albedoSampler,   albedoView,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        imageInfos[1] = { normalSampler,   normalView,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        imageInfos[2] = { specularSampler, specularView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-
-        std::array<VkWriteDescriptorSet, 3> writes{};
-        for (int j = 0; j < 3; ++j) {
-            writes[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[j].dstSet = ds;
-            writes[j].dstBinding = j;
-            writes[j].dstArrayElement = 0;
-            writes[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[j].descriptorCount = 1;
-            writes[j].pImageInfo = &imageInfos[j];
-        }
-
-        vkUpdateDescriptorSets(vkDevice->getVkDevice(),
-                               static_cast<uint32_t>(writes.size()),
-                               writes.data(), 0, nullptr);
-
-        material->nativeSets[i] = ds;
+        if (!material->groups[i]) continue;
+        material->groups[i]->updateTexture(0, albedoTex, albedoSampler);
+        material->groups[i]->updateTexture(1, normalTex, normalSampler);
+        material->groups[i]->updateTexture(2, specularTex, specularSampler);
     }
 
     material->valid = true;
 }
 
 // =============================================================================
-// Native Handle Accessors (compatibility — transitional)
+// Render Commands (Pure RHI — RHICommandBuffer)
 // =============================================================================
 
-VkRenderPass GBufferPass::getRenderPass() const {
-    if (!renderPass_) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHIRenderPass*>(renderPass_.get())->getVkRenderPass();
+void GBufferPass::beginRenderPass(RHICommandBuffer* cmd) {
+    std::vector<RHIClearValue> clearValues(4);
+    clearValues[0].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Position
+    clearValues[1].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Normal
+    clearValues[2].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Albedo
+    clearValues[3].depthStencil = { 1.0f, 0 };               // Depth
+
+    cmd->beginRenderPass(renderPass_.get(), framebuffer_.get(), clearValues);
+    cmd->setViewport(0, 0, static_cast<float>(width_), static_cast<float>(height_));
+    cmd->setScissor(0, 0, width_, height_);
 }
 
-VkFramebuffer GBufferPass::getFramebuffer() const {
-    if (!framebuffer_) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHIFramebuffer*>(framebuffer_.get())->getVkFramebuffer();
+void GBufferPass::endRenderPass(RHICommandBuffer* cmd) {
+    cmd->endRenderPass();
 }
 
-VkImageView GBufferPass::getPositionView() const {
-    if (!attachmentTextures_[POSITION]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[POSITION].get())->getVkImageView();
+void GBufferPass::bindPipeline(RHICommandBuffer* cmd) const {
+    cmd->bindGraphicsPipeline(pipeline_.get());
 }
 
-VkImageView GBufferPass::getNormalView() const {
-    if (!attachmentTextures_[NORMAL]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[NORMAL].get())->getVkImageView();
-}
-
-VkImageView GBufferPass::getAlbedoView() const {
-    if (!attachmentTextures_[ALBEDO]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[ALBEDO].get())->getVkImageView();
-}
-
-VkImageView GBufferPass::getDepthView() const {
-    if (!attachmentTextures_[DEPTH]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[DEPTH].get())->getVkImageView();
-}
-
-VkImage GBufferPass::getPositionImage() const {
-    if (!attachmentTextures_[POSITION]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[POSITION].get())->getVkImage();
-}
-
-VkImage GBufferPass::getNormalImage() const {
-    if (!attachmentTextures_[NORMAL]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[NORMAL].get())->getVkImage();
-}
-
-VkImage GBufferPass::getAlbedoImage() const {
-    if (!attachmentTextures_[ALBEDO]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[ALBEDO].get())->getVkImage();
-}
-
-VkImage GBufferPass::getDepthImage() const {
-    if (!attachmentTextures_[DEPTH]) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHITexture*>(attachmentTextures_[DEPTH].get())->getVkImage();
-}
-
-VkSampler GBufferPass::getSampler() const {
-    if (!sampler_) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHISampler*>(sampler_.get())->getVkSampler();
-}
-
-VkPipeline GBufferPass::getPipeline() const {
-    if (!pipeline_) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHIPipeline*>(pipeline_.get())->getVkPipeline();
-}
-
-VkPipelineLayout GBufferPass::getPipelineLayout() const {
-    if (!pipeline_) return VK_NULL_HANDLE;
-    return static_cast<VulkanRHIPipeline*>(pipeline_.get())->getVkPipelineLayout();
-}
-
-// =============================================================================
-// Render Commands (VkCommandBuffer compatibility — transitional)
-// =============================================================================
-
-void GBufferPass::beginRenderPass(VkCommandBuffer cmd) {
-    auto clearValues = getClearValues();
-
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = getRenderPass();
-    renderPassInfo.framebuffer = getFramebuffer();
-    renderPassInfo.renderArea.offset = { 0, 0 };
-    renderPassInfo.renderArea.extent = { width_, height_ };
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
-
-    vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(width_);
-    viewport.height = static_cast<float>(height_);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = { width_, height_ };
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-}
-
-void GBufferPass::endRenderPass(VkCommandBuffer cmd) {
-    vkCmdEndRenderPass(cmd);
-}
-
-std::array<VkClearValue, 4> GBufferPass::getClearValues() const {
-    std::array<VkClearValue, 4> clearValues{};
-    clearValues[0].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};     // Position
-    clearValues[1].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};     // Normal
-    clearValues[2].color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};     // Albedo
-    clearValues[3].depthStencil = { 1.0f, 0 };                 // Depth
-    return clearValues;
-}
-
-void GBufferPass::bindPipeline(VkCommandBuffer cmd) const {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getPipeline());
-}
-
-void GBufferPass::bindGlobalDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex) const {
+void GBufferPass::bindGlobalDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex) const {
     if (frameIndex < globalBindingGroups_.size() && globalBindingGroups_[frameIndex]) {
-        auto* vkGroup = static_cast<VulkanRHIBindingGroup*>(globalBindingGroups_[frameIndex].get());
-        VkDescriptorSet ds = vkGroup->getVkDescriptorSet();
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getPipelineLayout(),
-                                0, 1, &ds, 0, nullptr);
+        cmd->setBindingGroup(0, globalBindingGroups_[frameIndex].get());
     }
 }
 
-void GBufferPass::bindMaterialDescriptorSet(VkCommandBuffer cmd, uint32_t frameIndex,
+void GBufferPass::bindMaterialDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex,
                                              MaterialDescriptor* material) const {
-    if (material && material->valid && frameIndex < material->nativeSets.size()) {
-        VkDescriptorSet ds = material->nativeSets[frameIndex];
-        if (ds != VK_NULL_HANDLE) {
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getPipelineLayout(),
-                                    1, 1, &ds, 0, nullptr);
-        }
+    if (!material || !material->valid || frameIndex >= material->groups.size()) return;
+    if (material->groups[frameIndex]) {
+        cmd->setBindingGroup(1, material->groups[frameIndex].get());
     }
 }
 
-void GBufferPass::drawMesh(VkCommandBuffer cmd, VkBuffer vertexBuffer, VkBuffer indexBuffer,
+void GBufferPass::drawMesh(RHICommandBuffer* cmd, RHIBuffer* vertexBuffer, RHIBuffer* indexBuffer,
                             uint32_t indexCount) const {
-    if (vertexBuffer == VK_NULL_HANDLE || indexBuffer == VK_NULL_HANDLE) return;
-
-    VkBuffer vertexBuffers[] = { vertexBuffer };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+    if (!vertexBuffer || !indexBuffer) return;
+    cmd->bindVertexBuffer(0, vertexBuffer);
+    cmd->bindIndexBuffer(indexBuffer, 0, RHIIndexType::UInt32);
+    cmd->drawIndexed(indexCount, 1, 0, 0, 0);
 }
 
-void GBufferPass::pushModelMatrix(VkCommandBuffer cmd, const glm::mat4& model) {
+void GBufferPass::pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model) {
     PushConstantData pushData{};
     pushData.model = model;
     pushData.normalMatrix = glm::transpose(glm::inverse(model));
-
-    vkCmdPushConstants(cmd, getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
-                       0, sizeof(PushConstantData), &pushData);
-}
-
-// =============================================================================
-// recordCommands
-// =============================================================================
-
-void GBufferPass::recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) {
-    recordCommands(cmd, currentContext);
-}
-
-void GBufferPass::recordCommands(VkCommandBuffer cmd, const RenderContext& context) {
-    if (!enabled) return;
-
-    beginRenderPass(cmd);
-    bindPipeline(cmd);
-
-    if (context.sceneVertexBuffer != VK_NULL_HANDLE &&
-        context.sceneIndexBuffer != VK_NULL_HANDLE &&
-        context.sceneIndexCount > 0) {
-
-        VkBuffer vertexBuffers[] = { context.sceneVertexBuffer };
-        VkDeviceSize offsets[] = { 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, context.sceneIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, context.sceneIndexCount, 1, 0, 0, 0);
-    }
-
-    endRenderPass(cmd);
+    cmd->pushConstants(RHIShaderStage::Vertex, 0, sizeof(PushConstantData), &pushData);
 }

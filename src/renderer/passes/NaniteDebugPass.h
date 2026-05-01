@@ -14,7 +14,6 @@
 #include <string>
 #include <unordered_map>
 #include <glm/glm.hpp>
-#include <vulkan/vulkan.h>
 
 // 前向声明
 namespace Nanite {
@@ -24,13 +23,15 @@ namespace Nanite {
     class ClusterCullingPass;
 }
 
-class VulkanDevice;
-class VulkanSwapChain;
 class Scene;
 class RHIDevice;
+class RHISwapChain;
 class RHIBuffer;
 class RHIPipeline;
 class RHIBindingLayout;
+class RHIBindingGroup;
+class RHICommandBuffer;
+class RHIRenderPass;
 
 /**
  * Cluster 调试信息 Push Constants
@@ -68,9 +69,8 @@ struct NaniteDebugUBO {
  */
 class NaniteDebugPass : public RenderPassBase {
 public:
-    NaniteDebugPass(std::shared_ptr<VulkanDevice> device,
-                    RHIDevice* rhiDevice,
-                    std::shared_ptr<VulkanSwapChain> swapChain,
+    NaniteDebugPass(RHIDevice* rhiDevice,
+                    RHISwapChain* rhiSwapChain,
                     std::shared_ptr<Nanite::NaniteManager> naniteManager);
     
     ~NaniteDebugPass() override;
@@ -79,19 +79,19 @@ public:
      * 初始化渲染通道
      * @param renderPass Vulkan 渲染通道句柄 (external, NOT owned)
      */
-    void initialize(VkRenderPass renderPass);
+    void initialize(RHIRenderPass* externalRenderPass);
     
     void cleanup();
     
-    void recordCommands(VkCommandBuffer commandBuffer, 
+    void recordCommands(RHICommandBuffer* cmd, 
                        uint32_t frameIndex,
                        const glm::mat4& modelMatrix);
     
-    void recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
+    void recordCommandsMultiMesh(RHICommandBuffer* cmd,
                                  uint32_t frameIndex,
                                  const std::unordered_map<std::string, glm::mat4>& meshMatrices);
     
-    void recordCommandsWithLOD(VkCommandBuffer commandBuffer,
+    void recordCommandsWithLOD(RHICommandBuffer* cmd,
                                uint32_t frameIndex,
                                const std::unordered_map<std::string, glm::mat4>& meshMatrices,
                                Nanite::NaniteManager* naniteManager);
@@ -133,17 +133,17 @@ public:
 
 private:
     void createBindingLayout();
-    void createPipeline(VkRenderPass renderPass);
+    void createPipeline();
     void createUniformBuffers();
     void createDescriptorSets();
     void buildRenderData();
 
-    // RHI device
+    // RHI device & swap chain
     RHIDevice* rhiDevice_ = nullptr;
+    RHISwapChain* rhiSwapChain_ = nullptr;
+    RHIRenderPass* externalRenderPass_ = nullptr;  // NOT owned
 
-    // 设备引用
-    std::shared_ptr<VulkanDevice> m_device;
-    std::shared_ptr<VulkanSwapChain> m_swapChain;
+    // Nanite manager
     std::shared_ptr<Nanite::NaniteManager> m_naniteManager;
     
     // RHI resources
@@ -153,8 +153,8 @@ private:
     // Per-frame UBOs (RHI)
     std::vector<std::unique_ptr<RHIBuffer>> m_uniformBuffers_;
 
-    // Descriptor sets (native Vulkan — hybrid approach)
-    std::vector<VkDescriptorSet> m_descriptorSets_;
+    // Binding groups (Pure RHI)
+    std::vector<std::unique_ptr<RHIBindingGroup>> m_bindingGroups_;
     
     // 渲染数据结构
     struct ClusterRenderData {

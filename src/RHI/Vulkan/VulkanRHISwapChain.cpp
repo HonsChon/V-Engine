@@ -30,24 +30,41 @@ VulkanRHISwapChain::~VulkanRHISwapChain() {
 // Public API
 // =============================================================================
 
-VkResult VulkanRHISwapChain::acquireNextImage(VkSemaphore semaphore, uint32_t* imageIndex) {
-    return vkAcquireNextImageKHR(device_->getVkDevice(), swapChain_,
-                                 UINT64_MAX, semaphore, VK_NULL_HANDLE, imageIndex);
+static RHISwapChainResult vkResultToSwapChainResult(VkResult result) {
+    switch (result) {
+        case VK_SUCCESS: return RHISwapChainResult::Success;
+        case VK_SUBOPTIMAL_KHR: return RHISwapChainResult::Suboptimal;
+        case VK_ERROR_OUT_OF_DATE_KHR: return RHISwapChainResult::OutOfDate;
+        default: return RHISwapChainResult::Error;
+    }
 }
 
-VkResult VulkanRHISwapChain::present(VkSemaphore waitSemaphore, uint32_t imageIndex) {
+RHISwapChainResult VulkanRHISwapChain::acquireNextImage(void* signalSemaphore, uint32_t* outImageIndex) {
+    VkSemaphore sem = static_cast<VkSemaphore>(signalSemaphore);
+    VkResult result = vkAcquireNextImageKHR(device_->getVkDevice(), swapChain_,
+                                            UINT64_MAX, sem, VK_NULL_HANDLE, outImageIndex);
+    return vkResultToSwapChainResult(result);
+}
+
+RHISwapChainResult VulkanRHISwapChain::present(void* waitSemaphore, uint32_t imageIndex) {
+    VkSemaphore sem = static_cast<VkSemaphore>(waitSemaphore);
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &waitSemaphore;
+    presentInfo.pWaitSemaphores = &sem;
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapChain_;
     presentInfo.pImageIndices = &imageIndex;
-    return vkQueuePresentKHR(device_->getPresentQueue(), &presentInfo);
+    VkResult result = vkQueuePresentKHR(device_->getPresentQueue(), &presentInfo);
+    return vkResultToSwapChainResult(result);
 }
 
 VkFramebuffer VulkanRHISwapChain::getVkFramebuffer(uint32_t index) const {
     return (index < framebuffers_.size()) ? framebuffers_[index] : VK_NULL_HANDLE;
+}
+
+void* VulkanRHISwapChain::getNativeFramebuffer(uint32_t imageIndex) const {
+    return (void*)getVkFramebuffer(imageIndex);
 }
 
 void VulkanRHISwapChain::recreate(uint32_t width, uint32_t height) {
@@ -60,6 +77,34 @@ void VulkanRHISwapChain::recreate(uint32_t width, uint32_t height) {
     createRenderPass();
     createDepthResources();
     createFramebuffers();
+}
+
+// =============================================================================
+// RHI accessors — non-owning wrappers around native handles
+// =============================================================================
+
+void VulkanRHISwapChain::createRHIWrappers() const {
+    // Wrap the native VkRenderPass
+    rhiRenderPass_ = std::make_unique<VulkanRHIRenderPass>(renderPass_);
+
+    // Wrap each native VkFramebuffer
+    rhiFramebuffers_.clear();
+    rhiFramebuffers_.reserve(framebuffers_.size());
+    for (size_t i = 0; i < framebuffers_.size(); ++i) {
+        rhiFramebuffers_.push_back(std::make_unique<VulkanRHIFramebuffer>(
+            framebuffers_[i], vkExtent_.width, vkExtent_.height));
+    }
+}
+
+RHIRenderPass* VulkanRHISwapChain::getRHIRenderPass() const {
+    if (!rhiRenderPass_) createRHIWrappers();
+    return rhiRenderPass_.get();
+}
+
+RHIFramebuffer* VulkanRHISwapChain::getRHIFramebuffer(uint32_t imageIndex) const {
+    if (rhiFramebuffers_.empty()) createRHIWrappers();
+    if (imageIndex < rhiFramebuffers_.size()) return rhiFramebuffers_[imageIndex].get();
+    return nullptr;
 }
 
 // =============================================================================
@@ -283,6 +328,10 @@ void VulkanRHISwapChain::createFramebuffers() {
 }
 
 void VulkanRHISwapChain::cleanup() {
+    // Destroy non-owning RHI wrappers before native resources
+    rhiFramebuffers_.clear();
+    rhiRenderPass_.reset();
+
     VkDevice vkDev = device_->getVkDevice();
 
     if (depthView_ != VK_NULL_HANDLE)  { vkDestroyImageView(vkDev, depthView_, nullptr); depthView_ = VK_NULL_HANDLE; }

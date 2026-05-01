@@ -1,408 +1,220 @@
 #include "FrustumCullingPass.h"
-#include "VulkanDevice.h"
-#include "VulkanBuffer.h"
-#include "ComputePipeline.h"
+#include "RHIDevice.h"
+#include "RHIBuffer.h"
+#include "RHIPipeline.h"
+#include "RHIDescriptor.h"
+#include "RHICommandBuffer.h"
 #include <cstring>
 #include <stdexcept>
-#include <array>
+#include <iostream>
 
-FrustumCullingPass::FrustumCullingPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice)
-    : ComputePassBase(device, rhiDevice, "FrustumCulling") {
+FrustumCullingPass::FrustumCullingPass(RHIDevice* rhiDevice)
+    : ComputePassBase(rhiDevice, "FrustumCulling") {
 }
 
-FrustumCullingPass::~FrustumCullingPass() {
-    cleanup();
-}
+FrustumCullingPass::~FrustumCullingPass() { cleanup(); }
 
 void FrustumCullingPass::init() {
-    // 默认支持 10000 个实例
     createBuffers(10000);
-    
-    // 创建 Compute Pipeline
-    ComputePipeline::Config config;
-    config.shaderPath = "shaders/culling/frustum_culling.comp.spv";
-    
-    // 绑定布局
-    // binding 0: Uniform Buffer (相机数据)
-    // binding 1: Instance Buffer (只读)
-    // binding 2: Visible Indices Buffer (读写)
-    // binding 3: Counter Buffer (原子计数器
-    // binding 4: Indirect Draw Buffer (输出)
-    config.bindings = {
-        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT},
-        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT}
-    };
-    
-    pipeline = std::make_unique<ComputePipeline>(device, config);
-    
+    createComputePipeline();
     createDescriptorSet();
+    std::cout << "[FrustumCullingPass] Initialized (Pure RHI)" << std::endl;
 }
 
+// ============================================
+// Buffer creation (Pure RHI)
+// ============================================
+
 void FrustumCullingPass::createBuffers(uint32_t maxInstCount) {
-    maxInstances = maxInstCount;
-    
-    // Instance Buffer: 存储所有实例的变换和包围盒
-    VkDeviceSize instanceBufferSize = sizeof(GPUInstanceData) * maxInstances;
-    instanceBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        instanceBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    
-    // Uniform Buffer: 相机矩阵和视锥体
-    uniformBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        sizeof(CullingUniforms),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    
-    // Visible Indices Buffer: 存储通过剔除测试的实例索引
-    VkDeviceSize visibleBufferSize = sizeof(uint32_t) * maxInstances;
-    visibleIndicesBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        visibleBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    
-    // Indirect Draw Buffer: 存储间接绘制命令
-    // 每个网格一与DrawIndexedIndirectCommand
-    VkDeviceSize indirectBufferSize = sizeof(VkDrawIndexedIndirectCommand) * maxInstances;
-    indirectDrawBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        indirectBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    
-    // Counter Buffer: 原子计数器
-    counterBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        sizeof(uint32_t),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    
-    // Counter Readback Buffer: CPU 可读
-    counterReadbackBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        sizeof(uint32_t),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    
-    // Visible Indices Readback Buffer: CPU 可读的可见索引
-    visibleIndicesReadbackBuffer = std::make_unique<VulkanBuffer>(
-        device,
-        sizeof(uint32_t) * maxInstances,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
+    maxInstances_ = maxInstCount;
+
+    // Instance buffer (Storage, GPU-only, upload via staging)
+    { RHIBufferDesc d{}; d.size = sizeof(GPUInstanceData) * maxInstances_;
+      d.usage = RHIBufferUsage::Storage; d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      instanceBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Uniform buffer (CPU→GPU)
+    { RHIBufferDesc d{}; d.size = sizeof(CullingUniforms);
+      d.usage = RHIBufferUsage::Uniform; d.memoryUsage = RHIMemoryUsage::CPUToGPU;
+      uniformBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Visible indices buffer (Storage + Vertex + TransferSrc)
+    { RHIBufferDesc d{}; d.size = sizeof(uint32_t) * maxInstances_;
+      d.usage = RHIBufferUsage::Storage | RHIBufferUsage::Vertex | RHIBufferUsage::TransferSrc;
+      d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      visibleIndicesBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Indirect draw buffer (Storage + Indirect + TransferDst)
+    { RHIBufferDesc d{}; d.size = sizeof(RHIDrawIndexedIndirectCommand) * maxInstances_;
+      d.usage = RHIBufferUsage::Storage | RHIBufferUsage::Indirect | RHIBufferUsage::TransferDst;
+      d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      indirectDrawBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Counter buffer (Storage + TransferDst + TransferSrc)
+    { RHIBufferDesc d{}; d.size = sizeof(uint32_t);
+      d.usage = RHIBufferUsage::Storage | RHIBufferUsage::TransferDst | RHIBufferUsage::TransferSrc;
+      d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      counterBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Counter readback buffer (CPU-readable)
+    { RHIBufferDesc d{}; d.size = sizeof(uint32_t);
+      d.usage = RHIBufferUsage::TransferDst; d.memoryUsage = RHIMemoryUsage::GPUToCPU;
+      counterReadbackBuffer_ = rhiDevice_->createBuffer(d); }
+
+    // Visible indices readback buffer
+    { RHIBufferDesc d{}; d.size = sizeof(uint32_t) * maxInstances_;
+      d.usage = RHIBufferUsage::TransferDst; d.memoryUsage = RHIMemoryUsage::GPUToCPU;
+      visibleIndicesReadbackBuffer_ = rhiDevice_->createBuffer(d); }
+}
+
+// ============================================
+// Compute Pipeline (Pure RHI)
+// ============================================
+
+void FrustumCullingPass::createComputePipeline() {
+    // Binding layout: 5 buffers
+    RHIBindingLayoutDesc layoutDesc;
+    layoutDesc.entries.push_back({0, RHIDescriptorType::UniformBuffer,  RHIShaderStage::Compute, 1});
+    layoutDesc.entries.push_back({1, RHIDescriptorType::StorageBuffer,  RHIShaderStage::Compute, 1});
+    layoutDesc.entries.push_back({2, RHIDescriptorType::StorageBuffer,  RHIShaderStage::Compute, 1});
+    layoutDesc.entries.push_back({3, RHIDescriptorType::StorageBuffer,  RHIShaderStage::Compute, 1});
+    layoutDesc.entries.push_back({4, RHIDescriptorType::StorageBuffer,  RHIShaderStage::Compute, 1});
+    bindingLayout_ = rhiDevice_->createBindingLayout(layoutDesc);
+
+    auto builder = rhiDevice_->createComputePipelineBuilder();
+    builder->setComputeShader("shaders/culling/frustum_culling.comp.spv")
+        .addBindingLayout(bindingLayout_.get());
+    pipeline_ = builder->build();
 }
 
 void FrustumCullingPass::createDescriptorSet() {
-    if (!pipeline) return;
-    
-    // 分配 Descriptor Set
-    descriptorSet = pipeline->allocateDescriptorSet();
-    
+    bindingGroup_ = rhiDevice_->allocateBindingGroup(bindingLayout_.get());
     updateDescriptorSet();
 }
 
 void FrustumCullingPass::updateDescriptorSet() {
-    if (descriptorSet == VK_NULL_HANDLE) return;
-    
-    std::array<VkWriteDescriptorSet, 5> writes{};
-    
-    VkDescriptorBufferInfo uniformInfo{};
-    uniformInfo.buffer = uniformBuffer->getBuffer();
-    uniformInfo.offset = 0;
-    uniformInfo.range = sizeof(CullingUniforms);
-    
-    VkDescriptorBufferInfo instanceInfo{};
-    instanceInfo.buffer = instanceBuffer->getBuffer();
-    instanceInfo.offset = 0;
-    instanceInfo.range = sizeof(GPUInstanceData) * maxInstances;
-    
-    VkDescriptorBufferInfo visibleInfo{};
-    visibleInfo.buffer = visibleIndicesBuffer->getBuffer();
-    visibleInfo.offset = 0;
-    visibleInfo.range = sizeof(uint32_t) * maxInstances;
-    
-    VkDescriptorBufferInfo counterInfo{};
-    counterInfo.buffer = counterBuffer->getBuffer();
-    counterInfo.offset = 0;
-    counterInfo.range = sizeof(uint32_t);
-    
-    VkDescriptorBufferInfo indirectInfo{};
-    indirectInfo.buffer = indirectDrawBuffer->getBuffer();
-    indirectInfo.offset = 0;
-    indirectInfo.range = sizeof(VkDrawIndexedIndirectCommand) * maxInstances;
-    
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = descriptorSet;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[0].descriptorCount = 1;
-    writes[0].pBufferInfo = &uniformInfo;
-    
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = descriptorSet;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[1].descriptorCount = 1;
-    writes[1].pBufferInfo = &instanceInfo;
-    
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = descriptorSet;
-    writes[2].dstBinding = 2;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[2].descriptorCount = 1;
-    writes[2].pBufferInfo = &visibleInfo;
-    
-    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[3].dstSet = descriptorSet;
-    writes[3].dstBinding = 3;
-    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[3].descriptorCount = 1;
-    writes[3].pBufferInfo = &counterInfo;
-    
-    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[4].dstSet = descriptorSet;
-    writes[4].dstBinding = 4;
-    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[4].descriptorCount = 1;
-    writes[4].pBufferInfo = &indirectInfo;
-    
-    vkUpdateDescriptorSets(device->getDevice(), 
-                           static_cast<uint32_t>(writes.size()), 
-                           writes.data(), 0, nullptr);
+    if (!bindingGroup_) return;
+    bindingGroup_->updateBuffer(0, uniformBuffer_.get(),        0, sizeof(CullingUniforms));
+    bindingGroup_->updateBuffer(1, instanceBuffer_.get(),       0, sizeof(GPUInstanceData) * maxInstances_);
+    bindingGroup_->updateBuffer(2, visibleIndicesBuffer_.get(), 0, sizeof(uint32_t) * maxInstances_);
+    bindingGroup_->updateBuffer(3, counterBuffer_.get(),        0, sizeof(uint32_t));
+    bindingGroup_->updateBuffer(4, indirectDrawBuffer_.get(),   0, sizeof(RHIDrawIndexedIndirectCommand) * maxInstances_);
 }
 
-void FrustumCullingPass::record(VkCommandBuffer commandBuffer) {
-    if (!pipeline || currentInstanceCount == 0) return;
-    
-    // 绑定 Pipeline
-    pipeline->bind(commandBuffer);
-    
-    // 绑定 Descriptor Set
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipeline->getPipelineLayout(),
-                            0, 1, &descriptorSet, 0, nullptr);
-    
-    // 计算工作组数量
-    uint32_t workGroupCount = (currentInstanceCount + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    
-    // 派发 Compute Shader
-    pipeline->dispatch(commandBuffer, workGroupCount, 1, 1);
-    
-    // 添加内存屏障，确保后续的 Draw 命令能正确读取
-    insertBufferBarrier(commandBuffer,
-                        indirectDrawBuffer->getBuffer(),
-                        VK_WHOLE_SIZE,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-                        VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
-    
-    insertBufferBarrier(commandBuffer,
-                        visibleIndicesBuffer->getBuffer(),
-                        VK_WHOLE_SIZE,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                        VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+// ============================================
+// Record (Pure RHI)
+// ============================================
+
+void FrustumCullingPass::record(RHICommandBuffer* cmd) {
+    if (!pipeline_ || currentInstanceCount_ == 0) return;
+
+    cmd->bindComputePipeline(pipeline_.get());
+    cmd->setBindingGroup(0, bindingGroup_.get());
+
+    uint32_t workGroupCount = (currentInstanceCount_ + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+    cmd->dispatch(workGroupCount, 1, 1);
+
+    // Barriers: ensure writes are visible to draw indirect and vertex input
+    insertBufferBarrier(cmd, indirectDrawBuffer_.get());
+    insertBufferBarrier(cmd, visibleIndicesBuffer_.get());
 }
 
-void FrustumCullingPass::resetCounters(VkCommandBuffer commandBuffer) {
-    // 将计数器重置与0
-    vkCmdFillBuffer(commandBuffer, counterBuffer->getBuffer(), 0, sizeof(uint32_t), 0);
-    
-    // 确保重置完成后才开始剔除
-    insertBufferBarrier(commandBuffer,
-                        counterBuffer->getBuffer(),
-                        sizeof(uint32_t),
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+void FrustumCullingPass::resetCounters(RHICommandBuffer* cmd) {
+    cmd->fillBuffer(counterBuffer_.get(), 0, sizeof(uint32_t), 0);
+    insertBufferBarrier(cmd, counterBuffer_.get());
 }
+
+// ============================================
+// Data upload
+// ============================================
 
 void FrustumCullingPass::updateInstances(const std::vector<GPUInstanceData>& instances) {
-    currentInstanceCount = static_cast<uint32_t>(instances.size());
-    
-    if (currentInstanceCount > maxInstances) {
-        // 需要重新分配更大的缓冲区
+    currentInstanceCount_ = static_cast<uint32_t>(instances.size());
+    if (currentInstanceCount_ > maxInstances_) {
         cleanup();
-        createBuffers(currentInstanceCount * 2); // 预留一些空间
+        createBuffers(currentInstanceCount_ * 2);
+        createComputePipeline();
         createDescriptorSet();
     }
-    
-    // 上传实例数据（这里简化处理，实际应使用staging buffer：
-    // TODO: 使用 staging buffer 进行异步上传
-    instanceBuffer->uploadData(instances.data(), sizeof(GPUInstanceData) * currentInstanceCount);
+    instanceBuffer_->uploadData(instances.data(), sizeof(GPUInstanceData) * currentInstanceCount_);
 }
 
 void FrustumCullingPass::updateUniforms(const CullingUniforms& uniforms) {
-    // 计算视锥体平面
-    CullingUniforms updatedUniforms = uniforms;
-    extractFrustumPlanes(uniforms.viewProjMatrix, updatedUniforms.frustumPlanes);
-    // 使用 instanceCountPacked.x 存储实例数量
-    updatedUniforms.instanceCountPacked = glm::uvec4(currentInstanceCount, 0, 0, 0);
-    
-    // 直接映射内存上传（因为是 HOST_VISIBLE：
-    void* data;
-    vkMapMemory(device->getDevice(), uniformBuffer->getMemory(), 0, sizeof(CullingUniforms), 0, &data);
-    memcpy(data, &updatedUniforms, sizeof(CullingUniforms));
-    vkUnmapMemory(device->getDevice(), uniformBuffer->getMemory());
+    CullingUniforms updated = uniforms;
+    extractFrustumPlanes(uniforms.viewProjMatrix, updated.frustumPlanes);
+    updated.instanceCountPacked = glm::uvec4(currentInstanceCount_, 0, 0, 0);
+    void* ptr = uniformBuffer_->map();
+    memcpy(ptr, &updated, sizeof(CullingUniforms));
+    uniformBuffer_->unmap();
 }
 
+// ============================================
+// Frustum plane extraction (pure math, no Vulkan)
+// ============================================
+
 void FrustumCullingPass::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
-    // 从ViewProjection 矩阵提取视锥体的 6 个平面
-    // 平面方程: ax + by + cz + d = 0
-    
-    // Left plane
-    planes[0] = glm::vec4(
-        viewProj[0][3] + viewProj[0][0],
-        viewProj[1][3] + viewProj[1][0],
-        viewProj[2][3] + viewProj[2][0],
-        viewProj[3][3] + viewProj[3][0]
-    );
-    
-    // Right plane
-    planes[1] = glm::vec4(
-        viewProj[0][3] - viewProj[0][0],
-        viewProj[1][3] - viewProj[1][0],
-        viewProj[2][3] - viewProj[2][0],
-        viewProj[3][3] - viewProj[3][0]
-    );
-    
-    // Bottom plane
-    planes[2] = glm::vec4(
-        viewProj[0][3] + viewProj[0][1],
-        viewProj[1][3] + viewProj[1][1],
-        viewProj[2][3] + viewProj[2][1],
-        viewProj[3][3] + viewProj[3][1]
-    );
-    
-    // Top plane
-    planes[3] = glm::vec4(
-        viewProj[0][3] - viewProj[0][1],
-        viewProj[1][3] - viewProj[1][1],
-        viewProj[2][3] - viewProj[2][1],
-        viewProj[3][3] - viewProj[3][1]
-    );
-    
-    // Near plane
-    planes[4] = glm::vec4(
-        viewProj[0][2],
-        viewProj[1][2],
-        viewProj[2][2],
-        viewProj[3][2]
-    );
-    
-    // Far plane
-    planes[5] = glm::vec4(
-        viewProj[0][3] - viewProj[0][2],
-        viewProj[1][3] - viewProj[1][2],
-        viewProj[2][3] - viewProj[2][2],
-        viewProj[3][3] - viewProj[3][2]
-    );
-    
-    // 归一化平面
+    planes[0] = glm::vec4(viewProj[0][3]+viewProj[0][0], viewProj[1][3]+viewProj[1][0], viewProj[2][3]+viewProj[2][0], viewProj[3][3]+viewProj[3][0]);
+    planes[1] = glm::vec4(viewProj[0][3]-viewProj[0][0], viewProj[1][3]-viewProj[1][0], viewProj[2][3]-viewProj[2][0], viewProj[3][3]-viewProj[3][0]);
+    planes[2] = glm::vec4(viewProj[0][3]+viewProj[0][1], viewProj[1][3]+viewProj[1][1], viewProj[2][3]+viewProj[2][1], viewProj[3][3]+viewProj[3][1]);
+    planes[3] = glm::vec4(viewProj[0][3]-viewProj[0][1], viewProj[1][3]-viewProj[1][1], viewProj[2][3]-viewProj[2][1], viewProj[3][3]-viewProj[3][1]);
+    planes[4] = glm::vec4(viewProj[0][2], viewProj[1][2], viewProj[2][2], viewProj[3][2]);
+    planes[5] = glm::vec4(viewProj[0][3]-viewProj[0][2], viewProj[1][3]-viewProj[1][2], viewProj[2][3]-viewProj[2][2], viewProj[3][3]-viewProj[3][2]);
     for (int i = 0; i < 6; ++i) {
-        float length = glm::length(glm::vec3(planes[i]));
-        planes[i] /= length;
+        float len = glm::length(glm::vec3(planes[i]));
+        planes[i] /= len;
     }
 }
 
-VkBuffer FrustumCullingPass::getIndirectDrawBuffer() const {
-    return indirectDrawBuffer ? indirectDrawBuffer->getBuffer() : VK_NULL_HANDLE;
-}
-
-VkBuffer FrustumCullingPass::getVisibleIndicesBuffer() const {
-    return visibleIndicesBuffer ? visibleIndicesBuffer->getBuffer() : VK_NULL_HANDLE;
-}
-
-void FrustumCullingPass::cleanup() {
-    instanceBuffer.reset();
-    uniformBuffer.reset();
-    visibleIndicesBuffer.reset();
-    visibleIndicesReadbackBuffer.reset();  // 添加: 清理 readback buffer
-    indirectDrawBuffer.reset();
-    counterBuffer.reset();
-    counterReadbackBuffer.reset();
-    
-    ComputePassBase::cleanup();
-}
+// ============================================
+// Readback (uses RHI map/unmap + device single-time commands for copy)
+// ============================================
 
 uint32_t FrustumCullingPass::getVisibleCount() {
     readbackCounter();
-    return visibleCount;
+    return visibleCount_;
 }
 
 void FrustumCullingPass::readbackCounter() {
-    if (!counterBuffer || !counterReadbackBuffer) return;
-    
-    // 使用一次性命令缓冲区复制计数器
-    VkCommandBuffer cmdBuffer = device->beginSingleTimeCommands();
-    
-    VkBufferCopy copyRegion{};
-    copyRegion.size = sizeof(uint32_t);
-    vkCmdCopyBuffer(cmdBuffer, counterBuffer->getBuffer(), 
-                    counterReadbackBuffer->getBuffer(), 1, &copyRegion);
-    
-    device->endSingleTimeCommands(cmdBuffer);
-    
-    // 从readback buffer 读取值
-    void* data;
-    vkMapMemory(device->getDevice(), counterReadbackBuffer->getMemory(), 
-                0, sizeof(uint32_t), 0, &data);
-    visibleCount = *reinterpret_cast<uint32_t*>(data);
-    vkUnmapMemory(device->getDevice(), counterReadbackBuffer->getMemory());
+    if (!counterBuffer_ || !counterReadbackBuffer_) return;
+    // Use RHI single-time commands for the copy
+    void* cmdRaw = rhiDevice_->beginSingleTimeCommands();
+    auto rhiCmd = rhiDevice_->wrapCommandBuffer(cmdRaw);
+    rhiCmd->copyBuffer(counterBuffer_.get(), counterReadbackBuffer_.get(), sizeof(uint32_t));
+    rhiCmd.reset(); // release wrap before ending
+    rhiDevice_->endSingleTimeCommands(cmdRaw);
+
+    void* data = counterReadbackBuffer_->map();
+    visibleCount_ = *reinterpret_cast<uint32_t*>(data);
+    counterReadbackBuffer_->unmap();
 }
 
 const std::vector<uint32_t>& FrustumCullingPass::getVisibleIndices() {
-    if (!visibleIndicesBuffer || !visibleIndicesReadbackBuffer) {
-        visibleIndicesCPU.clear();
-        return visibleIndicesCPU;
+    if (!visibleIndicesBuffer_ || !visibleIndicesReadbackBuffer_) {
+        visibleIndicesCPU_.clear();
+        return visibleIndicesCPU_;
     }
-    
-    // 先读取可见数量
     readbackCounter();
-    
-    if (visibleCount == 0) {
-        visibleIndicesCPU.clear();
-        return visibleIndicesCPU;
-    }
-    
-    // 限制读取数量，防止越界
-    uint32_t readCount = std::min(visibleCount, maxInstances);
-    
-    // 使用一次性命令缓冲区复制可见索引
-    VkCommandBuffer cmdBuffer = device->beginSingleTimeCommands();
-    
-    VkBufferCopy copyRegion{};
-    copyRegion.size = sizeof(uint32_t) * readCount;
-    vkCmdCopyBuffer(cmdBuffer, visibleIndicesBuffer->getBuffer(), 
-                    visibleIndicesReadbackBuffer->getBuffer(), 1, &copyRegion);
-    
-    device->endSingleTimeCommands(cmdBuffer);
-    
-    // 从readback buffer 读取索引
-    void* data;
-    vkMapMemory(device->getDevice(), visibleIndicesReadbackBuffer->getMemory(), 
-                0, sizeof(uint32_t) * readCount, 0, &data);
-    
-    visibleIndicesCPU.resize(readCount);
-    memcpy(visibleIndicesCPU.data(), data, sizeof(uint32_t) * readCount);
-    
-    vkUnmapMemory(device->getDevice(), visibleIndicesReadbackBuffer->getMemory());
-    
-    return visibleIndicesCPU;
+    if (visibleCount_ == 0) { visibleIndicesCPU_.clear(); return visibleIndicesCPU_; }
+    uint32_t readCount = std::min(visibleCount_, maxInstances_);
+
+    void* cmdRaw = rhiDevice_->beginSingleTimeCommands();
+    auto rhiCmd = rhiDevice_->wrapCommandBuffer(cmdRaw);
+    rhiCmd->copyBuffer(visibleIndicesBuffer_.get(), visibleIndicesReadbackBuffer_.get(), sizeof(uint32_t) * readCount);
+    rhiCmd.reset();
+    rhiDevice_->endSingleTimeCommands(cmdRaw);
+
+    void* data = visibleIndicesReadbackBuffer_->map();
+    visibleIndicesCPU_.resize(readCount);
+    memcpy(visibleIndicesCPU_.data(), data, sizeof(uint32_t) * readCount);
+    visibleIndicesReadbackBuffer_->unmap();
+
+    return visibleIndicesCPU_;
+}
+
+void FrustumCullingPass::cleanup() {
+    instanceBuffer_.reset(); uniformBuffer_.reset();
+    visibleIndicesBuffer_.reset(); visibleIndicesReadbackBuffer_.reset();
+    indirectDrawBuffer_.reset(); counterBuffer_.reset();
+    counterReadbackBuffer_.reset(); bindingGroup_.reset();
+    ComputePassBase::cleanup();
 }

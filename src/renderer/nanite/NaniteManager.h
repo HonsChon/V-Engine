@@ -12,13 +12,13 @@
 
 #include "Nanite.h"
 #include "ClusterCullingPass.h"
-#include <vulkan/vulkan.h>
 #include <memory>
 #include <unordered_map>
 
 // 前向声明
-class VulkanDevice;
-class VulkanBuffer;
+class RHIDevice;
+class RHICommandBuffer;
+class RHIBuffer;
 
 namespace Nanite {
 
@@ -27,7 +27,7 @@ namespace Nanite {
  */
 class NaniteManager {
 public:
-    NaniteManager(std::shared_ptr<VulkanDevice> device);
+    NaniteManager(RHIDevice* rhiDevice);
     ~NaniteManager();
     
     /**
@@ -80,13 +80,13 @@ public:
     
     /**
      * 执行 Cluster 剔除（在 Compute Pass 中调用）
-     * @param commandBuffer 命令缓冲区
+     * @param cmd RHI 命令缓冲区
      * @param viewMatrix 视图矩阵
      * @param projMatrix 投影矩阵
      * @param cameraPosition 相机世界坐标
      * @param frameIndex 当前帧索引（用于双缓冲同步）
      */
-    void performCulling(VkCommandBuffer commandBuffer,
+    void performCulling(RHICommandBuffer* cmd,
                        const glm::mat4& viewMatrix,
                        const glm::mat4& projMatrix,
                        const glm::vec3& cameraPosition,
@@ -117,8 +117,8 @@ public:
     /**
      * 获取 Cluster 数据缓冲区（用于渲染）
      */
-    VkBuffer getClusterDataBuffer() const;
-    VkBuffer getVisibleIndicesBuffer() const;
+    RHIBuffer* getClusterDataBuffer() const;
+    RHIBuffer* getVisibleIndicesBuffer() const;
 
 private:
     // GPU 缓冲区
@@ -130,7 +130,7 @@ private:
     // 从视图投影矩阵提取视锥平面
     static void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     
-    std::shared_ptr<VulkanDevice> m_device;
+    RHIDevice* m_rhiDevice = nullptr;
     
     // Cluster 化处理器
     std::unique_ptr<MeshClusterizer> m_clusterizer;
@@ -138,13 +138,15 @@ private:
     // 已处理的网格缓存
     std::unordered_map<std::string, std::shared_ptr<ClusterizedMesh>> m_meshCache;
     
-    // GPU 缓冲区
-    std::unique_ptr<VulkanBuffer> m_clusterDataBuffer;      // 所属Cluster 的GPUClusterData
-    std::unique_ptr<VulkanBuffer> m_transformBuffer;        // 变换矩阵
-    std::unique_ptr<VulkanBuffer> m_uniformBuffer;          // Uniform 数据
-    std::unique_ptr<VulkanBuffer> m_visibleIndicesBuffer;   // 可见 Cluster 索引
-    std::unique_ptr<VulkanBuffer> m_counterBuffer;          // 原子计数量
-    std::unique_ptr<VulkanBuffer> m_readbackBuffer;         // CPU 读取缓冲区
+    // GPU 缓冲区 (Pure RHI)
+    std::unique_ptr<RHIBuffer> m_transformBuffer;
+    std::unique_ptr<RHIBuffer> m_uniformBuffer;
+    std::unique_ptr<RHIBuffer> m_visibleIndicesBuffer;
+    std::unique_ptr<RHIBuffer> m_counterBuffer;
+    std::unique_ptr<RHIBuffer> m_readbackBuffer;
+    
+    // RHI buffer for cluster data (used by ClusterCullingPass)
+    std::unique_ptr<RHIBuffer> m_clusterDataBufferRHI;
     
     // GPU Cluster Culling Pass
     std::unique_ptr<ClusterCullingPass> m_cullingPass;

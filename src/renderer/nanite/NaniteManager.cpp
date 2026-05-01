@@ -3,8 +3,9 @@
  */
 
 #include "NaniteManager.h"
-#include "VulkanDevice.h"
-#include "VulkanBuffer.h"
+#include "RHIDevice.h"
+#include "RHICommandBuffer.h"
+#include "RHIBuffer.h"
 
 #include <algorithm>
 #include <iostream>
@@ -16,8 +17,8 @@ namespace Nanite {
 // 构建析构
 // ============================================================================
 
-NaniteManager::NaniteManager(std::shared_ptr<VulkanDevice> device)
-    : m_device(std::move(device))
+NaniteManager::NaniteManager(RHIDevice* rhiDevice)
+    : m_rhiDevice(rhiDevice)
 {
     m_clusterizer = std::make_unique<MeshClusterizer>();
 }
@@ -33,7 +34,7 @@ void NaniteManager::initialize() {
               << VERSION_MAJOR << "." << VERSION_MINOR << std::endl;
     
     // 创建 GPU Cluster Culling Pass
-    m_cullingPass = std::make_unique<ClusterCullingPass>(m_device);
+    m_cullingPass = std::make_unique<ClusterCullingPass>(m_rhiDevice);
     m_cullingPass->init();
     
     // 创建 GPU 缓冲区将在uploadToGPU 时进行
@@ -44,8 +45,8 @@ void NaniteManager::cleanup() {
     if (!m_initialized) return;
     
     // 等待 GPU 完成
-    if (m_device) {
-        vkDeviceWaitIdle(m_device->getDevice());
+    if (m_rhiDevice) {
+        m_rhiDevice->waitIdle();
     }
     
     // 清理 culling pass
@@ -55,7 +56,7 @@ void NaniteManager::cleanup() {
     }
     
     // 清理缓冲区
-    m_clusterDataBuffer.reset();
+    m_clusterDataBufferRHI.reset();
     m_transformBuffer.reset();
     m_uniformBuffer.reset();
     m_visibleIndicesBuffer.reset();
@@ -345,62 +346,59 @@ void NaniteManager::uploadToGPU() {
         }
     }
     
-    // 创建或更新Cluster 数据缓冲区
-    VkDeviceSize clusterBufferSize = sizeof(GPUClusterData) * m_totalClusterCount;
+    // 创建或更新Cluster 数据缓冲区 (RHI)
+    uint64_t clusterBufferSize = sizeof(GPUClusterData) * m_totalClusterCount;
     
-    m_clusterDataBuffer = std::make_unique<VulkanBuffer>(
-        m_device,
-        clusterBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    
-    // 通过 staging buffer 上传
-    m_clusterDataBuffer->uploadData(allClusterData.data(), clusterBufferSize);
+    if (m_rhiDevice) {
+        RHIBufferDesc d{};
+        d.size = clusterBufferSize;
+        d.usage = RHIBufferUsage::Storage;
+        d.memoryUsage = RHIMemoryUsage::GPUOnly;
+        m_clusterDataBufferRHI = m_rhiDevice->createBuffer(d);
+        m_clusterDataBufferRHI->uploadData(allClusterData.data(), clusterBufferSize);
+    }
     
     // 创建可见索引缓冲区（最多和总Cluster 数量一样大）
-    VkDeviceSize visibleBufferSize = sizeof(uint32_t) * m_totalClusterCount;
-    
-    m_visibleIndicesBuffer = std::make_unique<VulkanBuffer>(
-        m_device,
-        visibleBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
+    {
+        RHIBufferDesc desc{};
+        desc.size = sizeof(uint32_t) * m_totalClusterCount;
+        desc.usage = RHIBufferUsage::Storage;
+        desc.memoryUsage = RHIMemoryUsage::GPUOnly;
+        m_visibleIndicesBuffer = m_rhiDevice->createBuffer(desc);
+    }
     
     // 创建计数器缓冲区（单个uint32_t）
-    m_counterBuffer = std::make_unique<VulkanBuffer>(
-        m_device,
-        sizeof(uint32_t),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
+    {
+        RHIBufferDesc desc{};
+        desc.size = sizeof(uint32_t);
+        desc.usage = RHIBufferUsage::Storage;
+        desc.memoryUsage = RHIMemoryUsage::GPUOnly;
+        m_counterBuffer = m_rhiDevice->createBuffer(desc);
+    }
     
     // 创建 Uniform 缓冲区
-    // ClusterCullingUniforms 结构大小（参考cluster_culling.comp）
-    constexpr VkDeviceSize uniformSize = 368; // 6 planes * 16 + viewProj + 其他
-    
-    m_uniformBuffer = std::make_unique<VulkanBuffer>(
-        m_device,
-        uniformSize,
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
+    {
+        constexpr uint64_t uniformSize = 368; // 6 planes * 16 + viewProj + etc
+        RHIBufferDesc desc{};
+        desc.size = uniformSize;
+        desc.usage = RHIBufferUsage::Uniform;
+        desc.memoryUsage = RHIMemoryUsage::CPUToGPU;
+        m_uniformBuffer = m_rhiDevice->createBuffer(desc);
+    }
     
     // 创建 readback 缓冲区
-    m_readbackBuffer = std::make_unique<VulkanBuffer>(
-        m_device,
-        sizeof(uint32_t) * (m_totalClusterCount + 1), // +1 for counter
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
+    {
+        RHIBufferDesc desc{};
+        desc.size = sizeof(uint32_t) * (m_totalClusterCount + 1); // +1 for counter
+        desc.usage = RHIBufferUsage::Storage;
+        desc.memoryUsage = RHIMemoryUsage::GPUToCPU;
+        m_readbackBuffer = m_rhiDevice->createBuffer(desc);
+    }
     
-    // 将cluster buffer 绑定到culling pass
-    if (m_cullingPass) {
-        m_cullingPass->setClusterBuffer(m_clusterDataBuffer->getBuffer(), m_totalClusterCount);
-        if (m_transformBuffer) {
-            m_cullingPass->setTransformBuffer(m_transformBuffer->getBuffer());
-        }
+    // 将cluster buffer 绑定到culling pass (RHI)
+    if (m_cullingPass && m_clusterDataBufferRHI) {
+        m_cullingPass->setClusterBuffer(m_clusterDataBufferRHI.get(), m_totalClusterCount);
+        // TODO: transform buffer migration to RHI
     }
     
     m_gpuDataDirty = false;
@@ -416,7 +414,7 @@ void NaniteManager::createGPUBuffers() {
 }
 
 void NaniteManager::performCulling(
-    VkCommandBuffer commandBuffer,
+    RHICommandBuffer* cmd,
     const glm::mat4& viewMatrix,
     const glm::mat4& projMatrix,
     const glm::vec3& cameraPosition,
@@ -459,10 +457,10 @@ void NaniteManager::performCulling(
     m_cullingPass->updateUniforms(uniforms);
     
     // 重置计数器和选择状态
-    m_cullingPass->resetCounters(commandBuffer);
+    m_cullingPass->resetCounters(cmd);
     
     // 执行 compute pass，传递帧索引以实现双缓冲同步
-    m_cullingPass->record(commandBuffer, frameIndex);
+    m_cullingPass->record(cmd, frameIndex);
 }
 
 void NaniteManager::updateUniformBuffer(
@@ -511,8 +509,8 @@ void NaniteManager::updateUniformBuffer(
         m_config.screenSpaceErrorThreshold      // w: pixel threshold
     );
     
-    // 使用 copyFrom 直接写入（对于HOST_VISIBLE 缓冲区）
-    m_uniformBuffer->copyFrom(&uniforms, sizeof(uniforms));
+    // 直接写入 HOST_VISIBLE 缓冲区
+    m_uniformBuffer->uploadData(&uniforms, sizeof(uniforms));
 }
 
 void NaniteManager::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
@@ -582,12 +580,12 @@ const std::vector<uint32_t>& NaniteManager::getVisibleClusters() {
     return m_visibleClustersCPU;
 }
 
-VkBuffer NaniteManager::getClusterDataBuffer() const {
-    return m_clusterDataBuffer ? m_clusterDataBuffer->getBuffer() : VK_NULL_HANDLE;
+RHIBuffer* NaniteManager::getClusterDataBuffer() const {
+    return m_clusterDataBufferRHI.get();
 }
 
-VkBuffer NaniteManager::getVisibleIndicesBuffer() const {
-    return m_visibleIndicesBuffer ? m_visibleIndicesBuffer->getBuffer() : VK_NULL_HANDLE;
+RHIBuffer* NaniteManager::getVisibleIndicesBuffer() const {
+    return m_visibleIndicesBuffer.get();
 }
 
 uint32_t NaniteManager::getVisibleClusterCount() const {

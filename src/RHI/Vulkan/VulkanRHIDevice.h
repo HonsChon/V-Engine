@@ -20,7 +20,6 @@
 #include <set>
 #include <string>
 
-class VulkanDevice; // Forward declaration for wrapping constructor
 
 // =============================================================================
 // VulkanRHIDevice — Vulkan implementation of RHIDevice
@@ -40,9 +39,6 @@ public:
     /// Create a new standalone device (owns all Vulkan objects)
     explicit VulkanRHIDevice(GLFWwindow* window);
 
-    /// Wrap an existing VulkanDevice (borrows handles — does NOT destroy them)
-    explicit VulkanRHIDevice(std::shared_ptr<VulkanDevice> existingDevice);
-
     ~VulkanRHIDevice() override;
 
     // ---- RHIDevice factory methods ----
@@ -61,10 +57,72 @@ public:
     std::unique_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) override;
     std::unique_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) override;
 
+    std::unique_ptr<RHIRenderPass>   wrapExternalRenderPass(void* nativeHandle) override;
+    std::unique_ptr<RHIBuffer>       wrapExternalBuffer(void* nativeBuffer, uint64_t size) override;
+    std::unique_ptr<RHITexture>      wrapExternalTexture(void* nativeImage, void* nativeImageView,
+                                                          uint32_t width, uint32_t height,
+                                                          RHIFormat format) override;
+    std::unique_ptr<RHISampler>      wrapExternalSampler(void* nativeSampler) override;
+    std::unique_ptr<RHIBindingGroup> allocateBindingGroup(RHIBindingLayout* layout) override;
+    std::unique_ptr<RHICommandBuffer> wrapCommandBuffer(void* nativeCmd) override;
+
     void waitIdle() override;
     uint32_t findMemoryType(uint32_t typeFilter, uint32_t propertyFlags) override;
 
-    // ---- Vulkan-specific accessors (native handle backdoor) ----
+    // ---- SwapChain factory ----
+    std::unique_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) override;
+
+    // ---- Format query ----
+    RHIFormat findSupportedFormat(const std::vector<RHIFormat>& candidates,
+                                  uint32_t tiling, uint32_t features) override;
+    RHIFormat findDepthFormat() override;
+
+    // ---- Raw buffer/image creation ----
+    void createRawBuffer(uint64_t size, uint32_t usage, uint32_t memoryProperties,
+                          void* outBuffer, void* outMemory) override;
+    void createRawImage(uint32_t width, uint32_t height, RHIFormat format,
+                         uint32_t tiling, uint32_t usage, uint32_t memoryProperties,
+                         void* outImage, void* outMemory) override;
+    void copyBuffer(void* srcBuffer, void* dstBuffer, uint64_t size) override;
+
+    // ---- Single-time commands (RHIDevice interface) ----
+    void* beginSingleTimeCommands() override;
+    void endSingleTimeCommands(void* commandBuffer) override;
+
+    // ---- Debug labels ----
+    void beginDebugLabel(void* commandBuffer, const char* name,
+                          float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f) override;
+    void endDebugLabel(void* commandBuffer) override;
+    void insertDebugLabel(void* commandBuffer, const char* name,
+                           float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f) override;
+
+    // ---- Sync objects ----
+    void* createSemaphore() override;
+    void* createFence(bool signaled = false) override;
+    void destroySemaphore(void* semaphore) override;
+    void destroyFence(void* fence) override;
+    void waitForFence(void* fence) override;
+    void resetFence(void* fence) override;
+
+    // ---- Command buffer allocation ----
+    std::vector<void*> allocateCommandBuffers(uint32_t count) override;
+
+    // ---- Queue submission ----
+    void submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
+                              const std::vector<uint32_t>& waitStages,
+                              const std::vector<void*>& commandBuffers,
+                              const std::vector<void*>& signalSemaphores,
+                              void* fence) override;
+
+    // ---- Native handle access ----
+    void*    getNativeDevice() const override { return (void*)device_; }
+    void*    getNativeInstance() const override { return (void*)instance_; }
+    void*    getNativePhysicalDevice() const override { return (void*)physicalDevice_; }
+    uint32_t getGraphicsQueueFamilyIndex() const override { return graphicsQueueFamily_; }
+    void*    getNativeGraphicsQueue() const override { return (void*)graphicsQueue_; }
+    void*    getNativeCommandPool() const override { return (void*)commandPool_; }
+
+    // ---- Vulkan-specific accessors (internal use / legacy interop) ----
     VkDevice         getVkDevice() const { return device_; }
     VkPhysicalDevice getVkPhysicalDevice() const { return physicalDevice_; }
     VkInstance        getVkInstance() const { return instance_; }
@@ -74,9 +132,9 @@ public:
     VkSurfaceKHR     getSurface() const { return surface_; }
     uint32_t         getGraphicsQueueFamily() const { return graphicsQueueFamily_; }
 
-    // ---- Internal helpers ----
-    VkCommandBuffer beginSingleTimeCommands();
-    void endSingleTimeCommands(VkCommandBuffer cmd);
+    // ---- Internal Vulkan helpers ----
+    VkCommandBuffer beginSingleTimeCommandsVk();
+    void endSingleTimeCommandsVk(VkCommandBuffer cmd);
 
     // ---- Descriptor Pool management (auto-grow) ----
     VkDescriptorSet allocateDescriptorSet(VkDescriptorSetLayout layout);
@@ -99,10 +157,6 @@ private:
     void createNewDescriptorPool();
 
     GLFWwindow* window_ = nullptr;
-    bool ownsDevice_ = true;  // false when wrapping an existing VulkanDevice
-
-    // Keep a shared_ptr to the wrapped device to ensure it stays alive
-    std::shared_ptr<VulkanDevice> wrappedDevice_;
 
     VkInstance instance_ = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;

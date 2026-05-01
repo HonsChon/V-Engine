@@ -218,16 +218,8 @@ set(APPLICATION_HEADERS
     src/Application/Input.h
 )
 
-# RHI - 渲染硬件接口层：Vulkan封装（旧代码）+ 新 RHI 抽象层
+# RHI - 渲染硬件接口层：RHI 抽象层 + Vulkan 后端
 set(RHI_SOURCES
-    src/RHI/VulkanDevice.cpp
-    src/RHI/VulkanSwapChain.cpp
-    src/RHI/VulkanBuffer.cpp
-    src/RHI/VulkanTexture.cpp
-    src/RHI/VulkanPipeline.cpp
-    src/RHI/ComputePipeline.cpp
-    src/RHI/FrameResources.cpp
-    # New RHI abstraction layer
     src/RHI/RHI.cpp
     src/RHI/Vulkan/VulkanRHIDevice.cpp
     src/RHI/Vulkan/VulkanRHIBuffer.cpp
@@ -242,14 +234,6 @@ set(RHI_SOURCES
 )
 
 set(RHI_HEADERS
-    src/RHI/VulkanDevice.h
-    src/RHI/VulkanSwapChain.h
-    src/RHI/VulkanBuffer.h
-    src/RHI/VulkanTexture.h
-    src/RHI/VulkanPipeline.h
-    src/RHI/ComputePipeline.h
-    src/RHI/FrameResources.h
-    # New RHI abstraction headers
     src/RHI/RHI.h
     src/RHI/RHITypes.h
     src/RHI/RHIDevice.h
@@ -336,12 +320,12 @@ set(WORLD_HEADERS
 # Resources - 资源管理
 set(RESOURCES_SOURCES
     src/resources/Mesh.cpp
-    src/resources/Material.cpp
+    src/resources/GPUMesh.cpp
+    src/resources/TextureManager.cpp
 )
 
 set(RESOURCES_HEADERS
     src/resources/Mesh.h
-    src/resources/Material.h
     src/resources/MeshManager.h
     src/resources/TextureManager.h
     src/resources/RenderSystem.h

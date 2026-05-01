@@ -1,11 +1,11 @@
 #pragma once
 
 #include "RHIBuffer.h"
-#include <vulkan/vulkan.h>
+#include "IVulkanNative.h"
 
 class VulkanRHIDevice;
 
-class VulkanRHIBuffer : public RHIBuffer {
+class VulkanRHIBuffer : public RHIBuffer, public IVulkanNativeBuffer {
 public:
     VulkanRHIBuffer(VulkanRHIDevice* device, const RHIBufferDesc& desc);
     ~VulkanRHIBuffer() override;
@@ -18,8 +18,8 @@ public:
     RHIBufferUsage getUsage() const override { return desc_.usage; }
     RHIMemoryUsage getMemoryUsage() const override { return desc_.memoryUsage; }
 
-    // Native handle
-    VkBuffer       getVkBuffer() const { return buffer_; }
+    // IVulkanNativeBuffer implementation
+    VkBuffer       getVkBuffer() const override { return buffer_; }
     VkDeviceMemory getVkMemory() const { return memory_; }
 
 private:

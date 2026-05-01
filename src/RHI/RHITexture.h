@@ -36,6 +36,16 @@ public:
     virtual RHIFormat       getFormat() const = 0;
     virtual RHITextureUsage getUsage() const = 0;
 
+    /// Upload pixel data to this texture (uses staging buffer + layout transitions).
+    /// The texture must have been created with TransferDst usage.
+    /// After upload, the texture is left in ShaderReadOnly layout.
+    virtual void uploadPixels(const void* data, uint64_t dataSize) { /* no-op for views */ }
+
+    /// Create a view into a single layer of an array texture.
+    /// The returned RHITexture is a non-owning view (does not destroy the underlying image).
+    /// Used for per-layer framebuffer attachments (e.g., SSAO's 16-layer array).
+    virtual std::unique_ptr<RHITexture> createLayerView(uint32_t layer) { return nullptr; }
+
     // Non-copyable
     RHITexture(const RHITexture&) = delete;
     RHITexture& operator=(const RHITexture&) = delete;

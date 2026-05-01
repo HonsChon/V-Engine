@@ -1,24 +1,27 @@
 #pragma once
 
 #include "Mesh.h"
-#include "VulkanBuffer.h"
-#include "VulkanDevice.h"
+#include "RHIBuffer.h"
 #include "RayPicker.h"  // for AABB
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <iostream>
 
+// Forward declaration
+class RHIDevice;
+
 namespace VulkanEngine {
 
 /**
  * @brief GPU Mesh 数据结构
- * 包含 Mesh 几何数据以及 Vulkan 顶点/索引缓冲区
+ * 持有 Mesh 几何数据及 RHI 顶点/索引缓冲区
+ * 所有 buffer 通过 RHIDevice 创建 — 无 Vulkan 依赖
  */
 struct GPUMesh {
     std::shared_ptr<Mesh> mesh;
-    std::shared_ptr<VulkanBuffer> vertexBuffer;
-    std::shared_ptr<VulkanBuffer> indexBuffer;
+    std::unique_ptr<RHIBuffer> vertexBuffer;
+    std::unique_ptr<RHIBuffer> indexBuffer;
     
     bool isValid() const {
         return mesh && vertexBuffer && indexBuffer;
@@ -32,13 +35,9 @@ struct GPUMesh {
         return mesh ? static_cast<uint32_t>(mesh->getVertices().size()) : 0;
     }
     
-    VkBuffer getVertexBufferHandle() const {
-        return vertexBuffer ? vertexBuffer->getBuffer() : VK_NULL_HANDLE;
-    }
-    
-    VkBuffer getIndexBufferHandle() const {
-        return indexBuffer ? indexBuffer->getBuffer() : VK_NULL_HANDLE;
-    }
+    /// Direct RHI buffer access — no wrapping needed
+    RHIBuffer* getVertexBuffer() const { return vertexBuffer.get(); }
+    RHIBuffer* getIndexBuffer() const { return indexBuffer.get(); }
     
     /**
      * @brief 计算网格的局部空间AABB
@@ -59,6 +58,8 @@ struct GPUMesh {
  * @brief 网格资源管理器
  * 负责加载、缓存和管理所有网格资源
  * 单例模式，全局访问
+ * 
+ * 通过 RHIDevice 创建 GPU buffer — 不依赖具体后端
  */
 class MeshManager {
 public:
@@ -72,12 +73,12 @@ public:
     MeshManager& operator=(const MeshManager&) = delete;
     
     /**
-     * @brief 初始区MeshManager
-     * @param device Vulkan 设备指针
+     * @brief 初始化 MeshManager
+     * @param rhiDevice RHI 设备指针（用于创建 buffer）
      */
-    void init(std::shared_ptr<VulkanDevice> device) {
-        m_device = device;
-        std::cout << "[MeshManager] Initialized" << std::endl;
+    void init(RHIDevice* rhiDevice) {
+        m_rhiDevice = rhiDevice;
+        std::cout << "[MeshManager] Initialized (RHI)" << std::endl;
     }
     
     /**
@@ -101,23 +102,14 @@ public:
         return gpuMesh;
     }
     
-    /**
-     * @brief 预加载网格（不返回，仅缓存）
-     */
     void preloadMesh(const std::string& meshId) {
         getMesh(meshId);
     }
     
-    /**
-     * @brief 检查网格是否已缓存
-     */
     bool hasMesh(const std::string& meshId) const {
         return m_meshCache.find(meshId) != m_meshCache.end();
     }
     
-    /**
-     * @brief 卸载指定网格
-     */
     void unloadMesh(const std::string& meshId) {
         auto it = m_meshCache.find(meshId);
         if (it != m_meshCache.end()) {
@@ -126,33 +118,21 @@ public:
         }
     }
     
-    /**
-     * @brief 卸载所有网格资源
-     */
     void cleanup() {
         std::cout << "[MeshManager] Cleaning up " << m_meshCache.size() << " meshes..." << std::endl;
         m_meshCache.clear();
-        m_device.reset();
+        m_rhiDevice = nullptr;
     }
     
-    /**
-     * @brief 获取已加载的网格数量
-     */
     size_t getMeshCount() const {
         return m_meshCache.size();
     }
     
-    /**
-     * @brief 获取指定网格的AABB 包围盒
-     * @param meshId 网格标识第
-     * @return 网格的局部空间AABB，如果网格不存在则返回默认AABB
-     */
     AABB getMeshAABB(const std::string& meshId) {
         auto gpuMesh = getMesh(meshId);
         if (gpuMesh) {
             return gpuMesh->calculateAABB();
         }
-        // 返回默认的单位立方体 AABB
         AABB defaultAABB;
         defaultAABB.min = glm::vec3(-1.0f);
         defaultAABB.max = glm::vec3(1.0f);
@@ -163,12 +143,9 @@ private:
     MeshManager() = default;
     ~MeshManager() { cleanup(); }
     
-    /**
-     * @brief 实际加载网格的内部方法
-     */
     std::shared_ptr<GPUMesh> loadMesh(const std::string& meshId) {
-        if (!m_device) {
-            std::cerr << "[MeshManager] Error: Device not initialized!" << std::endl;
+        if (!m_rhiDevice) {
+            std::cerr << "[MeshManager] Error: RHI Device not initialized!" << std::endl;
             return nullptr;
         }
         
@@ -208,7 +185,7 @@ private:
             return nullptr;
         }
         
-        // 创建 GPU 缓冲区
+        // 通过 RHI 创建 GPU 缓冲区
         if (!createGPUBuffers(gpuMesh)) {
             return nullptr;
         }
@@ -220,44 +197,9 @@ private:
         return gpuMesh;
     }
     
-    /**
-     * @brief 为网格创建GPU 缓冲区
-     */
-    bool createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh) {
-        if (!gpuMesh || !gpuMesh->mesh) return false;
-        
-        const auto& vertices = gpuMesh->mesh->getVertices();
-        const auto& indices = gpuMesh->mesh->getIndices();
-        
-        if (vertices.empty() || indices.empty()) {
-            std::cerr << "[MeshManager] Error: Empty mesh data!" << std::endl;
-            return false;
-        }
-        
-        // 创建顶点缓冲区
-        VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
-        gpuMesh->vertexBuffer = std::make_shared<VulkanBuffer>(
-            m_device,
-            vertexBufferSize,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        );
-        gpuMesh->vertexBuffer->copyFrom(vertices.data(), vertexBufferSize);
-        
-        // 创建索引缓冲区
-        VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
-        gpuMesh->indexBuffer = std::make_shared<VulkanBuffer>(
-            m_device,
-            indexBufferSize,
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        );
-        gpuMesh->indexBuffer->copyFrom(indices.data(), indexBufferSize);
-        
-        return true;
-    }
+    bool createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh);
     
-    std::shared_ptr<VulkanDevice> m_device;
+    RHIDevice* m_rhiDevice = nullptr;
     std::unordered_map<std::string, std::shared_ptr<GPUMesh>> m_meshCache;
 };
 

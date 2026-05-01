@@ -386,3 +386,31 @@ uint32_t VulkanTexture::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlag
     
     throw std::runtime_error("Failed to find suitable memory type!");
 }
+
+// =============================================================================
+// RHI accessors (lazy non-owning wrappers)
+// =============================================================================
+
+#include "RHIDevice.h"
+#include "RHITexture.h"
+#include "RHISampler.h"
+#include "RHITypes.h"
+
+RHITexture* VulkanTexture::getRHITexture() const {
+    if (!rhiTexture_ && rhiDevice_ && imageView != VK_NULL_HANDLE) {
+        rhiTexture_ = rhiDevice_->wrapExternalTexture(
+            static_cast<void*>(image),
+            static_cast<void*>(imageView),
+            width, height,
+            RHIFormat::R8G8B8A8_SRGB  // Default; actual format tracking can be added later
+        );
+    }
+    return rhiTexture_.get();
+}
+
+RHISampler* VulkanTexture::getRHISampler() const {
+    if (!rhiSampler_ && rhiDevice_ && sampler != VK_NULL_HANDLE) {
+        rhiSampler_ = rhiDevice_->wrapExternalSampler(static_cast<void*>(sampler));
+    }
+    return rhiSampler_.get();
+}

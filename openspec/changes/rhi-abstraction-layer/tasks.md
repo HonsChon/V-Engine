@@ -72,10 +72,23 @@
 - [x] 10.7 重构 `ClusterCullingPass.h/cpp`：构造函数接受 RHIDevice*，内部暂保留旧 ComputePipeline（渐进迁移）
 - [ ] 10.8 编译运行，全面回归测试所有渲染效果
 
+## 10b. Phase 3b — Pure RHI 深度迁移（移除所有 Vulkan 后端头文件）
+
+- [x] 10b.1 `NaniteDebugPass.h/cpp`：移除所有 VulkanRHI*.h 头文件和 static_cast，vkCmd 全部转为 RHICommandBuffer 方法
+- [x] 10b.2 `ComputePassBase.h/cpp`：移除 insertMemoryBarrier，insertBufferBarrier 改用 RHICommandBuffer::bufferBarrier
+- [x] 10b.3 `FrustumCullingPass.h/cpp`：完全纯 RHI 重写，使用 RHIBuffer/RHIBindingGroup/RHI Compute Pipeline Builder，readback 改用 RHIBuffer::map/unmap
+- [x] 10b.4 `ClusterCullingPass.h/cpp`：完全纯 RHI 重写，包括双缓冲 readback 系统和外部 buffer 依赖
+- [x] 10b.5 `GPUDrivenRenderer.h/cpp`：纯 RHI 封装，构造函数接受 RHIDevice*，返回 RHIBuffer* 而非 VkBuffer
+- [x] 10b.6 `NaniteManager.cpp`：RHI/Native 适配器模式，m_clusterDataBufferRHI 转为 RHIBuffer，命令录制通过 wrapCommandBuffer 桥接
+- [x] 10b.7 `ForwardPass.h/cpp`：二次重写，彻底移除所有 static_cast 和 VulkanRHI*.h 头文件，材质更新改用 RHITexture*/RHISampler*
+- [x] 10b.8 `GBufferPass.h`：纯 RHI 头文件重写，所有 accessor 返回 RHITexture*/RHIRenderPass*，渲染命令接受 RHICommandBuffer*，材质 API 改用 RHITexture*/RHISampler*
+- [x] 10b.9 `GBufferPass.cpp`：移除 Vulkan 后端 includes，材质更新改用 BindingGroup::updateTexture，渲染命令全部改用 RHICommandBuffer 方法
+- [x] 10b.10 `SSAOPass.h/cpp`：完全纯 RHI 重写（最大的剩余 Pass）
+
 ## 11. 上层集成与清理
 
-- [ ] 11.1 重构 `SceneRenderer.h/cpp`：将 VulkanDevice 引用替换为 RHIDevice
-- [ ] 11.2 重构 `Engine.h/cpp`：使用 `RHI::CreateDevice()` 创建设备，替代直接 new VulkanDevice
-- [ ] 11.3 更新 `ImGuiLayer`：通过原生 Handle 后门获取 VkRenderPass / VkCommandBuffer 等，确保 ImGui 正常工作
-- [ ] 11.4 移除或归档旧的 `src/RHI/VulkanPipeline.h/cpp` 和 `src/RHI/ComputePipeline.h/cpp`（已被新 Pipeline Builder 替代）
+- [x] 11.1 重构 `SceneRenderer.h/cpp`：移除剩余 vkCmd 调用，全部使用 RHICommandBuffer 录制（GBuffer + Forward 部分完成，SSAO/Blit 等保留 Vulkan 兼容）
+- [x] 11.2 重构 `Engine.h/cpp`：使用 `RHI::CreateDevice()` 创建设备，替代直接 new VulkanDevice
+- [x] 11.3 更新 `ImGuiLayer`：通过原生 Handle 后门获取 VkRenderPass / VkCommandBuffer 等，确保 ImGui 正常工作
+- [x] 11.4 移除或归档旧的 `src/RHI/VulkanPipeline.h/cpp` 和 `src/RHI/ComputePipeline.h/cpp`（已被新 Pipeline Builder 替代）
 - [ ] 11.5 最终编译、运行、全面验证所有功能（前向渲染、延迟渲染、SSAO、SSR、水面、Nanite 调试、GPU 剔除）

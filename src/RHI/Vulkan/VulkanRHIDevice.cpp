@@ -1,6 +1,6 @@
 #include "VulkanRHIDevice.h"
 #include "VulkanTypeConversions.h"
-#include "VulkanDevice.h"  // For wrapping constructor
+#include "IVulkanNative.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -43,7 +43,7 @@ static void DestroyDebugUtilsMessengerEXT(VkInstance instance,
 // =============================================================================
 
 VulkanRHIDevice::VulkanRHIDevice(GLFWwindow* window)
-    : window_(window), ownsDevice_(true) {
+    : window_(window) {
     createInstance();
     setupDebugMessenger();
     createSurface();
@@ -54,46 +54,25 @@ VulkanRHIDevice::VulkanRHIDevice(GLFWwindow* window)
     std::cout << "[VulkanRHIDevice] Initialized successfully (standalone).\n";
 }
 
-VulkanRHIDevice::VulkanRHIDevice(std::shared_ptr<VulkanDevice> existingDevice)
-    : ownsDevice_(false), wrappedDevice_(std::move(existingDevice)) {
-    // Borrow native handles from the existing VulkanDevice
-    instance_        = wrappedDevice_->getInstance();
-    physicalDevice_  = wrappedDevice_->getPhysicalDevice();
-    device_          = wrappedDevice_->getDevice();
-    graphicsQueue_   = wrappedDevice_->getGraphicsQueue();
-    presentQueue_    = wrappedDevice_->getPresentQueue();
-    commandPool_     = wrappedDevice_->getCommandPool();
-    surface_         = wrappedDevice_->getSurface();
-    graphicsQueueFamily_ = wrappedDevice_->getGraphicsQueueFamily();
-
-    // Create our own descriptor pool (we own this even in wrapping mode)
-    createNewDescriptorPool();
-
-    std::cout << "[VulkanRHIDevice] Initialized successfully (wrapping existing VulkanDevice).\n";
-}
-
 VulkanRHIDevice::~VulkanRHIDevice() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
     }
 
-    // Always destroy descriptor pools we created
+    // Destroy descriptor pools
     for (auto pool : descriptorPools_) {
         vkDestroyDescriptorPool(device_, pool, nullptr);
     }
 
-    // Only destroy core Vulkan objects if we own them
-    if (ownsDevice_) {
-        vkDestroyCommandPool(device_, commandPool_, nullptr);
-        vkDestroyDevice(device_, nullptr);
+    // Destroy core Vulkan objects
+    vkDestroyCommandPool(device_, commandPool_, nullptr);
+    vkDestroyDevice(device_, nullptr);
 
-        if (enableValidationLayers_) {
-            DestroyDebugUtilsMessengerEXT(instance_, debugMessenger_, nullptr);
-        }
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
-        vkDestroyInstance(instance_, nullptr);
+    if (enableValidationLayers_) {
+        DestroyDebugUtilsMessengerEXT(instance_, debugMessenger_, nullptr);
     }
-    // When wrapping, the shared_ptr<VulkanDevice> will release naturally
+    vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    vkDestroyInstance(instance_, nullptr);
 }
 
 // =============================================================================
@@ -108,6 +87,7 @@ VulkanRHIDevice::~VulkanRHIDevice() {
 #include "VulkanRHIDescriptor.h"
 #include "VulkanRHIPipeline.h"
 #include "VulkanRHIRenderPass.h"
+#include "VulkanRHICommandBuffer.h"
 
 std::unique_ptr<RHIBuffer> VulkanRHIDevice::createBuffer(const RHIBufferDesc& desc) {
     return std::make_unique<VulkanRHIBuffer>(this, desc);
@@ -151,6 +131,107 @@ std::unique_ptr<RHIFramebuffer> VulkanRHIDevice::createFramebuffer(const RHIFram
     return std::make_unique<VulkanRHIFramebuffer>(this, desc);
 }
 
+std::unique_ptr<RHIRenderPass> VulkanRHIDevice::wrapExternalRenderPass(void* nativeHandle) {
+    return std::make_unique<VulkanRHIRenderPass>(static_cast<VkRenderPass>(nativeHandle));
+}
+
+// =============================================================================
+// Non-owning wrappers for external resources
+// =============================================================================
+
+namespace {
+
+/// Non-owning wrapper around an existing VkBuffer
+class VulkanExternalBuffer : public RHIBuffer, public IVulkanNativeBuffer {
+public:
+    VulkanExternalBuffer(VkBuffer buffer, uint64_t size)
+        : buffer_(buffer), size_(size) {}
+    ~VulkanExternalBuffer() override = default; // Does NOT destroy the buffer
+
+    void* map() override { return nullptr; } // Not supported for external buffers
+    void  unmap() override {}
+    void  uploadData(const void*, uint64_t, uint64_t) override {}
+    uint64_t       getSize() const override { return size_; }
+    RHIBufferUsage getUsage() const override { return RHIBufferUsage::Vertex; }
+    RHIMemoryUsage getMemoryUsage() const override { return RHIMemoryUsage::GPUOnly; }
+
+    // IVulkanNativeBuffer implementation
+    VkBuffer getVkBuffer() const override { return buffer_; }
+
+private:
+    VkBuffer buffer_;
+    uint64_t size_;
+};
+
+/// Non-owning wrapper around an existing VkImage + VkImageView
+class VulkanExternalTexture : public RHITexture, public IVulkanNativeTexture {
+public:
+    VulkanExternalTexture(VkImage image, VkImageView view,
+                          uint32_t w, uint32_t h, RHIFormat format)
+        : image_(image), view_(view), width_(w), height_(h), format_(format) {}
+    ~VulkanExternalTexture() override = default; // Does NOT destroy resources
+
+    uint32_t        getWidth() const override { return width_; }
+    uint32_t        getHeight() const override { return height_; }
+    uint32_t        getDepth() const override { return 1; }
+    uint32_t        getMipLevels() const override { return 1; }
+    uint32_t        getArrayLayers() const override { return 1; }
+    RHIFormat       getFormat() const override { return format_; }
+    RHITextureUsage getUsage() const override { return RHITextureUsage::Sampled; }
+
+    // IVulkanNativeTexture implementation
+    VkImage     getVkImage() const override { return image_; }
+    VkImageView getVkImageView() const override { return view_; }
+
+private:
+    VkImage     image_;
+    VkImageView view_;
+    uint32_t    width_, height_;
+    RHIFormat   format_;
+};
+
+/// Non-owning wrapper around an existing VkSampler
+class VulkanExternalSampler : public RHISampler, public IVulkanNativeSampler {
+public:
+    explicit VulkanExternalSampler(VkSampler sampler) : sampler_(sampler) {}
+    ~VulkanExternalSampler() override = default; // Does NOT destroy the sampler
+
+    // IVulkanNativeSampler implementation
+    VkSampler getVkSampler() const override { return sampler_; }
+
+private:
+    VkSampler sampler_;
+};
+
+} // anonymous namespace
+
+std::unique_ptr<RHIBuffer> VulkanRHIDevice::wrapExternalBuffer(void* nativeBuffer, uint64_t size) {
+    return std::make_unique<VulkanExternalBuffer>(static_cast<VkBuffer>(nativeBuffer), size);
+}
+
+std::unique_ptr<RHITexture> VulkanRHIDevice::wrapExternalTexture(void* nativeImage, void* nativeImageView,
+                                                                   uint32_t width, uint32_t height,
+                                                                   RHIFormat format) {
+    return std::make_unique<VulkanExternalTexture>(
+        static_cast<VkImage>(nativeImage),
+        static_cast<VkImageView>(nativeImageView),
+        width, height, format);
+}
+
+std::unique_ptr<RHISampler> VulkanRHIDevice::wrapExternalSampler(void* nativeSampler) {
+    return std::make_unique<VulkanExternalSampler>(static_cast<VkSampler>(nativeSampler));
+}
+
+std::unique_ptr<RHIBindingGroup> VulkanRHIDevice::allocateBindingGroup(RHIBindingLayout* layout) {
+    // Create an empty binding group (no initial writes)
+    RHIBindingGroupDesc emptyDesc;
+    return createBindingGroup(layout, emptyDesc);
+}
+
+std::unique_ptr<RHICommandBuffer> VulkanRHIDevice::wrapCommandBuffer(void* nativeCmd) {
+    return std::make_unique<VulkanRHICommandBuffer>(this, static_cast<VkCommandBuffer>(nativeCmd));
+}
+
 void VulkanRHIDevice::waitIdle() {
     vkDeviceWaitIdle(device_);
 }
@@ -172,7 +253,7 @@ uint32_t VulkanRHIDevice::findMemoryType(uint32_t typeFilter, uint32_t propertyF
 // Internal helpers
 // =============================================================================
 
-VkCommandBuffer VulkanRHIDevice::beginSingleTimeCommands() {
+VkCommandBuffer VulkanRHIDevice::beginSingleTimeCommandsVk() {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -190,7 +271,7 @@ VkCommandBuffer VulkanRHIDevice::beginSingleTimeCommands() {
     return commandBuffer;
 }
 
-void VulkanRHIDevice::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+void VulkanRHIDevice::endSingleTimeCommandsVk(VkCommandBuffer commandBuffer) {
     vkEndCommandBuffer(commandBuffer);
 
     VkSubmitInfo submitInfo{};
@@ -201,6 +282,300 @@ void VulkanRHIDevice::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
     vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(graphicsQueue_);
     vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+}
+
+// =============================================================================
+// RHIDevice interface — Single-time commands (void* wrapper)
+// =============================================================================
+
+void* VulkanRHIDevice::beginSingleTimeCommands() {
+    VkCommandBuffer cmd = beginSingleTimeCommandsVk();
+    return (void*)cmd;
+}
+
+void VulkanRHIDevice::endSingleTimeCommands(void* commandBuffer) {
+    endSingleTimeCommandsVk(static_cast<VkCommandBuffer>(commandBuffer));
+}
+
+// =============================================================================
+// RHIDevice interface — SwapChain factory
+// =============================================================================
+
+#include "VulkanRHISwapChain.h"
+
+std::unique_ptr<RHISwapChain> VulkanRHIDevice::createSwapChain(uint32_t width, uint32_t height) {
+    return std::make_unique<VulkanRHISwapChain>(this, width, height);
+}
+
+// =============================================================================
+// RHIDevice interface — Format query
+// =============================================================================
+
+RHIFormat VulkanRHIDevice::findSupportedFormat(const std::vector<RHIFormat>& candidates,
+                                               uint32_t tiling, uint32_t features) {
+    using namespace VulkanTypeConversions;
+    VkImageTiling vkTiling = (tiling == 0) ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+
+    for (auto fmt : candidates) {
+        VkFormat vkFmt = toVkFormat(fmt);
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physicalDevice_, vkFmt, &props);
+
+        if (vkTiling == VK_IMAGE_TILING_LINEAR &&
+            (props.linearTilingFeatures & features) == features) {
+            return fmt;
+        } else if (vkTiling == VK_IMAGE_TILING_OPTIMAL &&
+                   (props.optimalTilingFeatures & features) == features) {
+            return fmt;
+        }
+    }
+    throw std::runtime_error("[VulkanRHIDevice] Failed to find supported format!");
+}
+
+RHIFormat VulkanRHIDevice::findDepthFormat() {
+    // Try formats in priority order
+    for (VkFormat fmt : { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT }) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physicalDevice_, fmt, &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            using namespace VulkanTypeConversions;
+            return fromVkFormat(fmt);
+        }
+    }
+    throw std::runtime_error("[VulkanRHIDevice] Failed to find depth format!");
+}
+
+// =============================================================================
+// RHIDevice interface — Raw buffer/image creation
+// =============================================================================
+
+void VulkanRHIDevice::createRawBuffer(uint64_t size, uint32_t usage, uint32_t memoryProperties,
+                                       void* outBuffer, void* outMemory) {
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = static_cast<VkBufferUsageFlags>(usage);
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(device_, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to create raw buffer!");
+    }
+
+    VkMemoryRequirements memReq;
+    vkGetBufferMemoryRequirements(device_, buffer, &memReq);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memReq.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, memoryProperties);
+
+    if (vkAllocateMemory(device_, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to allocate raw buffer memory!");
+    }
+    vkBindBufferMemory(device_, buffer, memory, 0);
+
+    *static_cast<VkBuffer*>(outBuffer) = buffer;
+    *static_cast<VkDeviceMemory*>(outMemory) = memory;
+}
+
+void VulkanRHIDevice::createRawImage(uint32_t width, uint32_t height, RHIFormat format,
+                                      uint32_t tiling, uint32_t usage, uint32_t memoryProperties,
+                                      void* outImage, void* outMemory) {
+    using namespace VulkanTypeConversions;
+    VkImage image;
+    VkDeviceMemory memory;
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent = { width, height, 1 };
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = toVkFormat(format);
+    imageInfo.tiling = (tiling == 0) ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = static_cast<VkImageUsageFlags>(usage);
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(device_, &imageInfo, nullptr, &image) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to create raw image!");
+    }
+
+    VkMemoryRequirements memReq;
+    vkGetImageMemoryRequirements(device_, image, &memReq);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memReq.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, memoryProperties);
+
+    if (vkAllocateMemory(device_, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to allocate raw image memory!");
+    }
+    vkBindImageMemory(device_, image, memory, 0);
+
+    *static_cast<VkImage*>(outImage) = image;
+    *static_cast<VkDeviceMemory*>(outMemory) = memory;
+}
+
+void VulkanRHIDevice::copyBuffer(void* srcBuffer, void* dstBuffer, uint64_t size) {
+    VkCommandBuffer cmd = beginSingleTimeCommandsVk();
+
+    VkBufferCopy copyRegion{};
+    copyRegion.size = size;
+    vkCmdCopyBuffer(cmd, static_cast<VkBuffer>(srcBuffer),
+                    static_cast<VkBuffer>(dstBuffer), 1, &copyRegion);
+
+    endSingleTimeCommandsVk(cmd);
+}
+
+// =============================================================================
+// RHIDevice interface — Debug labels
+// =============================================================================
+
+void VulkanRHIDevice::beginDebugLabel(void* commandBuffer, const char* name,
+                                       float r, float g, float b, float a) {
+    auto func = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetInstanceProcAddr(
+        instance_, "vkCmdBeginDebugUtilsLabelEXT");
+    if (func) {
+        VkDebugUtilsLabelEXT label{};
+        label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+        label.pLabelName = name;
+        label.color[0] = r; label.color[1] = g; label.color[2] = b; label.color[3] = a;
+        func(static_cast<VkCommandBuffer>(commandBuffer), &label);
+    }
+}
+
+void VulkanRHIDevice::endDebugLabel(void* commandBuffer) {
+    auto func = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetInstanceProcAddr(
+        instance_, "vkCmdEndDebugUtilsLabelEXT");
+    if (func) {
+        func(static_cast<VkCommandBuffer>(commandBuffer));
+    }
+}
+
+void VulkanRHIDevice::insertDebugLabel(void* commandBuffer, const char* name,
+                                        float r, float g, float b, float a) {
+    auto func = (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetInstanceProcAddr(
+        instance_, "vkCmdInsertDebugUtilsLabelEXT");
+    if (func) {
+        VkDebugUtilsLabelEXT label{};
+        label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+        label.pLabelName = name;
+        label.color[0] = r; label.color[1] = g; label.color[2] = b; label.color[3] = a;
+        func(static_cast<VkCommandBuffer>(commandBuffer), &label);
+    }
+}
+
+// =============================================================================
+// RHIDevice interface — Sync objects
+// =============================================================================
+
+void* VulkanRHIDevice::createSemaphore() {
+    VkSemaphoreCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkSemaphore semaphore;
+    if (vkCreateSemaphore(device_, &info, nullptr, &semaphore) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to create semaphore!");
+    }
+    return (void*)semaphore;
+}
+
+void* VulkanRHIDevice::createFence(bool signaled) {
+    VkFenceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (signaled) info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VkFence fence;
+    if (vkCreateFence(device_, &info, nullptr, &fence) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to create fence!");
+    }
+    return (void*)fence;
+}
+
+void VulkanRHIDevice::destroySemaphore(void* semaphore) {
+    if (semaphore) vkDestroySemaphore(device_, static_cast<VkSemaphore>(semaphore), nullptr);
+}
+
+void VulkanRHIDevice::destroyFence(void* fence) {
+    if (fence) vkDestroyFence(device_, static_cast<VkFence>(fence), nullptr);
+}
+
+void VulkanRHIDevice::waitForFence(void* fence) {
+    VkFence vkFence = static_cast<VkFence>(fence);
+    vkWaitForFences(device_, 1, &vkFence, VK_TRUE, UINT64_MAX);
+}
+
+void VulkanRHIDevice::resetFence(void* fence) {
+    VkFence vkFence = static_cast<VkFence>(fence);
+    vkResetFences(device_, 1, &vkFence);
+}
+
+// =============================================================================
+// RHIDevice interface — Command buffer allocation
+// =============================================================================
+
+std::vector<void*> VulkanRHIDevice::allocateCommandBuffers(uint32_t count) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = commandPool_;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = count;
+
+    std::vector<VkCommandBuffer> cmdBuffers(count);
+    if (vkAllocateCommandBuffers(device_, &allocInfo, cmdBuffers.data()) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to allocate command buffers!");
+    }
+
+    std::vector<void*> result(count);
+    for (uint32_t i = 0; i < count; i++) {
+        result[i] = (void*)cmdBuffers[i];
+    }
+    return result;
+}
+
+// =============================================================================
+// RHIDevice interface — Queue submission
+// =============================================================================
+
+void VulkanRHIDevice::submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
+                                           const std::vector<uint32_t>& waitStages,
+                                           const std::vector<void*>& commandBuffers,
+                                           const std::vector<void*>& signalSemaphores,
+                                           void* fence) {
+    // Convert void* arrays to Vulkan types
+    std::vector<VkSemaphore> vkWaitSems(waitSemaphores.size());
+    for (size_t i = 0; i < waitSemaphores.size(); i++)
+        vkWaitSems[i] = static_cast<VkSemaphore>(waitSemaphores[i]);
+
+    std::vector<VkPipelineStageFlags> vkWaitStages(waitStages.begin(), waitStages.end());
+
+    std::vector<VkCommandBuffer> vkCmds(commandBuffers.size());
+    for (size_t i = 0; i < commandBuffers.size(); i++)
+        vkCmds[i] = static_cast<VkCommandBuffer>(commandBuffers[i]);
+
+    std::vector<VkSemaphore> vkSignalSems(signalSemaphores.size());
+    for (size_t i = 0; i < signalSemaphores.size(); i++)
+        vkSignalSems[i] = static_cast<VkSemaphore>(signalSemaphores[i]);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.waitSemaphoreCount = static_cast<uint32_t>(vkWaitSems.size());
+    submitInfo.pWaitSemaphores = vkWaitSems.data();
+    submitInfo.pWaitDstStageMask = vkWaitStages.data();
+    submitInfo.commandBufferCount = static_cast<uint32_t>(vkCmds.size());
+    submitInfo.pCommandBuffers = vkCmds.data();
+    submitInfo.signalSemaphoreCount = static_cast<uint32_t>(vkSignalSems.size());
+    submitInfo.pSignalSemaphores = vkSignalSems.data();
+
+    VkFence vkFence = fence ? static_cast<VkFence>(fence) : VK_NULL_HANDLE;
+
+    if (vkQueueSubmit(graphicsQueue_, 1, &submitInfo, vkFence) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHIDevice] Failed to submit to graphics queue!");
+    }
 }
 
 // =============================================================================

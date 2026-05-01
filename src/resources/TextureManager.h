@@ -1,18 +1,39 @@
 #pragma once
 
-#include "VulkanTexture.h"
-#include "VulkanDevice.h"
+#include "RHITexture.h"
+#include "RHISampler.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <iostream>
 
+// Forward declarations
+class RHIDevice;
+
 namespace VulkanEngine {
+
+/**
+ * @brief GPU Texture 数据结构 (Pure RHI)
+ * 持有 RHI 纹理和采样器 — 无 Vulkan 依赖
+ */
+struct GPUTexture {
+    std::unique_ptr<RHITexture> texture;
+    std::unique_ptr<RHISampler> sampler;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    
+    bool isValid() const { return texture != nullptr && sampler != nullptr; }
+    
+    RHITexture* getTexture() const { return texture.get(); }
+    RHISampler* getSampler() const { return sampler.get(); }
+};
 
 /**
  * @brief 纹理资源管理器
  * 负责加载、缓存和管理所有纹理资源
  * 单例模式，全局访问
+ * 
+ * 通过 RHIDevice 创建纹理和采样器 — 不依赖具体后端
  */
 class TextureManager {
 public:
@@ -21,86 +42,54 @@ public:
         return instance;
     }
     
-    // 禁止拷贝和移动
     TextureManager(const TextureManager&) = delete;
     TextureManager& operator=(const TextureManager&) = delete;
     
     /**
-     * @brief 初始区TextureManager
-     * @param device Vulkan 设备指针
+     * @brief 初始化 TextureManager
+     * @param rhiDevice RHI 设备指针（用于创建纹理/采样器）
      */
-    void init(std::shared_ptr<VulkanDevice> device) {
-        m_device = device;
+    void init(RHIDevice* rhiDevice) {
+        m_rhiDevice = rhiDevice;
         createDefaultTextures();
-        std::cout << "[TextureManager] Initialized" << std::endl;
+        std::cout << "[TextureManager] Initialized (RHI)" << std::endl;
     }
+    
+    /// Set RHI device (called by RenderSystem after init if not provided initially)
+    void setRHIDevice(RHIDevice* device) { m_rhiDevice = device; }
     
     /**
      * @brief 加载或获取纹理
-     * 如果纹理已缓存，直接返回；否则加载并缓存
-     * @param texturePath 纹理文件路径
-     * @return 指向 VulkanTexture 的共享指针，失败返回默认白色纹理
      */
-    std::shared_ptr<VulkanTexture> getTexture(const std::string& texturePath) {
+    std::shared_ptr<GPUTexture> getTexture(const std::string& texturePath) {
         if (texturePath.empty()) {
             return m_defaultWhiteTexture;
         }
         
-        // 检查缓存
         auto it = m_textureCache.find(texturePath);
         if (it != m_textureCache.end()) {
             return it->second;
         }
         
-        // 加载纹理
         auto texture = loadTexture(texturePath);
         if (texture) {
             m_textureCache[texturePath] = texture;
             return texture;
         }
         
-        // 加载失败返回默认纹理
         return m_defaultWhiteTexture;
     }
     
-    /**
-     * @brief 获取默认白色纹理
-     */
-    std::shared_ptr<VulkanTexture> getDefaultWhiteTexture() const {
-        return m_defaultWhiteTexture;
-    }
+    std::shared_ptr<GPUTexture> getDefaultWhiteTexture() const { return m_defaultWhiteTexture; }
+    std::shared_ptr<GPUTexture> getDefaultNormalTexture() const { return m_defaultNormalTexture; }
+    std::shared_ptr<GPUTexture> getDefaultBlackTexture() const { return m_defaultBlackTexture; }
     
-    /**
-     * @brief 获取默认法线纹理（指向+Z 的蓝色）
-     */
-    std::shared_ptr<VulkanTexture> getDefaultNormalTexture() const {
-        return m_defaultNormalTexture;
-    }
+    void preloadTexture(const std::string& texturePath) { getTexture(texturePath); }
     
-    /**
-     * @brief 获取默认黑色纹理
-     */
-    std::shared_ptr<VulkanTexture> getDefaultBlackTexture() const {
-        return m_defaultBlackTexture;
-    }
-    
-    /**
-     * @brief 预加载纹理（不返回，仅缓存）
-     */
-    void preloadTexture(const std::string& texturePath) {
-        getTexture(texturePath);
-    }
-    
-    /**
-     * @brief 检查纹理是否已缓存
-     */
     bool hasTexture(const std::string& texturePath) const {
         return m_textureCache.find(texturePath) != m_textureCache.end();
     }
     
-    /**
-     * @brief 卸载指定纹理
-     */
     void unloadTexture(const std::string& texturePath) {
         auto it = m_textureCache.find(texturePath);
         if (it != m_textureCache.end()) {
@@ -109,76 +98,33 @@ public:
         }
     }
     
-    /**
-     * @brief 卸载所有纹理资源
-     */
     void cleanup() {
         std::cout << "[TextureManager] Cleaning up " << m_textureCache.size() << " textures..." << std::endl;
         m_textureCache.clear();
         m_defaultWhiteTexture.reset();
         m_defaultNormalTexture.reset();
         m_defaultBlackTexture.reset();
-        m_device.reset();
+        m_rhiDevice = nullptr;
     }
     
-    /**
-     * @brief 获取已加载的纹理数量
-     */
-    size_t getTextureCount() const {
-        return m_textureCache.size();
-    }
+    size_t getTextureCount() const { return m_textureCache.size(); }
 
 private:
     TextureManager() = default;
     ~TextureManager() { cleanup(); }
     
-    /**
-     * @brief 创建默认纹理
-     */
-    void createDefaultTextures() {
-        if (!m_device) return;
-        
-        // 默认白色纹理
-        m_defaultWhiteTexture = std::make_shared<VulkanTexture>(m_device);
-        m_defaultWhiteTexture->createDefaultTexture();
-        
-        // 默认法线纹理
-        m_defaultNormalTexture = std::make_shared<VulkanTexture>(m_device);
-        m_defaultNormalTexture->createDefaultNormalTexture();
-        
-        // 默认黑色纹理
-        m_defaultBlackTexture = std::make_shared<VulkanTexture>(m_device);
-        m_defaultBlackTexture->createDefaultTexture(0, 0, 0, 255);
-        
-        std::cout << "[TextureManager] Default textures created" << std::endl;
-    }
+    void createDefaultTextures();
+    std::shared_ptr<GPUTexture> loadTexture(const std::string& texturePath);
+    std::shared_ptr<GPUTexture> createFromPixels(const unsigned char* pixels,
+                                                  uint32_t width, uint32_t height,
+                                                  RHIFormat format = RHIFormat::R8G8B8A8_SRGB);
     
-    /**
-     * @brief 实际加载纹理的内部方法
-     */
-    std::shared_ptr<VulkanTexture> loadTexture(const std::string& texturePath) {
-        if (!m_device) {
-            std::cerr << "[TextureManager] Error: Device not initialized!" << std::endl;
-            return nullptr;
-        }
-        
-        auto texture = std::make_shared<VulkanTexture>(m_device);
-        if (texture->loadFromFile(texturePath)) {
-            std::cout << "[TextureManager] Loaded texture: " << texturePath << std::endl;
-            return texture;
-        }
-        
-        std::cerr << "[TextureManager] Failed to load texture: " << texturePath << std::endl;
-        return nullptr;
-    }
+    RHIDevice* m_rhiDevice = nullptr;
+    std::unordered_map<std::string, std::shared_ptr<GPUTexture>> m_textureCache;
     
-    std::shared_ptr<VulkanDevice> m_device;
-    std::unordered_map<std::string, std::shared_ptr<VulkanTexture>> m_textureCache;
-    
-    // 默认纹理
-    std::shared_ptr<VulkanTexture> m_defaultWhiteTexture;
-    std::shared_ptr<VulkanTexture> m_defaultNormalTexture;
-    std::shared_ptr<VulkanTexture> m_defaultBlackTexture;
+    std::shared_ptr<GPUTexture> m_defaultWhiteTexture;
+    std::shared_ptr<GPUTexture> m_defaultNormalTexture;
+    std::shared_ptr<GPUTexture> m_defaultBlackTexture;
 };
 
 } // namespace VulkanEngine

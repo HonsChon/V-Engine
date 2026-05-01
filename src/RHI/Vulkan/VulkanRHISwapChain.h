@@ -22,11 +22,16 @@ public:
     RHIExtent2D  getExtent() const override { return extent_; }
     uint32_t     getImageCount() const override { return static_cast<uint32_t>(imageViews_.size()); }
 
-    // Acquire / present (returns VkResult for caller to handle OUT_OF_DATE)
-    VkResult acquireNextImage(VkSemaphore semaphore, uint32_t* imageIndex);
-    VkResult present(VkSemaphore waitSemaphore, uint32_t imageIndex);
+    // ---- RHISwapChain interface ----
+    RHISwapChainResult acquireNextImage(void* signalSemaphore, uint32_t* outImageIndex) override;
+    RHISwapChainResult present(void* waitSemaphore, uint32_t imageIndex) override;
+    void recreate(uint32_t width, uint32_t height) override;
 
-    void recreate(uint32_t width, uint32_t height);
+    RHIRenderPass*  getRHIRenderPass() const override;
+    RHIFramebuffer* getRHIFramebuffer(uint32_t imageIndex) const override;
+
+    void* getNativeRenderPass() const override { return (void*)renderPass_; }
+    void* getNativeFramebuffer(uint32_t imageIndex) const override;
 
     // Native handles
     VkSwapchainKHR        getVkSwapChain() const { return swapChain_; }
@@ -66,6 +71,11 @@ private:
 
     // Render pass for the final presentation pass
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
+
+    // RHI wrappers (non-owning, lazily created)
+    mutable std::unique_ptr<VulkanRHIRenderPass> rhiRenderPass_;
+    mutable std::vector<std::unique_ptr<VulkanRHIFramebuffer>> rhiFramebuffers_;
+    void createRHIWrappers() const;
 
     // Depth resources
     VkImage        depthImage_  = VK_NULL_HANDLE;

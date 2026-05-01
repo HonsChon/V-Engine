@@ -2,6 +2,7 @@
 #include "VulkanRHIDevice.h"
 #include "VulkanRHITexture.h"
 #include "VulkanTypeConversions.h"
+#include "IVulkanNative.h"
 #include <stdexcept>
 
 using namespace VulkanTypeConversions;
@@ -89,8 +90,13 @@ VulkanRHIRenderPass::VulkanRHIRenderPass(VulkanRHIDevice* device,
     }
 }
 
+VulkanRHIRenderPass::VulkanRHIRenderPass(VkRenderPass externalRenderPass)
+    : device_(nullptr), renderPass_(externalRenderPass), ownsRenderPass_(false)
+{
+}
+
 VulkanRHIRenderPass::~VulkanRHIRenderPass() {
-    if (renderPass_ != VK_NULL_HANDLE) {
+    if (ownsRenderPass_ && renderPass_ != VK_NULL_HANDLE && device_) {
         vkDestroyRenderPass(device_->getVkDevice(), renderPass_, nullptr);
     }
 }
@@ -108,8 +114,8 @@ VulkanRHIFramebuffer::VulkanRHIFramebuffer(VulkanRHIDevice* device,
     std::vector<VkImageView> views;
     views.reserve(desc.attachments.size());
     for (auto* att : desc.attachments) {
-        auto* vkTex = static_cast<VulkanRHITexture*>(att);
-        views.push_back(vkTex->getVkImageView());
+        auto* nativeTex = dynamic_cast<IVulkanNativeTexture*>(att);
+        views.push_back(nativeTex->getVkImageView());
     }
 
     VkFramebufferCreateInfo fbInfo{};
@@ -126,8 +132,15 @@ VulkanRHIFramebuffer::VulkanRHIFramebuffer(VulkanRHIDevice* device,
     }
 }
 
+VulkanRHIFramebuffer::VulkanRHIFramebuffer(VkFramebuffer externalFramebuffer,
+                                           uint32_t width, uint32_t height)
+    : device_(nullptr), framebuffer_(externalFramebuffer),
+      width_(width), height_(height), ownsFramebuffer_(false)
+{
+}
+
 VulkanRHIFramebuffer::~VulkanRHIFramebuffer() {
-    if (framebuffer_ != VK_NULL_HANDLE) {
+    if (ownsFramebuffer_ && framebuffer_ != VK_NULL_HANDLE && device_) {
         vkDestroyFramebuffer(device_->getVkDevice(), framebuffer_, nullptr);
     }
 }

@@ -1,28 +1,30 @@
 #pragma once
 
 #include "RenderPassBase.h"
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
-#include <array>
 #include <vector>
-#include <string>
 
-// RHI forward declarations
+// Pure RHI forward declarations — no Vulkan headers
 class RHIDevice;
 class RHIBuffer;
 class RHIPipeline;
 class RHIBindingLayout;
 class RHIBindingGroup;
+class RHIRenderPass;
+class RHICommandBuffer;
+class RHITexture;
+class RHISampler;
 
-class VulkanDevice;
 class GBufferPass;
 
 /**
- * LightingPass - 延迟渲染光照阶段 (RHI)
+ * LightingPass - 延迟渲染光照阶段 (Pure RHI)
  * 
  * 使用 G-Buffer 中的几何信息进行光照计算：
  * 渲染一个全屏四边形，在片段着色器中完成所有光照运算。
+ * 
+ * 所有接口均为纯 RHI，不再暴露任何 Vulkan 原生类型。
  */
 class LightingPass : public RenderPassBase {
 public:
@@ -35,21 +37,21 @@ public:
         alignas(16) glm::vec4 screenSize;   // 屏幕尺寸
     };
 
-    LightingPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice,
+    LightingPass(RHIDevice* rhiDevice,
                  uint32_t width, uint32_t height,
-                 VkRenderPass targetRenderPass, uint32_t maxFramesInFlight = 2);
+                 RHIRenderPass* externalRenderPass, uint32_t maxFramesInFlight = 2);
     ~LightingPass();
 
     // 禁止拷贝
     LightingPass(const LightingPass&) = delete;
     LightingPass& operator=(const LightingPass&) = delete;
 
-    // 设置 G-Buffer 输入（原生 Vulkan handles — 过渡期）
-    void setGBufferInputs(VkImageView positionView, VkImageView normalView,
-                          VkImageView albedoView, VkSampler sampler);
+    // 设置 G-Buffer 输入 (Pure RHI)
+    void setGBufferInputs(RHITexture* position, RHITexture* normal,
+                          RHITexture* albedo, RHISampler* sampler);
 
-    // 设置 SSAO 纹理（原生 Vulkan handles — 过渡期）
-    void setSSAOTexture(VkImageView ssaoView, VkSampler ssaoSampler);
+    // 设置 SSAO 纹理 (Pure RHI)
+    void setSSAOTexture(RHITexture* ssaoTexture, RHISampler* ssaoSampler);
 
     // 更新光照参数
     void updateUniforms(uint32_t frameIndex, const glm::vec3& viewPos,
@@ -59,13 +61,11 @@ public:
     // 设置环境光
     void setAmbientLight(const glm::vec3& color, float intensity = 0.1f);
 
-    // 录制渲染命令
-    void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) override;
-    void render(VkCommandBuffer cmd, uint32_t frameIndex);
+    // 录制渲染命令 (Pure RHI)
+    void render(RHICommandBuffer* cmd, uint32_t frameIndex);
 
-    // 获取器 — 返回原生 handles（过渡期）
-    VkPipeline getPipeline() const;
-    VkPipelineLayout getPipelineLayout() const;
+    // Pipeline accessor (for external use e.g. SceneRenderer)
+    RHIPipeline* getPipeline() const { return pipeline_.get(); }
 
 private:
     void createBindingLayout();
@@ -77,11 +77,10 @@ private:
 
     // RHI device references
     RHIDevice* rhiDevice_ = nullptr;
-    std::shared_ptr<VulkanDevice> vulkanDevice_;
     uint32_t width_;
     uint32_t height_;
     uint32_t maxFramesInFlight_;
-    VkRenderPass targetRenderPass_;
+    RHIRenderPass* externalRenderPass_ = nullptr;  // NOT owned
 
     // Pipeline (RHI)
     std::unique_ptr<RHIPipeline> pipeline_;
@@ -92,24 +91,12 @@ private:
     // Uniform Buffers (RHI)
     std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
 
-    // Binding Groups (RHI) — one per frame
-    // Note: descriptor set updates for GBuffer/SSAO textures still use native Vulkan
-    // because these textures come from other passes as raw VkImageViews
-    std::vector<VkDescriptorSet> nativeDescriptorSets_;
+    // Binding Groups (RHI) — one per frame, fully RHI
+    std::vector<std::unique_ptr<RHIBindingGroup>> bindingGroups_;
 
     // Fullscreen quad (RHI buffers)
     std::unique_ptr<RHIBuffer> quadVertexBuffer_;
     std::unique_ptr<RHIBuffer> quadIndexBuffer_;
-
-    // 缓存的 G-Buffer 视图
-    VkImageView cachedPositionView = VK_NULL_HANDLE;
-    VkImageView cachedNormalView = VK_NULL_HANDLE;
-    VkImageView cachedAlbedoView = VK_NULL_HANDLE;
-    VkSampler cachedSampler = VK_NULL_HANDLE;
-
-    // SSAO 纹理
-    VkImageView cachedSSAOView = VK_NULL_HANDLE;
-    VkSampler cachedSSAOSampler = VK_NULL_HANDLE;
 
     // 光照参数
     glm::vec3 ambientColor = glm::vec3(0.03f);

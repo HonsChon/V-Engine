@@ -1,11 +1,11 @@
 #pragma once
 
 #include "RHISampler.h"
-#include <vulkan/vulkan.h>
+#include "IVulkanNative.h"
 
 class VulkanRHIDevice;
 
-class VulkanRHISampler : public RHISampler {
+class VulkanRHISampler : public RHISampler, public IVulkanNativeSampler {
 public:
     VulkanRHISampler(VulkanRHIDevice* device, const RHISamplerDesc& desc);
     ~VulkanRHISampler() override;
@@ -16,7 +16,8 @@ public:
     RHIAddressMode getAddressModeV() const { return desc_.addressModeV; }
     RHIAddressMode getAddressModeW() const { return desc_.addressModeW; }
 
-    VkSampler getVkSampler() const { return sampler_; }
+    // IVulkanNativeSampler implementation
+    VkSampler getVkSampler() const override { return sampler_; }
 
 private:
     VulkanRHIDevice* device_;

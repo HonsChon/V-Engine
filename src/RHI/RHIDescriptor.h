@@ -96,6 +96,12 @@ class RHIBindingGroup {
 public:
     virtual ~RHIBindingGroup() = default;
 
+    // Update a single binding entry (buffer or texture) after creation
+    virtual void updateBuffer(uint32_t binding, RHIBuffer* buffer,
+                               uint64_t offset = 0, uint64_t range = 0) = 0;
+    virtual void updateTexture(uint32_t binding, RHITexture* texture,
+                                RHISampler* sampler = nullptr) = 0;
+
     RHIBindingGroup(const RHIBindingGroup&) = delete;
     RHIBindingGroup& operator=(const RHIBindingGroup&) = delete;
 

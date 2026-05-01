@@ -4,20 +4,19 @@
 #include <memory>
 #include <vector>
 
-class VulkanDevice;
+class RHIDevice;
+class RHICommandBuffer;
+class RHIBuffer;
 class Camera;
 
 /**
- * GPUDrivenRenderer - GPU 驱动渲染管理器
- * 
- * 整合所有GPU Culling 和Indirect Drawing 功能。
- * 这是 Nanite 风格渲染的核心入口。
+ * GPUDrivenRenderer - GPU 驱动渲染管理器 (Pure RHI)
  */
 struct GPUDrivenRendererConfig {
-    uint32_t maxInstances = 100000;      // 最大实例数
-    bool enableFrustumCulling = true;    // 启用视锥剔除
-    bool enableOcclusionCulling = false; // 启用遮挡剔除（后续实现）
-    bool enableLODSelection = true;      // 启用 LOD 选择（已实现：
+    uint32_t maxInstances = 100000;
+    bool enableFrustumCulling = true;
+    bool enableOcclusionCulling = false;
+    bool enableLODSelection = true;
 };
 
 struct GPUDrivenRendererStatistics {
@@ -32,77 +31,30 @@ public:
     using Config = GPUDrivenRendererConfig;
     using Statistics = GPUDrivenRendererStatistics;
 
-public:
-    GPUDrivenRenderer(std::shared_ptr<VulkanDevice> device, const Config& config = Config{});
+    GPUDrivenRenderer(RHIDevice* rhiDevice, const Config& config = Config{});
     ~GPUDrivenRenderer();
 
-    /**
-     * 初始化所有Pass
-     */
     void init();
-
-    /**
-     * 准备每帧数据
-     * @param instances 场景中所有实例的数据
-     * @param viewMatrix 相机视图矩阵
-     * @param projMatrix 相机投影矩阵
-     * @param cameraPos 相机位置
-     */
     void prepare(const std::vector<GPUInstanceData>& instances,
                  const glm::mat4& viewMatrix,
                  const glm::mat4& projMatrix,
                  const glm::vec3& cameraPos);
 
-    /**
-     * 执行 GPU Culling（在 Compute Queue 上）
-     */
-    void executeCulling(VkCommandBuffer commandBuffer);
+    void executeCulling(RHICommandBuffer* cmd);
 
-    /**
-     * 获取间接绘制缓冲区
-     */
-    VkBuffer getIndirectDrawBuffer() const;
-
-    /**
-     * 获取可见实例索引缓冲区
-     */
-    VkBuffer getVisibleIndicesBuffer() const;
-
-    /**
-     * 获取可见物体数量（需要GPU->CPU 回读：
-     */
+    RHIBuffer* getIndirectDrawBuffer() const;
+    RHIBuffer* getVisibleIndicesBuffer() const;
     uint32_t getVisibleCount() const;
-
-    /**
-     * 获取可见实体索引列表（方案B：GPU->CPU 回读压缩索引：
-     * @return 可见实体的原始索引列表
-     */
     const std::vector<uint32_t>& getVisibleIndices();
 
-    /**
-     * 获取统计信息
-     */
     const Statistics& getStatistics() const { return stats; }
-
-    /**
-     * 是否启用 GPU Culling
-     */
     bool isEnabled() const { return config.enableFrustumCulling; }
-
-    /**
-     * 设置是否启用
-     */
     void setEnabled(bool enabled) { config.enableFrustumCulling = enabled; }
 
 private:
-    std::shared_ptr<VulkanDevice> device;
+    RHIDevice* rhiDevice_ = nullptr;
     Config config;
     Statistics stats;
 
-    // Culling Passes
     std::unique_ptr<FrustumCullingPass> frustumCullingPass;
-    
-    // 后续扩展
-    // std::unique_ptr<OcclusionCullingPass> occlusionCullingPass;
-    // std::unique_ptr<LODSelectionPass> lodSelectionPass;
 };

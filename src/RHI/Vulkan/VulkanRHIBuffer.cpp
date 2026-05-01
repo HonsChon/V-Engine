@@ -18,6 +18,13 @@ VulkanRHIBuffer::VulkanRHIBuffer(VulkanRHIDevice* device, const RHIBufferDesc& d
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = desc_.size;
     bufferInfo.usage = toVkBufferUsage(desc_.usage);
+
+    // GPU-only buffers that hold vertex/index/storage data need TRANSFER_DST
+    // so that uploadData() can copy from a staging buffer via vkCmdCopyBuffer.
+    if (desc_.memoryUsage == RHIMemoryUsage::GPUOnly) {
+        bufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateBuffer(vkDev, &bufferInfo, nullptr, &buffer_) != VK_SUCCESS) {
@@ -99,13 +106,13 @@ void VulkanRHIBuffer::uploadData(const void* data, uint64_t size, uint64_t offse
         memcpy(ptr, data, size);
         vkUnmapMemory(vkDev, stagingMemory);
 
-        VkCommandBuffer cmd = device_->beginSingleTimeCommands();
+        VkCommandBuffer cmd = device_->beginSingleTimeCommandsVk();
         VkBufferCopy copyRegion{};
         copyRegion.srcOffset = 0;
         copyRegion.dstOffset = offset;
         copyRegion.size = size;
         vkCmdCopyBuffer(cmd, stagingBuffer, buffer_, 1, &copyRegion);
-        device_->endSingleTimeCommands(cmd);
+        device_->endSingleTimeCommandsVk(cmd);
 
         vkDestroyBuffer(vkDev, stagingBuffer, nullptr);
         vkFreeMemory(vkDev, stagingMemory, nullptr);

@@ -72,6 +72,20 @@ public:
     // ---- Transfer ----
     virtual void copyBuffer(RHIBuffer* src, RHIBuffer* dst, uint64_t size,
                              uint64_t srcOffset = 0, uint64_t dstOffset = 0) = 0;
+    virtual void fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64_t size, uint32_t data) = 0;
+
+    /// Blit (scaled copy) from one texture to another.
+    /// Both textures must already be in the correct layouts (TransferSrc / TransferDst).
+    virtual void blitImage(RHITexture* src, RHIImageLayout srcLayout,
+                            RHITexture* dst, RHIImageLayout dstLayout,
+                            uint32_t srcWidth, uint32_t srcHeight,
+                            uint32_t dstWidth, uint32_t dstHeight,
+                            RHIFilter filter = RHIFilter::Linear) = 0;
+
+    // ---- Buffer Barrier ----
+    virtual void bufferBarrier(RHIBuffer* buffer, uint64_t size,
+                                RHIPipelineStage srcStage, RHIPipelineStage dstStage,
+                                RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) = 0;
 
     // Non-copyable
     RHICommandBuffer(const RHICommandBuffer&) = delete;

@@ -1,21 +1,16 @@
 #include "NaniteDebugPass.h"
-#include "VulkanDevice.h"
-#include "VulkanSwapChain.h"
 #include "../nanite/NaniteManager.h"
 #include "../nanite/NaniteCluster.h"
 #include "ClusterCullingPass.h"
 
-// RHI headers
+// Pure RHI headers — NO Vulkan backend headers
 #include "RHIDevice.h"
+#include "RHISwapChain.h"
 #include "RHIBuffer.h"
 #include "RHIDescriptor.h"
 #include "RHIPipeline.h"
-
-// Vulkan backend headers — for downcast to get native handles
-#include "VulkanRHIDevice.h"
-#include "VulkanRHIPipeline.h"
-#include "VulkanRHIDescriptor.h"
-#include "VulkanRHIBuffer.h"
+#include "RHIRenderPass.h"
+#include "RHICommandBuffer.h"
 
 #include <stdexcept>
 #include <iostream>
@@ -27,55 +22,37 @@
 // 构造与析构
 // ============================================
 
-NaniteDebugPass::NaniteDebugPass(std::shared_ptr<VulkanDevice> device,
-                                 RHIDevice* rhiDevice,
-                                 std::shared_ptr<VulkanSwapChain> swapChain,
+NaniteDebugPass::NaniteDebugPass(RHIDevice* rhiDevice,
+                                 RHISwapChain* rhiSwapChain,
                                  std::shared_ptr<Nanite::NaniteManager> naniteManager)
-    : RenderPassBase(device, swapChain->getExtent().width, swapChain->getExtent().height)
+    : RenderPassBase(rhiDevice, rhiSwapChain->getExtent().width, rhiSwapChain->getExtent().height)
     , rhiDevice_(rhiDevice)
-    , m_device(device)
-    , m_swapChain(swapChain)
+    , rhiSwapChain_(rhiSwapChain)
     , m_naniteManager(naniteManager) {
-    
     passName = "Nanite Debug Pass";
 }
 
-NaniteDebugPass::~NaniteDebugPass() {
-    cleanup();
-}
+NaniteDebugPass::~NaniteDebugPass() { cleanup(); }
 
-// ============================================
-// 初始化
-// ============================================
-
-void NaniteDebugPass::initialize(VkRenderPass renderPass) {
-    if (m_initialized) {
-        return;
-    }
-    
+void NaniteDebugPass::initialize(RHIRenderPass* externalRenderPass) {
+    if (m_initialized) return;
+    externalRenderPass_ = externalRenderPass;
     createBindingLayout();
     createUniformBuffers();
     createDescriptorSets();
-    createPipeline(renderPass);
-    
+    createPipeline();
     m_initialized = true;
-    std::cout << "[NaniteDebugPass] Initialized (RHI)" << std::endl;
+    std::cout << "[NaniteDebugPass] Initialized (Pure RHI)" << std::endl;
 }
 
 void NaniteDebugPass::cleanup() {
     if (!rhiDevice_) return;
     rhiDevice_->waitIdle();
-
-    m_vertexBuffer_.reset();
-    m_indexBuffer_.reset();
+    m_vertexBuffer_.reset(); m_indexBuffer_.reset();
     m_clusterRenderData.clear();
-    m_uniformBuffers_.clear();
-    m_descriptorSets_.clear();
-    m_pipeline_.reset();
-    m_bindingLayout_.reset();
-
-    m_initialized = false;
-    m_renderDataBuilt = false;
+    m_uniformBuffers_.clear(); m_bindingGroups_.clear();
+    m_pipeline_.reset(); m_bindingLayout_.reset();
+    m_initialized = false; m_renderDataBuilt = false;
 }
 
 // ============================================
@@ -84,648 +61,249 @@ void NaniteDebugPass::cleanup() {
 
 void NaniteDebugPass::createBindingLayout() {
     RHIBindingLayoutDesc desc;
-    desc.entries.push_back({
-        0,                                  // binding
-        RHIDescriptorType::UniformBuffer,   // type
-        RHIShaderStage::Vertex | RHIShaderStage::Fragment,  // stageFlags
-        1                                   // count
-    });
+    desc.entries.push_back({0, RHIDescriptorType::UniformBuffer,
+                            RHIShaderStage::Vertex | RHIShaderStage::Fragment, 1});
     m_bindingLayout_ = rhiDevice_->createBindingLayout(desc);
 }
 
 void NaniteDebugPass::createUniformBuffers() {
-    size_t frameCount = m_swapChain->getImageCount();
+    size_t frameCount = rhiSwapChain_->getImageCount();
     m_uniformBuffers_.resize(frameCount);
-    
     for (size_t i = 0; i < frameCount; i++) {
-        RHIBufferDesc desc{};
-        desc.size = sizeof(NaniteDebugUBO);
-        desc.usage = RHIBufferUsage::Uniform;
-        desc.memoryUsage = RHIMemoryUsage::CPUToGPU;
-        m_uniformBuffers_[i] = rhiDevice_->createBuffer(desc);
+        RHIBufferDesc d{}; d.size = sizeof(NaniteDebugUBO);
+        d.usage = RHIBufferUsage::Uniform; d.memoryUsage = RHIMemoryUsage::CPUToGPU;
+        m_uniformBuffers_[i] = rhiDevice_->createBuffer(d);
     }
 }
 
 void NaniteDebugPass::createDescriptorSets() {
-    auto* vkDevice = static_cast<VulkanRHIDevice*>(rhiDevice_);
-    auto* vkLayout = static_cast<VulkanRHIBindingLayout*>(m_bindingLayout_.get());
-
-    size_t frameCount = m_swapChain->getImageCount();
-    m_descriptorSets_.resize(frameCount);
-
+    size_t frameCount = rhiSwapChain_->getImageCount();
+    m_bindingGroups_.resize(frameCount);
     for (size_t i = 0; i < frameCount; ++i) {
-        m_descriptorSets_[i] = vkDevice->allocateDescriptorSet(vkLayout->getVkDescriptorSetLayout());
-    }
-
-    // Update UBO bindings
-    for (size_t i = 0; i < frameCount; i++) {
-        auto* vkUBO = static_cast<VulkanRHIBuffer*>(m_uniformBuffers_[i].get());
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = vkUBO->getVkBuffer();
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(NaniteDebugUBO);
-        
-        VkWriteDescriptorSet descriptorWrite{};
-        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = m_descriptorSets_[i];
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pBufferInfo = &bufferInfo;
-        
-        vkUpdateDescriptorSets(vkDevice->getVkDevice(), 1, &descriptorWrite, 0, nullptr);
+        m_bindingGroups_[i] = rhiDevice_->allocateBindingGroup(m_bindingLayout_.get());
+        m_bindingGroups_[i]->updateBuffer(0, m_uniformBuffers_[i].get(), 0, sizeof(NaniteDebugUBO));
     }
 }
 
-void NaniteDebugPass::createPipeline(VkRenderPass renderPass) {
-    constexpr uint32_t vertexStride = sizeof(float) * 11;  // pos(3) + normal(3) + texCoord(2) + tangent(3)
+void NaniteDebugPass::createPipeline() {
+    constexpr uint32_t vertexStride = sizeof(float) * 11;
 
     auto builder = rhiDevice_->createGraphicsPipelineBuilder();
-    auto* vkBuilder = static_cast<VulkanGraphicsPipelineBuilder*>(builder.get());
-
-    // Set native render pass first (VulkanGraphicsPipelineBuilder-specific)
-    vkBuilder->setNativeRenderPass(renderPass, 0);
-
-    vkBuilder
-        ->setVertexShader("shaders/nanite/cluster_debug_vert.spv")
+    builder->setVertexShader("shaders/nanite/cluster_debug_vert.spv")
         .setFragmentShader("shaders/nanite/cluster_debug_frag.spv")
         .addVertexBinding(0, vertexStride, RHIVertexInputRate::Vertex)
-        .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0)                      // Position
-        .addVertexAttribute(0, 1, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 3)      // Normal
-        .addVertexAttribute(0, 2, RHIFormat::R32G32_SFLOAT,    sizeof(float) * 6)      // TexCoord
-        .addVertexAttribute(0, 3, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 8)      // Tangent
+        .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0)
+        .addVertexAttribute(0, 1, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 3)
+        .addVertexAttribute(0, 2, RHIFormat::R32G32_SFLOAT,    sizeof(float) * 6)
+        .addVertexAttribute(0, 3, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 8)
         .setTopology(RHIPrimitiveTopology::TriangleList)
-        .setCullMode(RHICullMode::None)   // 禁用剔除，显示双面
+        .setCullMode(RHICullMode::None)
         .setFrontFace(RHIFrontFace::CounterClockwise)
         .setPolygonMode(RHIPolygonMode::Fill)
         .setDepthTest(true, true, RHICompareOp::Less)
         .setSampleCount(RHISampleCount::Count1)
         .setColorAttachmentCount(1)
         .addBindingLayout(m_bindingLayout_.get())
-        .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
-                         0, sizeof(ClusterDebugPushConstants));
+        .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(ClusterDebugPushConstants))
+        .setRenderPass(externalRenderPass_);
 
-    m_pipeline_ = vkBuilder->build();
-
-    std::cout << "[NaniteDebugPass] Graphics pipeline created (RHI Pipeline Builder)" << std::endl;
+    m_pipeline_ = builder->build();
+    std::cout << "[NaniteDebugPass] Pipeline created (Pure RHI)" << std::endl;
 }
 
 // ============================================
-// Cluster 渲染数据构建
+// Cluster 渲染数据构建 (same business logic, no Vulkan)
 // ============================================
 
 void NaniteDebugPass::buildRenderData() {
-    if (!m_naniteManager) {
-        return;
-    }
-    
+    if (!m_naniteManager) return;
     std::vector<std::string> meshNames;
-    if (m_renderAllMeshes) {
-        meshNames = m_naniteManager->getAllMeshNames();
-    } else if (!m_targetMeshName.empty()) {
-        meshNames.push_back(m_targetMeshName);
-    }
-    
-    if (meshNames.empty()) {
-        return;
-    }
-    
-    m_totalVertexCount = 0;
-    m_totalIndexCount = 0;
-    m_totalClusterCount = 0;
-    m_lod0ClusterCount = 0;
-    
+    if (m_renderAllMeshes) meshNames = m_naniteManager->getAllMeshNames();
+    else if (!m_targetMeshName.empty()) meshNames.push_back(m_targetMeshName);
+    if (meshNames.empty()) return;
+
+    m_totalVertexCount = m_totalIndexCount = m_totalClusterCount = m_lod0ClusterCount = 0;
     std::vector<std::pair<std::string, std::shared_ptr<Nanite::ClusterizedMesh>>> meshesToRender;
-    
-    for (const auto& meshName : meshNames) {
-        auto clusterizedMesh = m_naniteManager->getMesh(meshName);
-        if (!clusterizedMesh || clusterizedMesh->clusters.empty()) {
-            continue;
+    for (const auto& name : meshNames) {
+        auto cm = m_naniteManager->getMesh(name);
+        if (!cm || cm->clusters.empty()) continue;
+        meshesToRender.push_back({name, cm});
+        for (const auto& c : cm->clusters) {
+            m_totalVertexCount += c.vertexCount;
+            m_totalIndexCount += static_cast<uint32_t>(c.localIndices.size());
         }
-        
-        meshesToRender.push_back({meshName, clusterizedMesh});
-        
-        for (const auto& cluster : clusterizedMesh->clusters) {
-            m_totalVertexCount += cluster.vertexCount;
-            m_totalIndexCount += static_cast<uint32_t>(cluster.localIndices.size());
-        }
-        m_totalClusterCount += static_cast<uint32_t>(clusterizedMesh->clusters.size());
-        
-        if (!clusterizedMesh->lodLevels.empty()) {
-            m_lod0ClusterCount += clusterizedMesh->lodLevels[0].clusterCount;
-            std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' LOD0 clusters: " 
-                      << clusterizedMesh->lodLevels[0].clusterCount 
-                      << " (total LOD levels: " << clusterizedMesh->lodLevels.size() << ")" << std::endl;
-        } else {
-            m_lod0ClusterCount += static_cast<uint32_t>(clusterizedMesh->clusters.size());
-            std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' no LOD info, using all " 
-                      << clusterizedMesh->clusters.size() << " clusters as LOD0" << std::endl;
-        }
+        m_totalClusterCount += static_cast<uint32_t>(cm->clusters.size());
+        m_lod0ClusterCount += !cm->lodLevels.empty() ? cm->lodLevels[0].clusterCount : static_cast<uint32_t>(cm->clusters.size());
     }
-    
-    if (m_totalVertexCount == 0 || m_totalIndexCount == 0) {
-        std::cout << "[NaniteDebugPass] No vertex/index data" << std::endl;
-        return;
-    }
-    
-    // 构建顶点数据（与 GBuffer 格式一致：pos(3) + normal(3) + texCoord(2) + tangent(3)）
-    std::vector<float> vertexData;
-    vertexData.reserve(m_totalVertexCount * 11);
-    
-    std::vector<uint32_t> indexData;
-    indexData.reserve(m_totalIndexCount);
-    
-    m_clusterRenderData.clear();
-    m_clusterRenderData.reserve(m_totalClusterCount);
-    
-    m_meshRenderInfos.clear();
-    m_meshRenderInfos.reserve(meshesToRender.size());
-    
-    uint32_t currentVertexOffset = 0;
-    uint32_t currentIndexOffset = 0;
-    uint32_t globalClusterIndex = 0;
-    
-    for (const auto& [meshName, clusterizedMesh] : meshesToRender) {
-        MeshRenderInfo meshInfo;
-        meshInfo.meshName = meshName;
-        meshInfo.modelMatrix = glm::mat4(1.0f);
-        
-        for (uint32_t clusterIdx = 0; clusterIdx < clusterizedMesh->clusters.size(); clusterIdx++) {
-            const auto& cluster = clusterizedMesh->clusters[clusterIdx];
-            
-            ClusterRenderData renderData;
-            renderData.vertexOffset = currentVertexOffset;
-            renderData.indexOffset = currentIndexOffset;
-            renderData.indexCount = static_cast<uint32_t>(cluster.localIndices.size());
-            renderData.clusterIndex = globalClusterIndex;
-            
-            for (const auto& vertex : cluster.vertices) {
-                vertexData.push_back(vertex.position.x);
-                vertexData.push_back(vertex.position.y);
-                vertexData.push_back(vertex.position.z);
-                vertexData.push_back(vertex.normal.x);
-                vertexData.push_back(vertex.normal.y);
-                vertexData.push_back(vertex.normal.z);
-                vertexData.push_back(vertex.uv.x);
-                vertexData.push_back(vertex.uv.y);
-                vertexData.push_back(vertex.tangent.x);
-                vertexData.push_back(vertex.tangent.y);
-                vertexData.push_back(vertex.tangent.z);
+    if (m_totalVertexCount == 0) return;
+
+    std::vector<float> vertexData; vertexData.reserve(m_totalVertexCount * 11);
+    std::vector<uint32_t> indexData; indexData.reserve(m_totalIndexCount);
+    m_clusterRenderData.clear(); m_meshRenderInfos.clear();
+
+    uint32_t curVOff = 0, curIOff = 0, globalCI = 0;
+    for (const auto& [meshName, cm] : meshesToRender) {
+        MeshRenderInfo mi; mi.meshName = meshName; mi.modelMatrix = glm::mat4(1.0f);
+        for (uint32_t ci = 0; ci < cm->clusters.size(); ci++) {
+            const auto& cluster = cm->clusters[ci];
+            ClusterRenderData rd{curVOff, curIOff, static_cast<uint32_t>(cluster.localIndices.size()), globalCI};
+            for (const auto& v : cluster.vertices) {
+                vertexData.insert(vertexData.end(), {v.position.x, v.position.y, v.position.z,
+                    v.normal.x, v.normal.y, v.normal.z, v.uv.x, v.uv.y,
+                    v.tangent.x, v.tangent.y, v.tangent.z});
             }
-            
-            for (uint32_t localIdx : cluster.localIndices) {
-                indexData.push_back(currentVertexOffset + localIdx);
-            }
-            
-            m_clusterRenderData.push_back(renderData);
-            meshInfo.clusters.push_back(renderData);
-            
-            currentVertexOffset += cluster.vertexCount;
-            currentIndexOffset += renderData.indexCount;
-            globalClusterIndex++;
+            for (uint32_t li : cluster.localIndices) indexData.push_back(curVOff + li);
+            m_clusterRenderData.push_back(rd); mi.clusters.push_back(rd);
+            curVOff += cluster.vertexCount; curIOff += rd.indexCount; globalCI++;
         }
-        
-        m_meshRenderInfos.push_back(std::move(meshInfo));
+        m_meshRenderInfos.push_back(std::move(mi));
     }
-    
-    // 创建 GPU 缓冲 (RHI)
-    uint64_t vertexBufferSize = vertexData.size() * sizeof(float);
-    uint64_t indexBufferSize = indexData.size() * sizeof(uint32_t);
-    
-    {
-        RHIBufferDesc desc{};
-        desc.size = vertexBufferSize;
-        desc.usage = RHIBufferUsage::Vertex;
-        desc.memoryUsage = RHIMemoryUsage::GPUOnly;
-        m_vertexBuffer_ = rhiDevice_->createBuffer(desc);
-        m_vertexBuffer_->uploadData(vertexData.data(), vertexBufferSize);
-    }
-    
-    {
-        RHIBufferDesc desc{};
-        desc.size = indexBufferSize;
-        desc.usage = RHIBufferUsage::Index;
-        desc.memoryUsage = RHIMemoryUsage::GPUOnly;
-        m_indexBuffer_ = rhiDevice_->createBuffer(desc);
-        m_indexBuffer_->uploadData(indexData.data(), indexBufferSize);
-    }
-    
+
+    { RHIBufferDesc d{}; d.size = vertexData.size() * sizeof(float);
+      d.usage = RHIBufferUsage::Vertex; d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      m_vertexBuffer_ = rhiDevice_->createBuffer(d);
+      m_vertexBuffer_->uploadData(vertexData.data(), d.size); }
+    { RHIBufferDesc d{}; d.size = indexData.size() * sizeof(uint32_t);
+      d.usage = RHIBufferUsage::Index; d.memoryUsage = RHIMemoryUsage::GPUOnly;
+      m_indexBuffer_ = rhiDevice_->createBuffer(d);
+      m_indexBuffer_->uploadData(indexData.data(), d.size); }
+
     m_renderDataBuilt = true;
-    
-    std::cout << "[NaniteDebugPass] Render data built: " 
-              << m_totalClusterCount << " clusters, "
-              << m_meshRenderInfos.size() << " mesh(es)" << std::endl;
-    
-    for (const auto& [meshName, clusterizedMesh] : meshesToRender) {
-        std::cout << "[NaniteDebugPass] Mesh '" << meshName << "' LOD levels:" << std::endl;
-        for (size_t lod = 0; lod < clusterizedMesh->lodLevels.size(); ++lod) {
-            const auto& level = clusterizedMesh->lodLevels[lod];
-            std::cout << "  LOD " << lod << ": " << level.clusterCount 
-                      << " clusters (start: " << level.clusterStartIndex
-                      << ", error: " << level.maxError << ")" << std::endl;
-        }
-    }
+    std::cout << "[NaniteDebugPass] Render data built: " << m_totalClusterCount << " clusters" << std::endl;
 }
 
 // ============================================
-// 渲染
+// UBO
 // ============================================
 
-void NaniteDebugPass::updateUniforms(uint32_t frameIndex,
-                                     const glm::mat4& viewMatrix,
-                                     const glm::mat4& projMatrix,
-                                     const glm::vec3& viewPos,
-                                     const glm::vec3& lightPos,
-                                     const glm::vec3& lightColor) {
+void NaniteDebugPass::updateUniforms(uint32_t frameIndex, const glm::mat4& viewMatrix,
+                                     const glm::mat4& projMatrix, const glm::vec3& viewPos,
+                                     const glm::vec3& lightPos, const glm::vec3& lightColor) {
     if (frameIndex >= m_uniformBuffers_.size()) return;
-    
     NaniteDebugUBO ubo{};
-    ubo.view = viewMatrix;
-    ubo.proj = projMatrix;
-    ubo.viewPos = glm::vec4(viewPos, 1.0f);
-    ubo.lightPos = glm::vec4(lightPos, 1.0f);
-    ubo.lightColor = glm::vec4(lightColor, 1.0f);
-    
+    ubo.view = viewMatrix; ubo.proj = projMatrix;
+    ubo.viewPos = glm::vec4(viewPos, 1); ubo.lightPos = glm::vec4(lightPos, 1); ubo.lightColor = glm::vec4(lightColor, 1);
     void* ptr = m_uniformBuffers_[frameIndex]->map();
     memcpy(ptr, &ubo, sizeof(ubo));
     m_uniformBuffers_[frameIndex]->unmap();
 }
 
-void NaniteDebugPass::recordCommands(VkCommandBuffer commandBuffer, 
-                                     uint32_t frameIndex,
-                                     const glm::mat4& modelMatrix) {
-    if (!m_initialized || !enabled) {
-        return;
-    }
-    
-    if (!m_renderDataBuilt) {
-        std::cout << "[NaniteDebugPass] Building render data for: " << m_targetMeshName << std::endl;
-        buildRenderData();
-        if (!m_renderDataBuilt) {
-            std::cout << "[NaniteDebugPass] Failed to build render data!" << std::endl;
-        }
-    }
-    
-    if (!m_renderDataBuilt || m_clusterRenderData.empty()) {
-        return;
-    }
-    
-    auto* vkPipeline = static_cast<VulkanRHIPipeline*>(m_pipeline_.get());
-    
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipeline->getVkPipeline());
-    
-    VkExtent2D extent = m_swapChain->getExtent();
-    
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = extent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            vkPipeline->getVkPipelineLayout(), 0, 1, 
-                            &m_descriptorSets_[frameIndex], 0, nullptr);
-    
-    auto* vkVB = static_cast<VulkanRHIBuffer*>(m_vertexBuffer_.get());
-    auto* vkIB = static_cast<VulkanRHIBuffer*>(m_indexBuffer_.get());
-    VkBuffer vertexBuffers[] = { vkVB->getVkBuffer() };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, vkIB->getVkBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    
-    glm::mat4 normalMatrix = glm::transpose(glm::inverse(modelMatrix));
-    
-    for (const auto& clusterData : m_clusterRenderData) {
-        ClusterDebugPushConstants pushConstants{};
-        pushConstants.model = modelMatrix;
-        pushConstants.normalMatrix = normalMatrix;
-        pushConstants.clusterIndex = clusterData.clusterIndex;
-        pushConstants.totalClusters = m_totalClusterCount;
-        pushConstants.debugMode = static_cast<uint32_t>(m_debugMode);
-        pushConstants.padding = 0.0f;
-        
-        vkCmdPushConstants(commandBuffer, vkPipeline->getVkPipelineLayout(),
-                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(ClusterDebugPushConstants), &pushConstants);
-        
-        vkCmdDrawIndexed(commandBuffer, clusterData.indexCount, 1, 
-                         clusterData.indexOffset, 0, 0);
+// ============================================
+// recordCommands (Pure RHI)
+// ============================================
+
+void NaniteDebugPass::recordCommands(RHICommandBuffer* cmd, uint32_t frameIndex, const glm::mat4& modelMatrix) {
+    if (!m_initialized || !enabled) return;
+    if (!m_renderDataBuilt) { buildRenderData(); }
+    if (!m_renderDataBuilt || m_clusterRenderData.empty()) return;
+
+    auto ext = rhiSwapChain_->getExtent();
+    cmd->bindGraphicsPipeline(m_pipeline_.get());
+    cmd->setViewport(0, 0, float(ext.width), float(ext.height));
+    cmd->setScissor(0, 0, ext.width, ext.height);
+    cmd->setBindingGroup(0, m_bindingGroups_[frameIndex].get());
+    cmd->bindVertexBuffer(0, m_vertexBuffer_.get());
+    cmd->bindIndexBuffer(m_indexBuffer_.get(), 0, RHIIndexType::UInt32);
+
+    glm::mat4 normalMat = glm::transpose(glm::inverse(modelMatrix));
+    for (const auto& cd : m_clusterRenderData) {
+        ClusterDebugPushConstants pc{};
+        pc.model = modelMatrix; pc.normalMatrix = normalMat;
+        pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
+        pc.debugMode = static_cast<uint32_t>(m_debugMode);
+        cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
+        cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
     }
 }
 
-void NaniteDebugPass::recordCommandsMultiMesh(VkCommandBuffer commandBuffer,
-                                              uint32_t frameIndex,
+void NaniteDebugPass::recordCommandsMultiMesh(RHICommandBuffer* cmd, uint32_t frameIndex,
                                               const std::unordered_map<std::string, glm::mat4>& meshMatrices) {
-    if (!m_initialized || !enabled) {
-        return;
-    }
-    
-    if (!m_renderDataBuilt) {
-        std::cout << "[NaniteDebugPass] Building render data for all meshes" << std::endl;
-        buildRenderData();
-        if (!m_renderDataBuilt) {
-            std::cout << "[NaniteDebugPass] Failed to build render data!" << std::endl;
-            return;
-        }
-    }
-    
-    if (!m_renderDataBuilt || m_meshRenderInfos.empty()) {
-        return;
-    }
-    
-    auto* vkPipeline = static_cast<VulkanRHIPipeline*>(m_pipeline_.get());
-    
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipeline->getVkPipeline());
-    
-    VkExtent2D extent = m_swapChain->getExtent();
-    
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = extent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            vkPipeline->getVkPipelineLayout(), 0, 1, 
-                            &m_descriptorSets_[frameIndex], 0, nullptr);
-    
-    auto* vkVB = static_cast<VulkanRHIBuffer*>(m_vertexBuffer_.get());
-    auto* vkIB = static_cast<VulkanRHIBuffer*>(m_indexBuffer_.get());
-    VkBuffer vertexBuffers[] = { vkVB->getVkBuffer() };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, vkIB->getVkBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    
-    for (const auto& meshInfo : m_meshRenderInfos) {
-        glm::mat4 modelMatrix = glm::mat4(1.0f);
-        auto it = meshMatrices.find(meshInfo.meshName);
-        if (it != meshMatrices.end()) {
-            modelMatrix = it->second;
-        }
-        
-        glm::mat4 normalMatrix = glm::transpose(glm::inverse(modelMatrix));
-        
-        for (const auto& clusterData : meshInfo.clusters) {
-            ClusterDebugPushConstants pushConstants{};
-            pushConstants.model = modelMatrix;
-            pushConstants.normalMatrix = normalMatrix;
-            pushConstants.clusterIndex = clusterData.clusterIndex;
-            pushConstants.totalClusters = m_totalClusterCount;
-            pushConstants.debugMode = static_cast<uint32_t>(m_debugMode);
-            pushConstants.padding = 0.0f;
-            
-            vkCmdPushConstants(commandBuffer, vkPipeline->getVkPipelineLayout(),
-                              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                              0, sizeof(ClusterDebugPushConstants), &pushConstants);
-            
-            vkCmdDrawIndexed(commandBuffer, clusterData.indexCount, 1, 
-                             clusterData.indexOffset, 0, 0);
+    if (!m_initialized || !enabled) return;
+    if (!m_renderDataBuilt) { buildRenderData(); }
+    if (!m_renderDataBuilt || m_meshRenderInfos.empty()) return;
+
+    auto ext = rhiSwapChain_->getExtent();
+    cmd->bindGraphicsPipeline(m_pipeline_.get());
+    cmd->setViewport(0, 0, float(ext.width), float(ext.height));
+    cmd->setScissor(0, 0, ext.width, ext.height);
+    cmd->setBindingGroup(0, m_bindingGroups_[frameIndex].get());
+    cmd->bindVertexBuffer(0, m_vertexBuffer_.get());
+    cmd->bindIndexBuffer(m_indexBuffer_.get(), 0, RHIIndexType::UInt32);
+
+    for (const auto& mi : m_meshRenderInfos) {
+        glm::mat4 model = glm::mat4(1.0f);
+        auto it = meshMatrices.find(mi.meshName);
+        if (it != meshMatrices.end()) model = it->second;
+        glm::mat4 normalMat = glm::transpose(glm::inverse(model));
+        for (const auto& cd : mi.clusters) {
+            ClusterDebugPushConstants pc{};
+            pc.model = model; pc.normalMatrix = normalMat;
+            pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
+            pc.debugMode = static_cast<uint32_t>(m_debugMode);
+            cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
+            cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
         }
     }
 }
 
-void NaniteDebugPass::resize(uint32_t newWidth, uint32_t newHeight) {
-    width = newWidth;
-    height = newHeight;
-}
-
-// ============================================
-// 调试模式
-// ============================================
-
-void NaniteDebugPass::cycleDebugMode() {
-    uint32_t current = static_cast<uint32_t>(m_debugMode);
-    current = (current + 1) % 4;
-    m_debugMode = static_cast<NaniteDebugMode>(current);
-    std::cout << "[NaniteDebugPass] Debug mode: " << getDebugModeName() << std::endl;
-}
-
-const char* NaniteDebugPass::getDebugModeName() const {
-    switch (m_debugMode) {
-        case NaniteDebugMode::ClusterColor: return "Cluster Color";
-        case NaniteDebugMode::Normal: return "Normal";
-        case NaniteDebugMode::LOD: return "LOD Level";
-        case NaniteDebugMode::HashColor: return "Hash Color";
-        default: return "Unknown";
-    }
-}
-
-bool NaniteDebugPass::hasClusterData() const {
-    return m_renderDataBuilt && !m_clusterRenderData.empty();
-}
-
-void NaniteDebugPass::ensureRenderDataBuilt() {
-    if (!m_initialized) {
-        return;
-    }
-    
-    if (!m_renderDataBuilt) {
-        std::cout << "[NaniteDebugPass] Building render data (pre-RenderPass)" << std::endl;
-        buildRenderData();
-        if (!m_renderDataBuilt) {
-            std::cerr << "[NaniteDebugPass] Failed to build render data!" << std::endl;
-        }
-    }
-}
-
-void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
-                                            uint32_t frameIndex,
+void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t frameIndex,
                                             const std::unordered_map<std::string, glm::mat4>& meshMatrices,
                                             Nanite::NaniteManager* naniteManager) {
-    if (!m_initialized || !enabled) {
-        return;
-    }
-    
-    if (!m_renderDataBuilt || m_clusterRenderData.empty()) {
-        return;
-    }
-    
-    // =====================================================
-    // 用ClusterCullingPass 获取 GPU culling 结果
-    // =====================================================
+    if (!m_initialized || !enabled) return;
+    if (!m_renderDataBuilt || m_clusterRenderData.empty()) return;
+
+    // GPU culling + LOD selection logic (same business logic as before)
     std::set<uint32_t> visibleSet;
-    
-    constexpr bool DEBUG_RENDER_ALL_CLUSTERS = false;
-    constexpr bool DEBUG_RENDER_LOD0_ONLY = false;
-    
-    if (DEBUG_RENDER_ALL_CLUSTERS) {
-        if (DEBUG_RENDER_LOD0_ONLY) {
-            uint32_t globalClusterOffset = 0;
-            
-            if (naniteManager) {
-                for (const auto& meshInfo : m_meshRenderInfos) {
-                    auto clusterizedMesh = naniteManager->getMesh(meshInfo.meshName);
-                    if (!clusterizedMesh) continue;
-                    
-                    uint32_t lod0Count = 0;
-                    if (!clusterizedMesh->lodLevels.empty()) {
-                        lod0Count = clusterizedMesh->lodLevels[0].clusterCount;
-                    } else {
-                        lod0Count = static_cast<uint32_t>(clusterizedMesh->clusters.size());
-                    }
-                    
-                    for (uint32_t i = 0; i < lod0Count; ++i) {
-                        visibleSet.insert(globalClusterOffset + i);
-                    }
-                    
-                    globalClusterOffset += static_cast<uint32_t>(clusterizedMesh->clusters.size());
-                }
-            } else {
-                for (uint32_t i = 0; i < m_lod0ClusterCount; ++i) {
-                    visibleSet.insert(i);
-                }
-            }
-            
-            std::cout << "[NaniteDebugPass] LOD0 only mode: " << visibleSet.size() 
-                      << " clusters visible (total: " << m_totalClusterCount << ")" << std::endl;
-        } else {
-            for (uint32_t i = 0; i < m_totalClusterCount; ++i) {
-                visibleSet.insert(i);
-            }
+    std::set<uint32_t> frustumVisible;
+    if (m_clusterCullingPass) {
+        const auto& vi = m_clusterCullingPass->getVisibleIndices();
+        for (uint32_t idx : vi) frustumVisible.insert(idx);
+    }
+    if (frustumVisible.empty())
+        for (uint32_t i = 0; i < m_totalClusterCount; ++i) frustumVisible.insert(i);
+
+    if (m_naniteManager) {
+        const auto& allGPU = m_naniteManager->getAllGPUClusterData();
+        glm::vec3 camPos = m_naniteManager->getLastCameraPosition();
+        for (uint32_t idx : frustumVisible) {
+            if (idx >= allGPU.size()) continue;
+            const auto& c = allGPU[idx];
+            uint32_t rootIdx = idx; uint32_t safety = 0;
+            while (allGPU[rootIdx].parentGroupIndex != 0xFFFFFFFF && allGPU[rootIdx].parentGroupIndex < allGPU.size() && safety < 10)
+                { rootIdx = allGPU[rootIdx].parentGroupIndex; safety++; }
+            glm::vec3 rc(allGPU[rootIdx].boundingSphere.x, allGPU[rootIdx].boundingSphere.y, allGPU[rootIdx].boundingSphere.z);
+            float dist = glm::length(rc - camPos);
+            uint32_t targetLOD = dist > 200 ? 7 : dist > 120 ? 6 : dist > 70 ? 5 : dist > 45 ? 4 : dist > 30 ? 3 : dist > 18 ? 2 : dist > 10 ? 1 : 0;
+            if (c.lodLevel == targetLOD || (c.parentGroupIndex == 0xFFFFFFFF && targetLOD > c.lodLevel))
+                visibleSet.insert(idx);
+        }
+    } else visibleSet = frustumVisible;
+
+    auto ext = rhiSwapChain_->getExtent();
+    cmd->bindGraphicsPipeline(m_pipeline_.get());
+    cmd->setViewport(0, 0, float(ext.width), float(ext.height));
+    cmd->setScissor(0, 0, ext.width, ext.height);
+    cmd->setBindingGroup(0, m_bindingGroups_[frameIndex].get());
+    cmd->bindVertexBuffer(0, m_vertexBuffer_.get());
+    cmd->bindIndexBuffer(m_indexBuffer_.get(), 0, RHIIndexType::UInt32);
+
+    uint32_t drawn = 0;
+    for (const auto& mi : m_meshRenderInfos) {
+        glm::mat4 model = glm::mat4(1.0f);
+        auto it = meshMatrices.find(mi.meshName); if (it != meshMatrices.end()) model = it->second;
+        glm::mat4 normalMat = glm::transpose(glm::inverse(model));
+        for (const auto& cd : mi.clusters) {
+            if (visibleSet.find(cd.clusterIndex) == visibleSet.end()) continue;
+            ClusterDebugPushConstants pc{};
+            pc.model = model; pc.normalMatrix = normalMat;
+            pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
+            pc.debugMode = static_cast<uint32_t>(m_debugMode);
+            cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
+            cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
+            drawn++;
         }
     }
-    else {
-        std::set<uint32_t> frustumVisible;
-        if (m_clusterCullingPass) {
-            const auto& visibleIndices = m_clusterCullingPass->getVisibleIndices();
-            for (uint32_t idx : visibleIndices) {
-                frustumVisible.insert(idx);
-            }
-        }
-        
-        if (frustumVisible.empty()) {
-            for (uint32_t i = 0; i < m_totalClusterCount; ++i) {
-                frustumVisible.insert(i);
-            }
-        }
-        
-        if (m_naniteManager) {
-            const auto& allGPUData = m_naniteManager->getAllGPUClusterData();
-            glm::vec3 cameraPos = m_naniteManager->getLastCameraPosition();
-            
-            for (uint32_t idx : frustumVisible) {
-                if (idx >= allGPUData.size()) continue;
-                const auto& cluster = allGPUData[idx];
-                
-                uint32_t rootIdx = idx;
-                uint32_t safetyCounter = 0;
-                while (allGPUData[rootIdx].parentGroupIndex != 0xFFFFFFFF && 
-                       allGPUData[rootIdx].parentGroupIndex < allGPUData.size() &&
-                       safetyCounter < 10) {
-                    rootIdx = allGPUData[rootIdx].parentGroupIndex;
-                    safetyCounter++;
-                }
-                
-                glm::vec3 rootCenter(allGPUData[rootIdx].boundingSphere.x, 
-                                     allGPUData[rootIdx].boundingSphere.y, 
-                                     allGPUData[rootIdx].boundingSphere.z);
-                float dist = glm::length(rootCenter - cameraPos);
-                
-                uint32_t targetLOD = 0;
-                if (dist > 200.0f) targetLOD = 7;
-                else if (dist > 120.0f) targetLOD = 6;
-                else if (dist > 70.0f) targetLOD = 5;
-                else if (dist > 45.0f) targetLOD = 4;
-                else if (dist > 30.0f) targetLOD = 3;
-                else if (dist > 18.0f) targetLOD = 2;
-                else if (dist > 10.0f) targetLOD = 1;
-                else targetLOD = 0;
-                
-                if (cluster.lodLevel == targetLOD) {
-                    visibleSet.insert(idx);
-                } else if (cluster.parentGroupIndex == 0xFFFFFFFF && targetLOD > cluster.lodLevel) {
-                    visibleSet.insert(idx);
-                }
-            }
-        } else {
-            visibleSet = frustumVisible;
-        }
-    }
-    
-    // 绑定管线
-    auto* vkPipeline = static_cast<VulkanRHIPipeline*>(m_pipeline_.get());
-    
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipeline->getVkPipeline());
-    
-    VkExtent2D extent = m_swapChain->getExtent();
-    
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = extent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            vkPipeline->getVkPipelineLayout(), 0, 1, 
-                            &m_descriptorSets_[frameIndex], 0, nullptr);
-    
-    auto* vkVB = static_cast<VulkanRHIBuffer*>(m_vertexBuffer_.get());
-    auto* vkIB = static_cast<VulkanRHIBuffer*>(m_indexBuffer_.get());
-    VkBuffer vertexBuffers[] = { vkVB->getVkBuffer() };
-    VkDeviceSize offsets_arr[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets_arr);
-    vkCmdBindIndexBuffer(commandBuffer, vkIB->getVkBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    
-    uint32_t drawnClusters = 0;
-    
-    for (const auto& meshInfo : m_meshRenderInfos) {
-        glm::mat4 modelMatrix = glm::mat4(1.0f);
-        auto it = meshMatrices.find(meshInfo.meshName);
-        if (it != meshMatrices.end()) {
-            modelMatrix = it->second;
-        }
-        
-        glm::mat4 normalMatrix = glm::transpose(glm::inverse(modelMatrix));
-        
-        for (const auto& clusterData : meshInfo.clusters) {
-            if (visibleSet.find(clusterData.clusterIndex) == visibleSet.end()) {
-                continue;
-            }
-            
-            ClusterDebugPushConstants pushConstants{};
-            pushConstants.model = modelMatrix;
-            pushConstants.normalMatrix = normalMatrix;
-            pushConstants.clusterIndex = clusterData.clusterIndex;
-            pushConstants.totalClusters = m_totalClusterCount;
-            pushConstants.debugMode = static_cast<uint32_t>(m_debugMode);
-            pushConstants.padding = 0.0f;
-            
-            vkCmdPushConstants(commandBuffer, vkPipeline->getVkPipelineLayout(),
-                              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                              0, sizeof(ClusterDebugPushConstants), &pushConstants);
-            
-            vkCmdDrawIndexed(commandBuffer, clusterData.indexCount, 1, 
-                             clusterData.indexOffset, 0, 0);
-            
-            drawnClusters++;
-        }
-    }
-    
+
     // ======== LOD 追踪和实时输出========
     std::unordered_map<uint32_t, uint32_t> lodClusterCounts;
     
@@ -753,7 +331,7 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
     
     static uint32_t frameCounter = 0;
     if (++frameCounter % 60 == 0) {
-        std::cout << "\r[LOD] Drawn:" << drawnClusters << "/" << m_totalClusterCount 
+        std::cout << "\r[LOD] Drawn:" << drawn << "/" << m_totalClusterCount 
                   << " | GPU Culling Mode"
                   << " | Visible:" << visibleSet.size()
                   << " | ";
@@ -768,5 +346,39 @@ void NaniteDebugPass::recordCommandsWithLOD(VkCommandBuffer commandBuffer,
         std::cout << "]";
         
         std::cout << "                " << std::flush;
+    }
+}
+
+// ============================================
+// Missing method implementations
+// ============================================
+
+void NaniteDebugPass::ensureRenderDataBuilt() {
+    if (!m_renderDataBuilt) {
+        buildRenderData();
+    }
+}
+
+void NaniteDebugPass::resize(uint32_t width, uint32_t height) {
+    // Debug pass uses swapchain extent directly; nothing to recreate here.
+    // Pipeline viewport/scissor are set dynamically in recordCommands.
+}
+
+bool NaniteDebugPass::hasClusterData() const {
+    return m_renderDataBuilt && m_totalClusterCount > 0;
+}
+
+void NaniteDebugPass::cycleDebugMode() {
+    uint32_t next = (static_cast<uint32_t>(m_debugMode) + 1) % 4;
+    m_debugMode = static_cast<NaniteDebugMode>(next);
+}
+
+const char* NaniteDebugPass::getDebugModeName() const {
+    switch (m_debugMode) {
+        case NaniteDebugMode::ClusterColor: return "Cluster Color";
+        case NaniteDebugMode::Normal:       return "Normal";
+        case NaniteDebugMode::LOD:          return "LOD";
+        case NaniteDebugMode::HashColor:    return "Hash Color";
+        default:                            return "Unknown";
     }
 }

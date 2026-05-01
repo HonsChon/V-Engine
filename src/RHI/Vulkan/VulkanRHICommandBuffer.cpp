@@ -6,6 +6,7 @@
 #include "VulkanRHIDescriptor.h"
 #include "VulkanRHIRenderPass.h"
 #include "VulkanTypeConversions.h"
+#include "IVulkanNative.h"
 
 using namespace VulkanTypeConversions;
 
@@ -166,7 +167,7 @@ void VulkanRHICommandBuffer::transitionImageLayout(RHITexture* texture,
                                                     RHIImageLayout newLayout,
                                                     RHIPipelineStage srcStage,
                                                     RHIPipelineStage dstStage) {
-    auto* vkTex = static_cast<VulkanRHITexture*>(texture);
+    auto* nativeTex = dynamic_cast<IVulkanNativeTexture*>(texture);
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -174,12 +175,12 @@ void VulkanRHICommandBuffer::transitionImageLayout(RHITexture* texture,
     barrier.newLayout = toVkImageLayout(newLayout);
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = vkTex->getVkImage();
-    barrier.subresourceRange.aspectMask = getAspectFlags(vkTex->getFormat());
+    barrier.image = nativeTex->getVkImage();
+    barrier.subresourceRange.aspectMask = getAspectFlags(texture->getFormat());
     barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = vkTex->getMipLevels();
+    barrier.subresourceRange.levelCount = texture->getMipLevels();
     barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = vkTex->getArrayLayers();
+    barrier.subresourceRange.layerCount = texture->getArrayLayers();
 
     // Infer access masks from layouts
     switch (barrier.oldLayout) {
@@ -230,4 +231,55 @@ void VulkanRHICommandBuffer::copyBuffer(RHIBuffer* src, RHIBuffer* dst, uint64_t
     copyRegion.dstOffset = dstOffset;
     copyRegion.size = size;
     vkCmdCopyBuffer(cmd_, vkSrc->getVkBuffer(), vkDst->getVkBuffer(), 1, &copyRegion);
+}
+
+void VulkanRHICommandBuffer::fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64_t size, uint32_t data) {
+    auto* vkBuf = static_cast<VulkanRHIBuffer*>(buffer);
+    vkCmdFillBuffer(cmd_, vkBuf->getVkBuffer(), offset, size, data);
+}
+
+void VulkanRHICommandBuffer::blitImage(RHITexture* src, RHIImageLayout srcLayout,
+                                        RHITexture* dst, RHIImageLayout dstLayout,
+                                        uint32_t srcWidth, uint32_t srcHeight,
+                                        uint32_t dstWidth, uint32_t dstHeight,
+                                        RHIFilter filter) {
+    auto* nativeSrc = dynamic_cast<IVulkanNativeTexture*>(src);
+    auto* nativeDst = dynamic_cast<IVulkanNativeTexture*>(dst);
+
+    VkImageBlit region{};
+    region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.srcOffsets[0] = { 0, 0, 0 };
+    region.srcOffsets[1] = { static_cast<int32_t>(srcWidth), static_cast<int32_t>(srcHeight), 1 };
+    region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.dstOffsets[0] = { 0, 0, 0 };
+    region.dstOffsets[1] = { static_cast<int32_t>(dstWidth), static_cast<int32_t>(dstHeight), 1 };
+
+    VkFilter vkFilter = (filter == RHIFilter::Nearest) ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+
+    vkCmdBlitImage(cmd_,
+                   nativeSrc->getVkImage(), toVkImageLayout(srcLayout),
+                   nativeDst->getVkImage(), toVkImageLayout(dstLayout),
+                   1, &region, vkFilter);
+}
+
+// ---- Buffer Barrier ----
+
+void VulkanRHICommandBuffer::bufferBarrier(RHIBuffer* buffer, uint64_t size,
+                                            RHIPipelineStage srcStage, RHIPipelineStage dstStage,
+                                            RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) {
+    auto* vkBuf = static_cast<VulkanRHIBuffer*>(buffer);
+
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = toVkAccessFlags(srcAccess);
+    barrier.dstAccessMask = toVkAccessFlags(dstAccess);
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = vkBuf->getVkBuffer();
+    barrier.offset = 0;
+    barrier.size = size;
+
+    vkCmdPipelineBarrier(cmd_,
+                         toVkPipelineStage(srcStage), toVkPipelineStage(dstStage),
+                         0, 0, nullptr, 1, &barrier, 0, nullptr);
 }

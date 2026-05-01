@@ -70,6 +70,17 @@ public:
     // ---- Transfer ----
     void copyBuffer(RHIBuffer* src, RHIBuffer* dst, uint64_t size,
                     uint64_t srcOffset, uint64_t dstOffset) override;
+    void fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64_t size, uint32_t data) override;
+    void blitImage(RHITexture* src, RHIImageLayout srcLayout,
+                   RHITexture* dst, RHIImageLayout dstLayout,
+                   uint32_t srcWidth, uint32_t srcHeight,
+                   uint32_t dstWidth, uint32_t dstHeight,
+                   RHIFilter filter) override;
+
+    // ---- Buffer Barrier ----
+    void bufferBarrier(RHIBuffer* buffer, uint64_t size,
+                       RHIPipelineStage srcStage, RHIPipelineStage dstStage,
+                       RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) override;
 
 private:
     VulkanRHIDevice* device_;

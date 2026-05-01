@@ -222,10 +222,59 @@ VkCommandBuffer vkCmd = static_cast<VulkanRHICommandBuffer*>(cmd)->getVkCommandB
 
 **理由**: ImGui 的 Vulkan 后端需要原生的 `VkRenderPass`、`VkCommandBuffer` 等。完全封死原生访问不现实，但通过显式的 `static_cast` 让使用者意识到这是平台特定代码。
 
+### Decision 9: Pure RHI 深度迁移策略（Phase 3b）
+
+**背景**: Phase 3 完成后，所有 Pass 已通过 RHI 接口进行资源创建和管线构建，但渲染命令录制（`beginRenderPass`、`drawIndexed` 等）和材质更新仍使用 `static_cast` 下沉到 Vulkan 后端头文件（`VulkanRHI*.h`）。这意味着 Pass 的 `.cpp` 文件仍然依赖 Vulkan 后端，**无法直接支持 DX12 后端**。
+
+**选择**: 全面移除 Pass 层对 `VulkanRHI*.h` 的依赖，达到"Pure RHI"状态：
+1. **渲染命令** 全部转为 `RHICommandBuffer*` 方法（`beginRenderPass`、`bindGraphicsPipeline`、`drawIndexed`、`pushConstants` 等）
+2. **材质描述符** 从 `VkDescriptorSet nativeSets[]` 改为 `std::vector<std::unique_ptr<RHIBindingGroup>> groups`，通过 `BindingGroup::updateTexture()` 更新
+3. **跨 Pass 资源传递** 使用 `RHITexture*` 而非 `VkImageView`
+4. **Native 桥接** 仅在 `SceneRenderer` / `NaniteManager` 等 adapter 层，使用 `RHIDevice::wrapCommandBuffer()` 将外部 VkCommandBuffer 包装为 RHI 对象
+
+**关键模式**:
+```cpp
+// 材质更新 (Pure RHI)
+void Pass::updateMaterialTextures(MaterialDescriptor* mat,
+                                   RHITexture* albedo, RHISampler* albedoSampler, ...) {
+    for (uint32_t i = 0; i < maxFrames; ++i) {
+        if (!mat->groups[i]) {
+            mat->groups[i] = rhiDevice_->createBindingGroup(materialLayout_.get(), desc);
+        }
+        mat->groups[i]->updateTexture(0, albedo, albedoSampler);
+        mat->groups[i]->updateTexture(1, normal, normalSampler);
+    }
+    mat->valid = true;
+}
+
+// 渲染命令 (Pure RHI)
+void Pass::beginRenderPass(RHICommandBuffer* cmd) {
+    std::vector<RHIClearValue> clears = { ... };
+    cmd->beginRenderPass(renderPass_.get(), framebuffer_.get(), clears);
+    cmd->setViewport(0, 0, width_, height_, 0.0f, 1.0f);
+    cmd->setScissor(0, 0, width_, height_);
+}
+```
+
+**理由**: 这是实现 DX12 后端的前提条件。只有当所有 Pass 都不引用任何 `VulkanRHI*.h` 头文件时，才能在不修改 Pass 代码的情况下切换到 DX12 后端。
+
+### Decision 10: NaniteManager 适配器模式
+
+**选择**: `NaniteManager` 作为 Native/RHI 边界的适配器，内部仍管理 `VkCommandBuffer` 的生命周期（因为它直接操作 GPU 传输队列），但在调用 RHI 化的 culling passes 时，通过 `wrapCommandBuffer` 将 native handle 转为 RHI 对象。
+
+```cpp
+// NaniteManager 中的适配器逻辑
+auto rhiCmd = m_rhiDevice->wrapCommandBuffer(static_cast<void*>(nativeCmd));
+m_gpuDrivenRenderer->dispatch(rhiCmd.get(), frameIndex);
+```
+
+**理由**: NaniteManager 管理底层的 GPU 传输（`vkQueueSubmit`、fence 同步等），完全 RHI 化需要先实现 `RHIQueue` 和 `RHIFence` 抽象，属于后续迭代的范围。当前的 adapter 模式是一个务实的折中。
+
 ## Risks / Trade-offs
 
-- **[重构范围大]** → 分阶段推进：Phase 1 实现核心 RHI + 迁移 ForwardPass 验证；Phase 2 迁移 GBufferPass + LightingPass；Phase 3 迁移其余 Pass。每个 Phase 确保可编译可运行。
+- **[重构范围大]** → 分阶段推进：Phase 1 实现核心 RHI + 迁移 ForwardPass 验证；Phase 2 迁移 GBufferPass + LightingPass；Phase 3 迁移其余 Pass；Phase 3b 深度纯 RHI 化。每个 Phase 确保可编译可运行。
 - **[虚函数性能]** → 在 GPU-bound 的渲染引擎中，CPU 端虚函数调用的开销（每帧几百次）远小于 GPU 工作。如果未来出现瓶颈，可通过 `final` 关键字 + LTO 消除虚调用。
 - **[DX12 兼容性不确定]** → RenderPass / Descriptor 模型参考了 WebGPU 和 UE5 RHI 的设计，这些都已验证过跨 Vulkan/DX12 的可行性。但实际 DX12 适配可能需要微调接口。
 - **[ImGui 耦合]** → ImGui 的 Vulkan 后端需要原生 handle，通过后门机制解决，接受这部分代码的平台依赖。
 - **[编译时间增加]** → 新增约 20 个头文件/源文件，但聚合头文件 `RHI.h` 可以配合前向声明减少包含链。
+- **[wrapCommandBuffer 开销]** → 每次 wrap 创建一个临时 RHICommandBuffer 对象。在每帧仅调用几次的场景下完全可接受。

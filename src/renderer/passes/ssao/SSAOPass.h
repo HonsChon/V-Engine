@@ -1,19 +1,28 @@
 #pragma once
 
 #include "RenderPassBase.h"
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <array>
 #include <vector>
 #include <string>
 
-class VulkanDevice;
-class GBufferPass;
+// RHI forward declarations — NO Vulkan headers
 class RHIDevice;
+class RHITexture;
+class RHISampler;
+class RHIBuffer;
+class RHIPipeline;
+class RHIBindingLayout;
+class RHIBindingGroup;
+class RHIRenderPass;
+class RHIFramebuffer;
+class RHICommandBuffer;
+
+class GBufferPass;
 
 /**
- * SSAOPass - 屏幕空间环境遮蔽渲染通道
+ * SSAOPass - 屏幕空间环境遮蔽渲染通道 (Pure RHI)
  * 
  * 采用 Deinterleaved Texturing 优化的 SSAO 实现。
  * 内部管理 4 个子阶段：
@@ -35,30 +44,28 @@ public:
         float radius = 0.5f;
         float bias = 0.025f;
         float power = 1.0f;
-        float amount = 1.5f;        // AO 强度乘数 (参照 NVIDIA ComputeAO)
+        float amount = 1.5f;
         int kernelSize = KERNEL_SIZE;
     };
 
     // SSAO UBO 结构（须与 shader 匹配）
-    // Alchemy AO 风格: samples.xy = 单位圆盘方向, samples.z = 径向缩放, w = unused
     struct SSAOParamsUBO {
-        alignas(16) glm::vec4 samples[KERNEL_SIZE];  // xy: 圆盘方向, z: 径向缩放
+        alignas(16) glm::vec4 samples[KERNEL_SIZE];
         alignas(16) glm::mat4 projection;
         alignas(16) glm::mat4 view;
-        alignas(4)  float radius;       // view-space 采样半径
-        alignas(4)  float bias;         // 法线偏移量 (防止自遮蔽)
-        alignas(4)  float power;        // 遮蔽强度指数
-        alignas(4)  float amount;       // AO 强度乘数 (参照 NVIDIA ComputeAO)
+        alignas(4)  float radius;
+        alignas(4)  float bias;
+        alignas(4)  float power;
+        alignas(4)  float amount;
         alignas(4)  int kernelSize;
     };
 
-    // Deinterleave push constants
+    // Push constants
     struct DeinterleavePushConstants {
         int fullWidth;
         int fullHeight;
     };
 
-    // SSAO push constants
     struct SSAOPushConstants {
         int layerIndex;
         float rotationAngle;
@@ -66,56 +73,37 @@ public:
         int subHeight;
     };
 
-    // Reinterleave push constants
     struct ReinterleavePushConstants {
         int fullWidth;
         int fullHeight;
     };
 
-    SSAOPass(std::shared_ptr<VulkanDevice> device, RHIDevice* rhiDevice,
+    SSAOPass(RHIDevice* rhiDevice,
              uint32_t width, uint32_t height);
     ~SSAOPass();
 
-    // 禁止拷贝
     SSAOPass(const SSAOPass&) = delete;
     SSAOPass& operator=(const SSAOPass&) = delete;
 
-    /**
-     * 初始化所有资源（纹理、管线、描述符等）
-     */
     void init();
 
     /**
-     * 执行完整的 SSAO 流程
-     * @param cmd 命令缓冲
-     * @param gbuffer GBuffer Pass（提供 Position/Normal 纹理）
-     * @param frameIndex 当前帧索引
-     * @param projection 投影矩阵
-     * @param view 视图矩阵
+     * 执行完整的 SSAO 流程 (Pure RHI)
      */
-    void execute(VkCommandBuffer cmd, GBufferPass* gbuffer, uint32_t frameIndex,
+    void execute(RHICommandBuffer* cmd, GBufferPass* gbuffer, uint32_t frameIndex,
                  const glm::mat4& projection, const glm::mat4& view);
 
-    /**
-     * 重建分辨率相关资源
-     */
     void resize(uint32_t newWidth, uint32_t newHeight) override;
-
-    /**
-     * 更新 SSAO 参数
-     */
     void updateSettings(const SSAOSettings& settings);
 
-    // 获取最终输出
-    VkImageView getOutputAOView() const { return m_blurredAOView; }
-    VkImage getOutputAOImage() const { return m_blurredAOImage; }
-    VkSampler getOutputAOSampler() const { return m_aoSampler; }
+    // 获取最终输出 (RHI)
+    RHITexture* getOutputAOTexture() const { return m_blurredAOTex.get(); }
+    RHISampler* getOutputAOSampler() const { return m_aoSampler.get(); }
 
     SSAOSettings& getSettings() { return m_settings; }
     const SSAOSettings& getSettings() const { return m_settings; }
 
 private:
-    // ========== 初始化方法 ==========
     void cleanup();
 
     // 资源创建
@@ -125,67 +113,28 @@ private:
     void generateKernel();
     void generateLayerRotations();
 
-    // Deinterleave 阶段资源
+    // Deinterleave 阶段
     void createDeinterleaveResources();
-    void createDeinterleaveDescriptorSetLayout();
-    void createDeinterleaveDescriptorPool();
-    void createDeinterleaveDescriptorSets();
-    void createDeinterleavePipeline();
 
-    // SSAO 计算阶段资源
+    // SSAO 计算阶段
     void createSSAOResources();
-    void createSSAORenderPass();
-    void createSSAOFramebuffers();
-    void createSSAODescriptorSetLayout();
-    void createSSAODescriptorPool();
-    void createSSAODescriptorSets();
-    void createSSAOPipeline();
-    void createSSAOUniformBuffers();
 
-    // Reinterleave 阶段资源
+    // Reinterleave 阶段
     void createReinterleaveResources();
-    void createReinterleaveDescriptorSetLayout();
-    void createReinterleaveDescriptorPool();
-    void createReinterleaveDescriptorSets();
-    void createReinterleavePipeline();
 
-    // Blur 阶段资源
+    // Blur 阶段
     void createBlurResources();
-    void createBlurRenderPass();
-    void createBlurFramebuffer();
-    void createBlurDescriptorSetLayout();
-    void createBlurDescriptorPool();
-    void createBlurDescriptorSets();
-    void createBlurPipeline();
 
     // 执行子阶段
-    void executeDeinterleave(VkCommandBuffer cmd, GBufferPass* gbuffer);
-    void executeSSAO(VkCommandBuffer cmd, uint32_t frameIndex);
-    void executeReinterleave(VkCommandBuffer cmd);
-    void executeBlur(VkCommandBuffer cmd);
-
-    // 工具方法
-    VkShaderModule createShaderModule(const std::vector<char>& code);
-    std::vector<char> readFile(const std::string& filename);
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
-    void createImage2D(uint32_t w, uint32_t h, VkFormat format, VkImageUsageFlags usage,
-                       VkImage& image, VkDeviceMemory& memory);
-    void createImage2DArray(uint32_t w, uint32_t h, uint32_t layers, VkFormat format,
-                            VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& memory);
-    VkImageView createImageView2D(VkImage image, VkFormat format, VkImageAspectFlags aspect);
-    VkImageView createImageView2DArray(VkImage image, VkFormat format, uint32_t layers, VkImageAspectFlags aspect);
-    VkImageView createImageView2DArraySingleLayer(VkImage image, VkFormat format, uint32_t layer, VkImageAspectFlags aspect);
-    void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout,
-                               VkImageLayout newLayout, VkImageAspectFlags aspect,
-                               uint32_t layerCount = 1);
+    void executeDeinterleave(RHICommandBuffer* cmd, GBufferPass* gbuffer);
+    void executeSSAO(RHICommandBuffer* cmd, uint32_t frameIndex);
+    void executeReinterleave(RHICommandBuffer* cmd);
+    void executeBlur(RHICommandBuffer* cmd);
 
     // ========== 成员变量 ==========
-    // RHI device (stored for future migration, not yet used internally)
     RHIDevice* rhiDevice_ = nullptr;
 
     SSAOSettings m_settings;
-    
-    // 子纹理尺寸
     uint32_t m_subWidth = 0;
     uint32_t m_subHeight = 0;
 
@@ -193,73 +142,46 @@ private:
     std::array<glm::vec4, KERNEL_SIZE> m_kernel;
     std::array<float, NUM_LAYERS> m_layerRotations;
 
-    // ---- Deinterleaved Textures ----
-    // Position array (16 layers, R16G16B16A16_SFLOAT)
-    VkImage m_deinterleavedPositionImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_deinterleavedPositionMemory = VK_NULL_HANDLE;
-    VkImageView m_deinterleavedPositionView = VK_NULL_HANDLE;  // full array view
-
-    // Normal array (16 layers, R16G16B16A16_SFLOAT)
-    VkImage m_deinterleavedNormalImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_deinterleavedNormalMemory = VK_NULL_HANDLE;
-    VkImageView m_deinterleavedNormalView = VK_NULL_HANDLE;  // full array view
+    // ---- Deinterleaved Textures (16-layer arrays) ----
+    std::unique_ptr<RHITexture> m_deinterleavedPosTex;   // R16G16B16A16_SFLOAT, 16 layers
+    std::unique_ptr<RHITexture> m_deinterleavedNorTex;   // R16G16B16A16_SFLOAT, 16 layers
 
     // ---- AO Texture Array ----
-    // AO output array (16 layers, R8_UNORM)
-    VkImage m_aoArrayImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_aoArrayMemory = VK_NULL_HANDLE;
-    VkImageView m_aoArrayView = VK_NULL_HANDLE;  // full array view
-    std::array<VkImageView, NUM_LAYERS> m_aoArrayLayerViews = {};  // per-layer views
+    std::unique_ptr<RHITexture> m_aoArrayTex;            // R8_UNORM, 16 layers
+    std::array<std::unique_ptr<RHITexture>, NUM_LAYERS> m_aoLayerViews; // per-layer views
 
     // ---- Full Resolution AO ----
-    // Reinterleaved AO (R8_UNORM, full res)
-    VkImage m_fullAOImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_fullAOMemory = VK_NULL_HANDLE;
-    VkImageView m_fullAOView = VK_NULL_HANDLE;
-
-    // Blurred AO (R8_UNORM, full res) — final output
-    VkImage m_blurredAOImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_blurredAOMemory = VK_NULL_HANDLE;
-    VkImageView m_blurredAOView = VK_NULL_HANDLE;
+    std::unique_ptr<RHITexture> m_fullAOTex;             // R8_UNORM, full res
+    std::unique_ptr<RHITexture> m_blurredAOTex;          // R8_UNORM, full res — final output
 
     // ---- Samplers ----
-    VkSampler m_aoSampler = VK_NULL_HANDLE;           // clamp-to-edge for AO
-    VkSampler m_deinterleaveSampler = VK_NULL_HANDLE;  // clamp-to-edge for deinterleaved
+    std::unique_ptr<RHISampler> m_aoSampler;
+    std::unique_ptr<RHISampler> m_deinterleaveSampler;
 
-    // ---- Deinterleave Pipeline ----
-    VkPipelineLayout m_deinterleavePipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_deinterleavePipeline = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_deinterleaveDescSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_deinterleaveDescPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_deinterleaveDescSet = VK_NULL_HANDLE;
+    // ---- Deinterleave (Compute) ----
+    std::unique_ptr<RHIBindingLayout> m_deinterleaveLayout;
+    std::unique_ptr<RHIBindingGroup>  m_deinterleaveGroup;
+    std::unique_ptr<RHIPipeline>      m_deinterleavePipeline;
 
-    // ---- SSAO Pipeline ----
-    VkRenderPass m_ssaoRenderPass = VK_NULL_HANDLE;
-    std::array<VkFramebuffer, NUM_LAYERS> m_ssaoFramebuffers = {};
-    VkPipelineLayout m_ssaoPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_ssaoPipeline = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_ssaoDescSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_ssaoDescPool = VK_NULL_HANDLE;
+    // ---- SSAO (Graphics, per-layer render pass) ----
+    std::unique_ptr<RHIRenderPass>  m_ssaoRenderPass;
+    std::array<std::unique_ptr<RHIFramebuffer>, NUM_LAYERS> m_ssaoFramebuffers;
+    std::unique_ptr<RHIBindingLayout> m_ssaoLayout;
+    std::unique_ptr<RHIPipeline>      m_ssaoPipeline;
 
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> m_ssaoDescSets = {};
-    std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOs = {};
-    std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOMemory = {};
-    std::array<void*, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOMapped = {};
+    std::array<std::unique_ptr<RHIBuffer>, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOs;
+    std::array<std::unique_ptr<RHIBindingGroup>, MAX_FRAMES_IN_FLIGHT> m_ssaoGroups;
 
-    // ---- Reinterleave Pipeline ----
-    VkPipelineLayout m_reinterleavePipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_reinterleavePipeline = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_reinterleaveDescSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_reinterleaveDescPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_reinterleaveDescSet = VK_NULL_HANDLE;
+    // ---- Reinterleave (Compute) ----
+    std::unique_ptr<RHIBindingLayout> m_reinterleaveLayout;
+    std::unique_ptr<RHIBindingGroup>  m_reinterleaveGroup;
+    std::unique_ptr<RHIPipeline>      m_reinterleavePipeline;
 
-    // ---- Blur Pipeline ----
-    VkRenderPass m_blurRenderPass = VK_NULL_HANDLE;
-    VkFramebuffer m_blurFramebuffer = VK_NULL_HANDLE;
-    VkPipelineLayout m_blurPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_blurPipeline = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_blurDescSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_blurDescPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_blurDescSet = VK_NULL_HANDLE;
+    // ---- Blur (Graphics, fullscreen) ----
+    std::unique_ptr<RHIRenderPass>    m_blurRenderPass;
+    std::unique_ptr<RHIFramebuffer>   m_blurFramebuffer;
+    std::unique_ptr<RHIBindingLayout> m_blurLayout;
+    std::unique_ptr<RHIBindingGroup>  m_blurGroup;
+    std::unique_ptr<RHIPipeline>      m_blurPipeline;
 };

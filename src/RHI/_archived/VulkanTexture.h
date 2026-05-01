@@ -5,6 +5,9 @@
 #include <string>
 
 class VulkanDevice;
+class RHIDevice;
+class RHITexture;
+class RHISampler;
 
 class VulkanTexture {
 public:
@@ -35,6 +38,11 @@ public:
     
     uint32_t getWidth() const { return width; }
     uint32_t getHeight() const { return height; }
+    
+    // RHI accessors (lazy-created non-owning wrappers)
+    void setRHIDevice(RHIDevice* device) const { rhiDevice_ = device; }
+    RHITexture* getRHITexture() const;
+    RHISampler* getRHISampler() const;
     
     // 静态工厂方法：创建默认纹理
     static std::unique_ptr<VulkanTexture> createDefaultTextureStatic(
@@ -69,4 +77,9 @@ private:
     
     uint32_t width = 0;
     uint32_t height = 0;
+    
+    // RHI wrappers (lazy, non-owning)
+    mutable RHIDevice* rhiDevice_ = nullptr;
+    mutable std::unique_ptr<RHITexture> rhiTexture_;
+    mutable std::unique_ptr<RHISampler> rhiSampler_;
 };
