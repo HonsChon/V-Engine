@@ -408,13 +408,14 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
 // ============================================================
 
 void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Water Scene Rendering", 0.2f, 0.6f, 0.9f, 1.0f);
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Deferred Pipeline", 0.2f, 0.6f, 0.9f, 1.0f);
 
     auto dExtent = m_swapChain->getExtent();
     uint32_t w = dExtent.width;
     uint32_t h = dExtent.height;
 
-    // === Pass 1: GBuffer (Pure RHI) ===
+    // === Pass 1: GBuffer ===
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "GBuffer Pass", 0.4f, 0.8f, 0.2f, 1.0f);
     if (m_gbuffer && m_scene) {
         auto rhiCmdGBuffer = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
         m_gbuffer->beginRenderPass(rhiCmdGBuffer.get());
@@ -425,8 +426,10 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
         }
         m_gbuffer->endRenderPass(rhiCmdGBuffer.get());
     }
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
-    // === Pass 1.5: Blit Albedo → sceneColorTexture (Pure RHI) ===
+    // === Pass 1.5: Blit Albedo → SceneColor ===
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Blit Albedo -> SceneColor", 0.9f, 0.7f, 0.2f, 1.0f);
     if (m_gbuffer && m_sceneColorTexture) {
         auto rhiCmdBlit = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
 
@@ -458,8 +461,10 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
             RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
             RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
     }
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
-    // === Pass 1.8: SSAO (Pure RHI) ===
+    // === Pass 1.8: SSAO ===
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "SSAO Pass", 0.6f, 0.3f, 0.8f, 1.0f);
     if (m_ssaoPass && m_gbuffer) {
         if (m_settings.enableSSAO) {
             auto rhiCmdSSAO = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
@@ -470,18 +475,20 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
             glm::mat4 view = m_camera ? m_camera->getViewMatrix() : glm::mat4(1.0f);
             m_ssaoPass->execute(rhiCmdSSAO.get(), m_gbuffer.get(), frameIndex, projection, view);
         }
-        // When SSAO is disabled, the blurred AO texture stays at its initial cleared state
-        // (white = no occlusion). The Lighting pass should handle this gracefully.
     }
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
-    // === Pass 2: SSR (Pure RHI) ===
+    // === Pass 2: SSR ===
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "SSR Pass", 0.2f, 0.8f, 0.8f, 1.0f);
     if (m_ssrPass && m_gbuffer && m_sceneColorTexture) {
         auto rhiCmdSSR = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
         m_ssrPass->execute(rhiCmdSSR.get(), m_gbuffer.get(),
             m_sceneColorTexture.get(), m_sceneColorSampler.get(), frameIndex);
     }
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
-    // === Pass 3: Final — render to swapchain (Pure RHI) ===
+    // === Pass 3: Final Composition (Swapchain RenderPass) ===
+    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Final Composition", 0.9f, 0.4f, 0.1f, 1.0f);
     {
         auto rhiCmdFinal = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
         std::vector<RHIClearValue> clears = {
@@ -493,17 +500,19 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
             m_swapChain->getRHIFramebuffer(imageIndex),
             clears);
 
-        // Deferred lighting (Pure RHI)
+        // Deferred Lighting
+        m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Lighting Pass", 1.0f, 0.9f, 0.3f, 1.0f);
         if (m_lightingPass && m_gbuffer) {
             m_lightingPass->render(rhiCmdFinal.get(), frameIndex);
         }
+        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
         // Water
+        m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
         if (m_waterPass) {
             m_waterPass->render(rhiCmdFinal.get(), frameIndex);
         }
-
-        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd)); // end Water Scene Rendering
+        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
 
         // UI
         m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
@@ -513,6 +522,9 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
 
         rhiCmdFinal->endRenderPass();
     }
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd)); // end Final Composition
+
+    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd)); // end Deferred Pipeline
 }
 
 // ============================================================

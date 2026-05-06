@@ -285,7 +285,6 @@ set(PASSES_SOURCES
 
 set(PASSES_HEADERS
     src/renderer/passes/RenderPassBase.h
-    src/renderer/passes/RenderContext.h
     src/renderer/passes/GBufferPass.h
     src/renderer/passes/SSRPass.h
     src/renderer/passes/WaterPass.h
