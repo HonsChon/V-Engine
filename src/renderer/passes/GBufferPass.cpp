@@ -360,11 +360,12 @@ void GBufferPass::updateMaterialTextures(MaterialDescriptor* material,
 // =============================================================================
 
 void GBufferPass::beginRenderPass(RHICommandBuffer* cmd) {
-    std::vector<RHIClearValue> clearValues(4);
-    clearValues[0].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Position
-    clearValues[1].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Normal
-    clearValues[2].color = { 0.0f, 0.0f, 0.0f, 0.0f };     // Albedo
-    clearValues[3].depthStencil = { 1.0f, 0 };               // Depth
+    std::vector<RHIClearValue> clearValues = {
+        RHIClearValue::Color(0.0f, 0.0f, 0.0f, 0.0f),      // Position
+        RHIClearValue::Color(0.0f, 0.0f, 0.0f, 0.0f),      // Normal
+        RHIClearValue::Color(0.0f, 0.0f, 0.0f, 0.0f),      // Albedo
+        RHIClearValue::DepthStencil(1.0f, 0)                 // Depth
+    };
 
     cmd->beginRenderPass(renderPass_.get(), framebuffer_.get(), clearValues);
     cmd->setViewport(0, 0, static_cast<float>(width_), static_cast<float>(height_));

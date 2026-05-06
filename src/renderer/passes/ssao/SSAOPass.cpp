@@ -184,7 +184,7 @@ void SSAOPass::createAOTextures() {
     blurDesc.width = width;
     blurDesc.height = height;
     blurDesc.format = RHIFormat::R8_UNORM;
-    blurDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+    blurDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
     m_blurredAOTex = rhiDevice_->createTexture(blurDesc);
 }
 

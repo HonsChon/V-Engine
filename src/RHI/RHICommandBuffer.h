@@ -87,6 +87,9 @@ public:
                                 RHIPipelineStage srcStage, RHIPipelineStage dstStage,
                                 RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) = 0;
 
+    /// Clear a color image (must be in TransferDst layout)
+    virtual void clearColorImage(RHITexture* texture, float r, float g, float b, float a) = 0;
+
     // Non-copyable
     RHICommandBuffer(const RHICommandBuffer&) = delete;
     RHICommandBuffer& operator=(const RHICommandBuffer&) = delete;

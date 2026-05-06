@@ -283,3 +283,24 @@ void VulkanRHICommandBuffer::bufferBarrier(RHIBuffer* buffer, uint64_t size,
                          toVkPipelineStage(srcStage), toVkPipelineStage(dstStage),
                          0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
+
+void VulkanRHICommandBuffer::clearColorImage(RHITexture* texture, float r, float g, float b, float a) {
+    auto* nativeTex = dynamic_cast<IVulkanNativeTexture*>(texture);
+
+    VkClearColorValue clearColor{};
+    clearColor.float32[0] = r;
+    clearColor.float32[1] = g;
+    clearColor.float32[2] = b;
+    clearColor.float32[3] = a;
+
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = texture->getMipLevels();
+    range.baseArrayLayer = 0;
+    range.layerCount = texture->getArrayLayers();
+
+    vkCmdClearColorImage(cmd_, nativeTex->getVkImage(),
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         &clearColor, 1, &range);
+}

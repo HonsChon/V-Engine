@@ -81,6 +81,7 @@ public:
     void bufferBarrier(RHIBuffer* buffer, uint64_t size,
                        RHIPipelineStage srcStage, RHIPipelineStage dstStage,
                        RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) override;
+    void clearColorImage(RHITexture* texture, float r, float g, float b, float a) override;
 
 private:
     VulkanRHIDevice* device_;

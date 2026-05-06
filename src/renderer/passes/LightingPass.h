@@ -99,6 +99,6 @@ private:
     std::unique_ptr<RHIBuffer> quadIndexBuffer_;
 
     // 光照参数
-    glm::vec3 ambientColor = glm::vec3(0.03f);
+    glm::vec3 ambientColor = glm::vec3(0.3f);
     float ambientIntensity = 1.0f;
 };

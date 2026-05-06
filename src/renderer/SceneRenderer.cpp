@@ -240,12 +240,8 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     proj[1][1] *= -1;
     glm::vec3 camPos = m_camera->getPosition();
 
-    // 光源（绕 Y 轴旋转）
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(now - startTime).count();
-    float lightAngle = time * 0.5f;
-    glm::vec3 lightPos(5.0f * cos(lightAngle), 3.0f, 5.0f * sin(lightAngle));
+    // 光源（固定位置）
+    glm::vec3 lightPos(5.0f, 3.0f, 5.0f);
 
     // ForwardPass UBO
     if (m_forwardPass) {
@@ -474,6 +470,19 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
             projection[1][1] *= -1;
             glm::mat4 view = m_camera ? m_camera->getViewMatrix() : glm::mat4(1.0f);
             m_ssaoPass->execute(rhiCmdSSAO.get(), m_gbuffer.get(), frameIndex, projection, view);
+        } else {
+            // SSAO 关闭：清空 AO 纹理为白色（1.0 = 无遮蔽）
+            auto rhiCmdClear = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
+            rhiCmdClear->transitionImageLayout(
+                m_ssaoPass->getOutputAOTexture(),
+                RHIImageLayout::ShaderReadOnly, RHIImageLayout::TransferDst,
+                RHIPipelineStage::FragmentShader, RHIPipelineStage::Transfer);
+            rhiCmdClear->clearColorImage(
+                m_ssaoPass->getOutputAOTexture(), 1.0f, 1.0f, 1.0f, 1.0f);
+            rhiCmdClear->transitionImageLayout(
+                m_ssaoPass->getOutputAOTexture(),
+                RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
+                RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
         }
     }
     m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
