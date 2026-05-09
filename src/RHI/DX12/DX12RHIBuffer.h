@@ -18,7 +18,4 @@ public:
     RHIBufferUsage getUsage() const override { return desc_.usage; }
     RHIMemoryUsage getMemoryUsage() const override { return desc_.memoryUsage; }
 
-
-
-
 }

@@ -173,6 +173,16 @@ if(NOT glm_FOUND)
 endif()
 
 # ============================================================
+# DirectX-Headers 配置 (Microsoft 开源 DX12 头文件)
+# ============================================================
+if(WIN32)
+    if(NOT TARGET DirectX-Headers AND NOT TARGET Microsoft::DirectX-Headers)
+        add_subdirectory(src/third_party/DirectX-Headers)
+    endif()
+    message(STATUS "DirectX-Headers enabled for DX12 support")
+endif()
+
+# ============================================================
 # Include directories
 # ============================================================
 include_directories(${Vulkan_INCLUDE_DIRS})
@@ -502,6 +512,10 @@ if(WIN32)
         WIN32_LEAN_AND_MEAN
         NOMINMAX
     )
+
+    # DirectX 12 支持 (通过 DirectX-Headers 开源项目)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX-Guids)
+    target_link_libraries(${PROJECT_NAME} PRIVATE d3d12 dxgi dxguid)
     
     # Visual Studio 特定设置
     if(MSVC)
