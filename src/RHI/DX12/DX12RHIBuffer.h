@@ -1,5 +1,6 @@
 #pragma once
 
+
 #include "RHIBuffer.h"
 
 class DX12RHIDevice;
@@ -17,5 +18,9 @@ public:
     uint64_t       getSize() const override { return desc_.size; }
     RHIBufferUsage getUsage() const override { return desc_.usage; }
     RHIMemoryUsage getMemoryUsage() const override { return desc_.memoryUsage; }
+
+private:
+    DX12RHIDevice* device_;
+    RHIBufferDesc  desc_;
 
 }

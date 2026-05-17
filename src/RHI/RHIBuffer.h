@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <string>
 
 // =============================================================================
 // RHI Buffer Description
@@ -13,6 +14,26 @@ struct RHIBufferDesc {
     uint64_t       size        = 0;
     RHIBufferUsage usage       = RHIBufferUsage::None;
     RHIMemoryUsage memoryUsage = RHIMemoryUsage::GPUOnly;
+
+    // Structured buffer stride (0 = not structured)
+    uint32_t       structStride = 0;
+
+    // Format for typed buffer views (e.g., R32_UINT for index buffer SRV)
+    RHIFormat      format      = RHIFormat::Undefined;
+
+    // Initial resource state (for backends that require explicit state tracking like DX12)
+    RHIImageLayout initialState = RHIImageLayout::Undefined;
+
+    // Debug name (useful for RenderDoc / PIX / validation layer)
+    std::string    debugName;
+
+    // --- Builder-style setters for convenience ---
+    RHIBufferDesc& setSize(uint64_t value)          { size = value; return *this; }
+    RHIBufferDesc& setUsage(RHIBufferUsage value)   { usage = value; return *this; }
+    RHIBufferDesc& setMemoryUsage(RHIMemoryUsage v) { memoryUsage = v; return *this; }
+    RHIBufferDesc& setStructStride(uint32_t value)  { structStride = value; return *this; }
+    RHIBufferDesc& setFormat(RHIFormat value)        { format = value; return *this; }
+    RHIBufferDesc& setDebugName(const std::string& name) { debugName = name; return *this; }
 };
 
 // =============================================================================
