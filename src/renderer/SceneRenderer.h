@@ -196,8 +196,8 @@ private:
     std::unique_ptr<Nanite::NaniteManager> m_naniteManager;
 
     // ========== 场景颜色纹理（SSR 采样）==========
-    std::unique_ptr<RHITexture> m_sceneColorTexture;
-    std::unique_ptr<RHISampler> m_sceneColorSampler;
+    std::shared_ptr<RHITexture> m_sceneColorTexture;
+    std::shared_ptr<RHISampler> m_sceneColorSampler;
 
     // ========== 状态 ==========
     RenderSettings m_settings;

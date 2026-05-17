@@ -83,13 +83,13 @@ private:
 
     SSRParams params;
 
-    std::unique_ptr<RHITexture>       outputTexture_;
-    std::unique_ptr<RHISampler>       outputSampler_;
-    std::unique_ptr<RHIRenderPass>    renderPass_;
-    std::unique_ptr<RHIFramebuffer>   framebuffer_;
-    std::unique_ptr<RHIPipeline>      pipeline_;
-    std::unique_ptr<RHIBindingLayout> bindingLayout_;
+    std::shared_ptr<RHITexture>       outputTexture_;
+    std::shared_ptr<RHISampler>       outputSampler_;
+    std::shared_ptr<RHIRenderPass>    renderPass_;
+    std::shared_ptr<RHIFramebuffer>   framebuffer_;
+    std::shared_ptr<RHIPipeline>      pipeline_;
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 
-    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
-    std::vector<std::unique_ptr<RHIBindingGroup>> bindingGroups_;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> bindingGroups_;
 };

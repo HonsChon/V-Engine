@@ -17,8 +17,8 @@ namespace VulkanEngine {
  * 持有 RHI 纹理和采样器 — 无 Vulkan 依赖
  */
 struct GPUTexture {
-    std::unique_ptr<RHITexture> texture;
-    std::unique_ptr<RHISampler> sampler;
+    std::shared_ptr<RHITexture> texture;
+    std::shared_ptr<RHISampler> sampler;
     uint32_t width = 0;
     uint32_t height = 0;
     

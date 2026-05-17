@@ -89,50 +89,50 @@ VulkanRHIDevice::~VulkanRHIDevice() {
 #include "VulkanRHIRenderPass.h"
 #include "VulkanRHICommandBuffer.h"
 
-std::unique_ptr<RHIBuffer> VulkanRHIDevice::createBuffer(const RHIBufferDesc& desc) {
-    return std::make_unique<VulkanRHIBuffer>(this, desc);
+std::shared_ptr<RHIBuffer> VulkanRHIDevice::createBuffer(const RHIBufferDesc& desc) {
+    return std::make_shared<VulkanRHIBuffer>(this, desc);
 }
 
-std::unique_ptr<RHITexture> VulkanRHIDevice::createTexture(const RHITextureDesc& desc) {
-    return std::make_unique<VulkanRHITexture>(this, desc);
+std::shared_ptr<RHITexture> VulkanRHIDevice::createTexture(const RHITextureDesc& desc) {
+    return std::make_shared<VulkanRHITexture>(this, desc);
 }
 
-std::unique_ptr<RHISampler> VulkanRHIDevice::createSampler(const RHISamplerDesc& desc) {
-    return std::make_unique<VulkanRHISampler>(this, desc);
+std::shared_ptr<RHISampler> VulkanRHIDevice::createSampler(const RHISamplerDesc& desc) {
+    return std::make_shared<VulkanRHISampler>(this, desc);
 }
 
-std::unique_ptr<RHIShader> VulkanRHIDevice::createShader(RHIShaderStage stage, const std::string& filePath) {
-    return std::make_unique<VulkanRHIShader>(this, stage, filePath);
+std::shared_ptr<RHIShader> VulkanRHIDevice::createShader(RHIShaderStage stage, const std::string& filePath) {
+    return std::make_shared<VulkanRHIShader>(this, stage, filePath);
 }
 
-std::unique_ptr<RHIBindingLayout> VulkanRHIDevice::createBindingLayout(const RHIBindingLayoutDesc& desc) {
-    return std::make_unique<VulkanRHIBindingLayout>(this, desc);
+std::shared_ptr<RHIBindingLayout> VulkanRHIDevice::createBindingLayout(const RHIBindingLayoutDesc& desc) {
+    return std::make_shared<VulkanRHIBindingLayout>(this, desc);
 }
 
-std::unique_ptr<RHIBindingGroup> VulkanRHIDevice::createBindingGroup(
+std::shared_ptr<RHIBindingGroup> VulkanRHIDevice::createBindingGroup(
     RHIBindingLayout* layout, const RHIBindingGroupDesc& desc) {
     auto* vkLayout = static_cast<VulkanRHIBindingLayout*>(layout);
-    return std::make_unique<VulkanRHIBindingGroup>(this, vkLayout, desc);
+    return std::make_shared<VulkanRHIBindingGroup>(this, vkLayout, desc);
 }
 
-std::unique_ptr<RHIGraphicsPipelineBuilder> VulkanRHIDevice::createGraphicsPipelineBuilder() {
-    return std::make_unique<VulkanGraphicsPipelineBuilder>(this);
+std::shared_ptr<RHIGraphicsPipelineBuilder> VulkanRHIDevice::createGraphicsPipelineBuilder() {
+    return std::make_shared<VulkanGraphicsPipelineBuilder>(this);
 }
 
-std::unique_ptr<RHIComputePipelineBuilder> VulkanRHIDevice::createComputePipelineBuilder() {
-    return std::make_unique<VulkanComputePipelineBuilder>(this);
+std::shared_ptr<RHIComputePipelineBuilder> VulkanRHIDevice::createComputePipelineBuilder() {
+    return std::make_shared<VulkanComputePipelineBuilder>(this);
 }
 
-std::unique_ptr<RHIRenderPass> VulkanRHIDevice::createRenderPass(const RHIRenderPassDesc& desc) {
-    return std::make_unique<VulkanRHIRenderPass>(this, desc);
+std::shared_ptr<RHIRenderPass> VulkanRHIDevice::createRenderPass(const RHIRenderPassDesc& desc) {
+    return std::make_shared<VulkanRHIRenderPass>(this, desc);
 }
 
-std::unique_ptr<RHIFramebuffer> VulkanRHIDevice::createFramebuffer(const RHIFramebufferDesc& desc) {
-    return std::make_unique<VulkanRHIFramebuffer>(this, desc);
+std::shared_ptr<RHIFramebuffer> VulkanRHIDevice::createFramebuffer(const RHIFramebufferDesc& desc) {
+    return std::make_shared<VulkanRHIFramebuffer>(this, desc);
 }
 
-std::unique_ptr<RHIRenderPass> VulkanRHIDevice::wrapExternalRenderPass(void* nativeHandle) {
-    return std::make_unique<VulkanRHIRenderPass>(static_cast<VkRenderPass>(nativeHandle));
+std::shared_ptr<RHIRenderPass> VulkanRHIDevice::wrapExternalRenderPass(void* nativeHandle) {
+    return std::make_shared<VulkanRHIRenderPass>(static_cast<VkRenderPass>(nativeHandle));
 }
 
 // =============================================================================
@@ -205,31 +205,31 @@ private:
 
 } // anonymous namespace
 
-std::unique_ptr<RHIBuffer> VulkanRHIDevice::wrapExternalBuffer(void* nativeBuffer, uint64_t size) {
-    return std::make_unique<VulkanExternalBuffer>(static_cast<VkBuffer>(nativeBuffer), size);
+std::shared_ptr<RHIBuffer> VulkanRHIDevice::wrapExternalBuffer(void* nativeBuffer, uint64_t size) {
+    return std::make_shared<VulkanExternalBuffer>(static_cast<VkBuffer>(nativeBuffer), size);
 }
 
-std::unique_ptr<RHITexture> VulkanRHIDevice::wrapExternalTexture(void* nativeImage, void* nativeImageView,
+std::shared_ptr<RHITexture> VulkanRHIDevice::wrapExternalTexture(void* nativeImage, void* nativeImageView,
                                                                    uint32_t width, uint32_t height,
                                                                    RHIFormat format) {
-    return std::make_unique<VulkanExternalTexture>(
+    return std::make_shared<VulkanExternalTexture>(
         static_cast<VkImage>(nativeImage),
         static_cast<VkImageView>(nativeImageView),
         width, height, format);
 }
 
-std::unique_ptr<RHISampler> VulkanRHIDevice::wrapExternalSampler(void* nativeSampler) {
-    return std::make_unique<VulkanExternalSampler>(static_cast<VkSampler>(nativeSampler));
+std::shared_ptr<RHISampler> VulkanRHIDevice::wrapExternalSampler(void* nativeSampler) {
+    return std::make_shared<VulkanExternalSampler>(static_cast<VkSampler>(nativeSampler));
 }
 
-std::unique_ptr<RHIBindingGroup> VulkanRHIDevice::allocateBindingGroup(RHIBindingLayout* layout) {
+std::shared_ptr<RHIBindingGroup> VulkanRHIDevice::allocateBindingGroup(RHIBindingLayout* layout) {
     // Create an empty binding group (no initial writes)
     RHIBindingGroupDesc emptyDesc;
     return createBindingGroup(layout, emptyDesc);
 }
 
-std::unique_ptr<RHICommandBuffer> VulkanRHIDevice::wrapCommandBuffer(void* nativeCmd) {
-    return std::make_unique<VulkanRHICommandBuffer>(this, static_cast<VkCommandBuffer>(nativeCmd));
+std::shared_ptr<RHICommandBuffer> VulkanRHIDevice::wrapCommandBuffer(void* nativeCmd) {
+    return std::make_shared<VulkanRHICommandBuffer>(this, static_cast<VkCommandBuffer>(nativeCmd));
 }
 
 void VulkanRHIDevice::waitIdle() {
@@ -303,8 +303,8 @@ void VulkanRHIDevice::endSingleTimeCommands(void* commandBuffer) {
 
 #include "VulkanRHISwapChain.h"
 
-std::unique_ptr<RHISwapChain> VulkanRHIDevice::createSwapChain(uint32_t width, uint32_t height) {
-    return std::make_unique<VulkanRHISwapChain>(this, width, height);
+std::shared_ptr<RHISwapChain> VulkanRHIDevice::createSwapChain(uint32_t width, uint32_t height) {
+    return std::make_shared<VulkanRHISwapChain>(this, width, height);
 }
 
 // =============================================================================

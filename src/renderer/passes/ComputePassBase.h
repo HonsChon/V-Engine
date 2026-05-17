@@ -42,6 +42,6 @@ protected:
     std::string name;
     
     // RHI resources
-    std::unique_ptr<RHIPipeline>      pipeline_;
-    std::unique_ptr<RHIBindingLayout> bindingLayout_;
+    std::shared_ptr<RHIPipeline>      pipeline_;
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 };

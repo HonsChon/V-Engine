@@ -20,8 +20,8 @@ namespace VulkanEngine {
  */
 struct GPUMesh {
     std::shared_ptr<Mesh> mesh;
-    std::unique_ptr<RHIBuffer> vertexBuffer;
-    std::unique_ptr<RHIBuffer> indexBuffer;
+    std::shared_ptr<RHIBuffer> vertexBuffer;
+    std::shared_ptr<RHIBuffer> indexBuffer;
     
     bool isValid() const {
         return mesh && vertexBuffer && indexBuffer;

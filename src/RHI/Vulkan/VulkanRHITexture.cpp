@@ -162,9 +162,9 @@ void VulkanRHITexture::uploadPixels(const void* data, uint64_t dataSize) {
     vkFreeMemory(vkDev, stagingMemory, nullptr);
 }
 
-std::unique_ptr<RHITexture> VulkanRHITexture::createLayerView(uint32_t layer) {
+std::shared_ptr<RHITexture> VulkanRHITexture::createLayerView(uint32_t layer) {
     if (layer >= desc_.arrayLayers) return nullptr;
-    return std::make_unique<VulkanRHITextureLayerView>(device_, this, layer);
+    return std::make_shared<VulkanRHITextureLayerView>(device_, this, layer);
 }
 
 // =============================================================================

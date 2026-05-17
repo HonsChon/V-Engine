@@ -99,7 +99,7 @@ public:
     virtual RHIGraphicsPipelineBuilder& setRenderPass(RHIRenderPass* renderPass, uint32_t subpass = 0) = 0;
 
     // Build!
-    virtual std::unique_ptr<RHIPipeline> build() = 0;
+    virtual std::shared_ptr<RHIPipeline> build() = 0;
 
 protected:
     RHIGraphicsPipelineBuilder() = default;
@@ -117,7 +117,7 @@ public:
     virtual RHIComputePipelineBuilder& addBindingLayout(RHIBindingLayout* layout) = 0;
     virtual RHIComputePipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) = 0;
 
-    virtual std::unique_ptr<RHIPipeline> build() = 0;
+    virtual std::shared_ptr<RHIPipeline> build() = 0;
 
 protected:
     RHIComputePipelineBuilder() = default;

@@ -73,19 +73,19 @@ private:
     uint32_t m_clusterCount_ = 0;
 
     // Internal RHI buffers
-    std::unique_ptr<RHIBuffer> m_uniformBuffer_;
-    std::unique_ptr<RHIBuffer> m_dummyStorageBuffer_;
-    std::unique_ptr<RHIBuffer> m_visibleIndicesBuffer_;
-    std::unique_ptr<RHIBuffer> m_counterBuffer_;
-    std::unique_ptr<RHIBuffer> m_selectionStateBuffer_;
+    std::shared_ptr<RHIBuffer> m_uniformBuffer_;
+    std::shared_ptr<RHIBuffer> m_dummyStorageBuffer_;
+    std::shared_ptr<RHIBuffer> m_visibleIndicesBuffer_;
+    std::shared_ptr<RHIBuffer> m_counterBuffer_;
+    std::shared_ptr<RHIBuffer> m_selectionStateBuffer_;
 
     // Double-buffered readback
     static constexpr uint32_t READBACK_BUFFER_COUNT = 2;
-    std::unique_ptr<RHIBuffer> m_readbackBuffers_[READBACK_BUFFER_COUNT];
+    std::shared_ptr<RHIBuffer> m_readbackBuffers_[READBACK_BUFFER_COUNT];
     uint32_t m_currentReadbackIndex_ = 0;
 
     // Binding group
-    std::unique_ptr<RHIBindingGroup> m_bindingGroup_;
+    std::shared_ptr<RHIBindingGroup> m_bindingGroup_;
 
     // State
     bool m_initialized = false;

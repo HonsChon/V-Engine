@@ -98,12 +98,12 @@ private:
     float ssrThickness = 0.03f;
 
     std::unique_ptr<Mesh> waterMesh;
-    std::unique_ptr<RHIBuffer> vertexBuffer_;
-    std::unique_ptr<RHIBuffer> indexBuffer_;
+    std::shared_ptr<RHIBuffer> vertexBuffer_;
+    std::shared_ptr<RHIBuffer> indexBuffer_;
     uint32_t indexCount_ = 0;
 
-    std::unique_ptr<RHIPipeline>       pipeline_;
-    std::unique_ptr<RHIBindingLayout>  bindingLayout_;
-    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
-    std::vector<std::unique_ptr<RHIBindingGroup>> bindingGroups_;
+    std::shared_ptr<RHIPipeline>       pipeline_;
+    std::shared_ptr<RHIBindingLayout>  bindingLayout_;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> bindingGroups_;
 };

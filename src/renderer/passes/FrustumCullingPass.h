@@ -77,16 +77,16 @@ private:
     void readbackCounter();
 
     // RHI buffers
-    std::unique_ptr<RHIBuffer> instanceBuffer_;
-    std::unique_ptr<RHIBuffer> uniformBuffer_;
-    std::unique_ptr<RHIBuffer> visibleIndicesBuffer_;
-    std::unique_ptr<RHIBuffer> indirectDrawBuffer_;
-    std::unique_ptr<RHIBuffer> counterBuffer_;
-    std::unique_ptr<RHIBuffer> counterReadbackBuffer_;
-    std::unique_ptr<RHIBuffer> visibleIndicesReadbackBuffer_;
+    std::shared_ptr<RHIBuffer> instanceBuffer_;
+    std::shared_ptr<RHIBuffer> uniformBuffer_;
+    std::shared_ptr<RHIBuffer> visibleIndicesBuffer_;
+    std::shared_ptr<RHIBuffer> indirectDrawBuffer_;
+    std::shared_ptr<RHIBuffer> counterBuffer_;
+    std::shared_ptr<RHIBuffer> counterReadbackBuffer_;
+    std::shared_ptr<RHIBuffer> visibleIndicesReadbackBuffer_;
 
     // Binding group (replaces VkDescriptorSet)
-    std::unique_ptr<RHIBindingGroup> bindingGroup_;
+    std::shared_ptr<RHIBindingGroup> bindingGroup_;
 
     uint32_t maxInstances_ = 0;
     uint32_t currentInstanceCount_ = 0;

@@ -143,45 +143,45 @@ private:
     std::array<float, NUM_LAYERS> m_layerRotations;
 
     // ---- Deinterleaved Textures (16-layer arrays) ----
-    std::unique_ptr<RHITexture> m_deinterleavedPosTex;   // R16G16B16A16_SFLOAT, 16 layers
-    std::unique_ptr<RHITexture> m_deinterleavedNorTex;   // R16G16B16A16_SFLOAT, 16 layers
+    std::shared_ptr<RHITexture> m_deinterleavedPosTex;   // R16G16B16A16_SFLOAT, 16 layers
+    std::shared_ptr<RHITexture> m_deinterleavedNorTex;   // R16G16B16A16_SFLOAT, 16 layers
 
     // ---- AO Texture Array ----
-    std::unique_ptr<RHITexture> m_aoArrayTex;            // R8_UNORM, 16 layers
-    std::array<std::unique_ptr<RHITexture>, NUM_LAYERS> m_aoLayerViews; // per-layer views
+    std::shared_ptr<RHITexture> m_aoArrayTex;            // R8_UNORM, 16 layers
+    std::array<std::shared_ptr<RHITexture>, NUM_LAYERS> m_aoLayerViews; // per-layer views
 
     // ---- Full Resolution AO ----
-    std::unique_ptr<RHITexture> m_fullAOTex;             // R8_UNORM, full res
-    std::unique_ptr<RHITexture> m_blurredAOTex;          // R8_UNORM, full res — final output
+    std::shared_ptr<RHITexture> m_fullAOTex;             // R8_UNORM, full res
+    std::shared_ptr<RHITexture> m_blurredAOTex;          // R8_UNORM, full res — final output
 
     // ---- Samplers ----
-    std::unique_ptr<RHISampler> m_aoSampler;
-    std::unique_ptr<RHISampler> m_deinterleaveSampler;
+    std::shared_ptr<RHISampler> m_aoSampler;
+    std::shared_ptr<RHISampler> m_deinterleaveSampler;
 
     // ---- Deinterleave (Compute) ----
-    std::unique_ptr<RHIBindingLayout> m_deinterleaveLayout;
-    std::unique_ptr<RHIBindingGroup>  m_deinterleaveGroup;
-    std::unique_ptr<RHIPipeline>      m_deinterleavePipeline;
+    std::shared_ptr<RHIBindingLayout> m_deinterleaveLayout;
+    std::shared_ptr<RHIBindingGroup>  m_deinterleaveGroup;
+    std::shared_ptr<RHIPipeline>      m_deinterleavePipeline;
 
     // ---- SSAO (Graphics, per-layer render pass) ----
-    std::unique_ptr<RHIRenderPass>  m_ssaoRenderPass;
-    std::array<std::unique_ptr<RHIFramebuffer>, NUM_LAYERS> m_ssaoFramebuffers;
-    std::unique_ptr<RHIBindingLayout> m_ssaoLayout;
-    std::unique_ptr<RHIPipeline>      m_ssaoPipeline;
+    std::shared_ptr<RHIRenderPass>  m_ssaoRenderPass;
+    std::array<std::shared_ptr<RHIFramebuffer>, NUM_LAYERS> m_ssaoFramebuffers;
+    std::shared_ptr<RHIBindingLayout> m_ssaoLayout;
+    std::shared_ptr<RHIPipeline>      m_ssaoPipeline;
 
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-    std::array<std::unique_ptr<RHIBuffer>, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOs;
-    std::array<std::unique_ptr<RHIBindingGroup>, MAX_FRAMES_IN_FLIGHT> m_ssaoGroups;
+    std::array<std::shared_ptr<RHIBuffer>, MAX_FRAMES_IN_FLIGHT> m_ssaoUBOs;
+    std::array<std::shared_ptr<RHIBindingGroup>, MAX_FRAMES_IN_FLIGHT> m_ssaoGroups;
 
     // ---- Reinterleave (Compute) ----
-    std::unique_ptr<RHIBindingLayout> m_reinterleaveLayout;
-    std::unique_ptr<RHIBindingGroup>  m_reinterleaveGroup;
-    std::unique_ptr<RHIPipeline>      m_reinterleavePipeline;
+    std::shared_ptr<RHIBindingLayout> m_reinterleaveLayout;
+    std::shared_ptr<RHIBindingGroup>  m_reinterleaveGroup;
+    std::shared_ptr<RHIPipeline>      m_reinterleavePipeline;
 
     // ---- Blur (Graphics, fullscreen) ----
-    std::unique_ptr<RHIRenderPass>    m_blurRenderPass;
-    std::unique_ptr<RHIFramebuffer>   m_blurFramebuffer;
-    std::unique_ptr<RHIBindingLayout> m_blurLayout;
-    std::unique_ptr<RHIBindingGroup>  m_blurGroup;
-    std::unique_ptr<RHIPipeline>      m_blurPipeline;
+    std::shared_ptr<RHIRenderPass>    m_blurRenderPass;
+    std::shared_ptr<RHIFramebuffer>   m_blurFramebuffer;
+    std::shared_ptr<RHIBindingLayout> m_blurLayout;
+    std::shared_ptr<RHIBindingGroup>  m_blurGroup;
+    std::shared_ptr<RHIPipeline>      m_blurPipeline;
 };

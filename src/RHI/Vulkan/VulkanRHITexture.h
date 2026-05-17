@@ -19,7 +19,7 @@ public:
     RHITextureUsage getUsage() const override { return desc_.usage; }
 
     void uploadPixels(const void* data, uint64_t dataSize) override;
-    std::unique_ptr<RHITexture> createLayerView(uint32_t layer) override;
+    std::shared_ptr<RHITexture> createLayerView(uint32_t layer) override;
 
     // IVulkanNativeTexture implementation
     VkImage        getVkImage() const override { return image_; }

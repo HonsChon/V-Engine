@@ -37,7 +37,7 @@ public:
     };
 
     struct MaterialDescriptor {
-        std::vector<std::unique_ptr<RHIBindingGroup>> groups;  // 每帧一个 BindingGroup (未来)
+        std::vector<std::shared_ptr<RHIBindingGroup>> groups;  // 每帧一个 BindingGroup (未来)
         bool valid = false;
     };
 
@@ -89,10 +89,10 @@ private:
     uint32_t height_;
     uint32_t maxFramesInFlight_;
 
-    std::unique_ptr<RHIPipeline> pipeline_;
-    std::unique_ptr<RHIBindingLayout> globalLayout_;
-    std::unique_ptr<RHIBindingLayout> materialLayout_;
-    std::vector<std::unique_ptr<RHIBindingGroup>> globalBindingGroups_;
-    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
+    std::shared_ptr<RHIPipeline> pipeline_;
+    std::shared_ptr<RHIBindingLayout> globalLayout_;
+    std::shared_ptr<RHIBindingLayout> materialLayout_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> globalBindingGroups_;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
     std::unordered_map<std::string, MaterialDescriptor> materialDescriptorCache_;
 };

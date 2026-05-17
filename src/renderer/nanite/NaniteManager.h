@@ -139,14 +139,14 @@ private:
     std::unordered_map<std::string, std::shared_ptr<ClusterizedMesh>> m_meshCache;
     
     // GPU 缓冲区 (Pure RHI)
-    std::unique_ptr<RHIBuffer> m_transformBuffer;
-    std::unique_ptr<RHIBuffer> m_uniformBuffer;
-    std::unique_ptr<RHIBuffer> m_visibleIndicesBuffer;
-    std::unique_ptr<RHIBuffer> m_counterBuffer;
-    std::unique_ptr<RHIBuffer> m_readbackBuffer;
+    std::shared_ptr<RHIBuffer> m_transformBuffer;
+    std::shared_ptr<RHIBuffer> m_uniformBuffer;
+    std::shared_ptr<RHIBuffer> m_visibleIndicesBuffer;
+    std::shared_ptr<RHIBuffer> m_counterBuffer;
+    std::shared_ptr<RHIBuffer> m_readbackBuffer;
     
     // RHI buffer for cluster data (used by ClusterCullingPass)
-    std::unique_ptr<RHIBuffer> m_clusterDataBufferRHI;
+    std::shared_ptr<RHIBuffer> m_clusterDataBufferRHI;
     
     // GPU Cluster Culling Pass
     std::unique_ptr<ClusterCullingPass> m_cullingPass;

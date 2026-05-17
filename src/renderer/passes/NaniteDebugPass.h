@@ -147,14 +147,14 @@ private:
     std::shared_ptr<Nanite::NaniteManager> m_naniteManager;
     
     // RHI resources
-    std::unique_ptr<RHIPipeline>       m_pipeline_;
-    std::unique_ptr<RHIBindingLayout>  m_bindingLayout_;
+    std::shared_ptr<RHIPipeline>       m_pipeline_;
+    std::shared_ptr<RHIBindingLayout>  m_bindingLayout_;
 
     // Per-frame UBOs (RHI)
-    std::vector<std::unique_ptr<RHIBuffer>> m_uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBuffer>> m_uniformBuffers_;
 
     // Binding groups (Pure RHI)
-    std::vector<std::unique_ptr<RHIBindingGroup>> m_bindingGroups_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> m_bindingGroups_;
     
     // 渲染数据结构
     struct ClusterRenderData {
@@ -174,8 +174,8 @@ private:
     std::vector<MeshRenderInfo> m_meshRenderInfos;
     
     // Vertex/Index buffers (RHI)
-    std::unique_ptr<RHIBuffer> m_vertexBuffer_;
-    std::unique_ptr<RHIBuffer> m_indexBuffer_;
+    std::shared_ptr<RHIBuffer> m_vertexBuffer_;
+    std::shared_ptr<RHIBuffer> m_indexBuffer_;
     
     uint32_t m_totalVertexCount = 0;
     uint32_t m_totalIndexCount = 0;

@@ -38,36 +38,36 @@ public:
     virtual ~RHIDevice() = default;
 
     // ---- Resource creation ----
-    virtual std::unique_ptr<RHIBuffer>    createBuffer(const RHIBufferDesc& desc) = 0;
-    virtual std::unique_ptr<RHITexture>   createTexture(const RHITextureDesc& desc) = 0;
-    virtual std::unique_ptr<RHISampler>   createSampler(const RHISamplerDesc& desc) = 0;
-    virtual std::unique_ptr<RHIShader>    createShader(RHIShaderStage stage, const std::string& filePath) = 0;
+    virtual std::shared_ptr<RHIBuffer>    createBuffer(const RHIBufferDesc& desc) = 0;
+    virtual std::shared_ptr<RHITexture>   createTexture(const RHITextureDesc& desc) = 0;
+    virtual std::shared_ptr<RHISampler>   createSampler(const RHISamplerDesc& desc) = 0;
+    virtual std::shared_ptr<RHIShader>    createShader(RHIShaderStage stage, const std::string& filePath) = 0;
 
     // ---- Descriptor / Binding ----
-    virtual std::unique_ptr<RHIBindingLayout> createBindingLayout(const RHIBindingLayoutDesc& desc) = 0;
-    virtual std::unique_ptr<RHIBindingGroup>  createBindingGroup(
+    virtual std::shared_ptr<RHIBindingLayout> createBindingLayout(const RHIBindingLayoutDesc& desc) = 0;
+    virtual std::shared_ptr<RHIBindingGroup>  createBindingGroup(
         RHIBindingLayout* layout, const RHIBindingGroupDesc& desc) = 0;
 
     // ---- Pipeline builders ----
-    virtual std::unique_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() = 0;
-    virtual std::unique_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() = 0;
+    virtual std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() = 0;
+    virtual std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() = 0;
 
     // ---- RenderPass / Framebuffer ----
-    virtual std::unique_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) = 0;
-    virtual std::unique_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) = 0;
+    virtual std::shared_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) = 0;
+    virtual std::shared_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) = 0;
 
     // ---- SwapChain factory ----
-    virtual std::unique_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) = 0;
+    virtual std::shared_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) = 0;
 
     // ---- Wrapping external resources ----
-    virtual std::unique_ptr<RHIRenderPass> wrapExternalRenderPass(void* nativeHandle) = 0;
-    virtual std::unique_ptr<RHIBuffer> wrapExternalBuffer(void* nativeBuffer, uint64_t size) = 0;
-    virtual std::unique_ptr<RHITexture> wrapExternalTexture(void* nativeImage, void* nativeImageView,
+    virtual std::shared_ptr<RHIRenderPass> wrapExternalRenderPass(void* nativeHandle) = 0;
+    virtual std::shared_ptr<RHIBuffer> wrapExternalBuffer(void* nativeBuffer, uint64_t size) = 0;
+    virtual std::shared_ptr<RHITexture> wrapExternalTexture(void* nativeImage, void* nativeImageView,
                                                              uint32_t width, uint32_t height,
                                                              RHIFormat format) = 0;
-    virtual std::unique_ptr<RHISampler> wrapExternalSampler(void* nativeSampler) = 0;
-    virtual std::unique_ptr<RHIBindingGroup> allocateBindingGroup(RHIBindingLayout* layout) = 0;
-    virtual std::unique_ptr<RHICommandBuffer> wrapCommandBuffer(void* nativeCmd) = 0;
+    virtual std::shared_ptr<RHISampler> wrapExternalSampler(void* nativeSampler) = 0;
+    virtual std::shared_ptr<RHIBindingGroup> allocateBindingGroup(RHIBindingLayout* layout) = 0;
+    virtual std::shared_ptr<RHICommandBuffer> wrapCommandBuffer(void* nativeCmd) = 0;
 
     // ---- Queue operations ----
     virtual void waitIdle() = 0;

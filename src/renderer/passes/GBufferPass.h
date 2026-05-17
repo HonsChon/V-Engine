@@ -33,7 +33,7 @@ public:
     };
 
     struct MaterialDescriptor {
-        std::vector<std::unique_ptr<RHIBindingGroup>> groups;
+        std::vector<std::shared_ptr<RHIBindingGroup>> groups;
         bool valid = false;
     };
 
@@ -110,14 +110,14 @@ private:
     uint32_t height_;
     uint32_t maxFramesInFlight_;
 
-    std::array<std::unique_ptr<RHITexture>, COUNT> attachmentTextures_;
-    std::unique_ptr<RHISampler> sampler_;
-    std::unique_ptr<RHIRenderPass> renderPass_;
-    std::unique_ptr<RHIFramebuffer> framebuffer_;
-    std::unique_ptr<RHIPipeline> pipeline_;
-    std::unique_ptr<RHIBindingLayout> globalLayout_;
-    std::unique_ptr<RHIBindingLayout> materialLayout_;
-    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
-    std::vector<std::unique_ptr<RHIBindingGroup>> globalBindingGroups_;
+    std::array<std::shared_ptr<RHITexture>, COUNT> attachmentTextures_;
+    std::shared_ptr<RHISampler> sampler_;
+    std::shared_ptr<RHIRenderPass> renderPass_;
+    std::shared_ptr<RHIFramebuffer> framebuffer_;
+    std::shared_ptr<RHIPipeline> pipeline_;
+    std::shared_ptr<RHIBindingLayout> globalLayout_;
+    std::shared_ptr<RHIBindingLayout> materialLayout_;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> globalBindingGroups_;
     std::unordered_map<std::string, MaterialDescriptor> materialDescriptorCache_;
 };

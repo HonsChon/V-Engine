@@ -44,7 +44,7 @@ public:
     /// Create a view into a single layer of an array texture.
     /// The returned RHITexture is a non-owning view (does not destroy the underlying image).
     /// Used for per-layer framebuffer attachments (e.g., SSAO's 16-layer array).
-    virtual std::unique_ptr<RHITexture> createLayerView(uint32_t layer) { return nullptr; }
+    virtual std::shared_ptr<RHITexture> createLayerView(uint32_t layer) { return nullptr; }
 
     // Non-copyable
     RHITexture(const RHITexture&) = delete;

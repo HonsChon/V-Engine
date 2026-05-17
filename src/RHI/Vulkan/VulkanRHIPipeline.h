@@ -69,7 +69,7 @@ public:
     // Transitional: set native VkRenderPass directly (for compatibility during migration)
     VulkanGraphicsPipelineBuilder& setNativeRenderPass(VkRenderPass renderPass, uint32_t subpass = 0);
 
-    std::unique_ptr<RHIPipeline> build() override;
+    std::shared_ptr<RHIPipeline> build() override;
 
 private:
     VulkanRHIDevice* device_;
@@ -132,7 +132,7 @@ public:
     RHIComputePipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIComputePipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
 
-    std::unique_ptr<RHIPipeline> build() override;
+    std::shared_ptr<RHIPipeline> build() override;
 
 private:
     VulkanRHIDevice* device_;

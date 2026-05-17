@@ -42,35 +42,35 @@ public:
     ~VulkanRHIDevice() override;
 
     // ---- RHIDevice factory methods ----
-    std::unique_ptr<RHIBuffer>    createBuffer(const RHIBufferDesc& desc) override;
-    std::unique_ptr<RHITexture>   createTexture(const RHITextureDesc& desc) override;
-    std::unique_ptr<RHISampler>   createSampler(const RHISamplerDesc& desc) override;
-    std::unique_ptr<RHIShader>    createShader(RHIShaderStage stage, const std::string& filePath) override;
+    std::shared_ptr<RHIBuffer>    createBuffer(const RHIBufferDesc& desc) override;
+    std::shared_ptr<RHITexture>   createTexture(const RHITextureDesc& desc) override;
+    std::shared_ptr<RHISampler>   createSampler(const RHISamplerDesc& desc) override;
+    std::shared_ptr<RHIShader>    createShader(RHIShaderStage stage, const std::string& filePath) override;
 
-    std::unique_ptr<RHIBindingLayout> createBindingLayout(const RHIBindingLayoutDesc& desc) override;
-    std::unique_ptr<RHIBindingGroup>  createBindingGroup(
+    std::shared_ptr<RHIBindingLayout> createBindingLayout(const RHIBindingLayoutDesc& desc) override;
+    std::shared_ptr<RHIBindingGroup>  createBindingGroup(
         RHIBindingLayout* layout, const RHIBindingGroupDesc& desc) override;
 
-    std::unique_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() override;
-    std::unique_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() override;
+    std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() override;
+    std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() override;
 
-    std::unique_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) override;
-    std::unique_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) override;
+    std::shared_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) override;
+    std::shared_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) override;
 
-    std::unique_ptr<RHIRenderPass>   wrapExternalRenderPass(void* nativeHandle) override;
-    std::unique_ptr<RHIBuffer>       wrapExternalBuffer(void* nativeBuffer, uint64_t size) override;
-    std::unique_ptr<RHITexture>      wrapExternalTexture(void* nativeImage, void* nativeImageView,
+    std::shared_ptr<RHIRenderPass>   wrapExternalRenderPass(void* nativeHandle) override;
+    std::shared_ptr<RHIBuffer>       wrapExternalBuffer(void* nativeBuffer, uint64_t size) override;
+    std::shared_ptr<RHITexture>      wrapExternalTexture(void* nativeImage, void* nativeImageView,
                                                           uint32_t width, uint32_t height,
                                                           RHIFormat format) override;
-    std::unique_ptr<RHISampler>      wrapExternalSampler(void* nativeSampler) override;
-    std::unique_ptr<RHIBindingGroup> allocateBindingGroup(RHIBindingLayout* layout) override;
-    std::unique_ptr<RHICommandBuffer> wrapCommandBuffer(void* nativeCmd) override;
+    std::shared_ptr<RHISampler>      wrapExternalSampler(void* nativeSampler) override;
+    std::shared_ptr<RHIBindingGroup> allocateBindingGroup(RHIBindingLayout* layout) override;
+    std::shared_ptr<RHICommandBuffer> wrapCommandBuffer(void* nativeCmd) override;
 
     void waitIdle() override;
     uint32_t findMemoryType(uint32_t typeFilter, uint32_t propertyFlags) override;
 
     // ---- SwapChain factory ----
-    std::unique_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) override;
+    std::shared_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) override;
 
     // ---- Format query ----
     RHIFormat findSupportedFormat(const std::vector<RHIFormat>& candidates,

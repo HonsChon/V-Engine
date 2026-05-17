@@ -83,20 +83,20 @@ private:
     RHIRenderPass* externalRenderPass_ = nullptr;  // NOT owned
 
     // Pipeline (RHI)
-    std::unique_ptr<RHIPipeline> pipeline_;
+    std::shared_ptr<RHIPipeline> pipeline_;
 
     // Binding layout (RHI)
-    std::unique_ptr<RHIBindingLayout> bindingLayout_;
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 
     // Uniform Buffers (RHI)
-    std::vector<std::unique_ptr<RHIBuffer>> uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
 
     // Binding Groups (RHI) — one per frame, fully RHI
-    std::vector<std::unique_ptr<RHIBindingGroup>> bindingGroups_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> bindingGroups_;
 
     // Fullscreen quad (RHI buffers)
-    std::unique_ptr<RHIBuffer> quadVertexBuffer_;
-    std::unique_ptr<RHIBuffer> quadIndexBuffer_;
+    std::shared_ptr<RHIBuffer> quadVertexBuffer_;
+    std::shared_ptr<RHIBuffer> quadIndexBuffer_;
 
     // 光照参数
     glm::vec3 ambientColor = glm::vec3(0.3f);

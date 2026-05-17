@@ -176,7 +176,7 @@ VulkanGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setNativeRenderPas
     return *this;
 }
 
-std::unique_ptr<RHIPipeline> VulkanGraphicsPipelineBuilder::build() {
+std::shared_ptr<RHIPipeline> VulkanGraphicsPipelineBuilder::build() {
     VkDevice vkDev = device_->getVkDevice();
 
     // ---- Create shader modules ----
@@ -310,7 +310,7 @@ std::unique_ptr<RHIPipeline> VulkanGraphicsPipelineBuilder::build() {
         throw std::runtime_error("[VulkanGraphicsPipelineBuilder] Failed to create graphics pipeline!");
     }
 
-    return std::make_unique<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
+    return std::make_shared<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
                                                RHIPipelineType::Graphics);
 }
 
@@ -342,7 +342,7 @@ RHIComputePipelineBuilder& VulkanComputePipelineBuilder::addPushConstant(
     return *this;
 }
 
-std::unique_ptr<RHIPipeline> VulkanComputePipelineBuilder::build() {
+std::shared_ptr<RHIPipeline> VulkanComputePipelineBuilder::build() {
     VkDevice vkDev = device_->getVkDevice();
 
     VulkanRHIShader computeShader(device_, RHIShaderStage::Compute, computeShaderPath_);
@@ -377,6 +377,6 @@ std::unique_ptr<RHIPipeline> VulkanComputePipelineBuilder::build() {
         throw std::runtime_error("[VulkanComputePipelineBuilder] Failed to create compute pipeline!");
     }
 
-    return std::make_unique<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
+    return std::make_shared<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
                                                RHIPipelineType::Compute);
 }
