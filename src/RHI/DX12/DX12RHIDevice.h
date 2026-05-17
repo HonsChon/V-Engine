@@ -29,6 +29,9 @@ public:
     explicit DX12RHIDevice(GLFWwindow* window);
     ~DX12RHIDevice() override;
 
+    // ---- RHIDevice factory methods ----
+    std::shared_ptr<RHIBuffer> createBuffer(const RHIBufferDesc& desc) override;
+
 private:
     void createDevice();
 

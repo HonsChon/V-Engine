@@ -86,7 +86,7 @@ private:
     // Subsystems
     std::unique_ptr<Window> m_window;
     std::unique_ptr<RHIDevice> m_rhiDevice;
-    std::unique_ptr<RHISwapChain> m_rhiSwapChain;
+    std::shared_ptr<RHISwapChain> m_rhiSwapChain;
     std::unique_ptr<Camera> m_camera;
     std::unique_ptr<VulkanEngine::Scene> m_scene;
     std::unique_ptr<VulkanEngine::RenderSystem> m_renderSystem;

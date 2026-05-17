@@ -1,4 +1,5 @@
 #include "DX12RHIDevice.h"
+#include "DX12RHIBuffer.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -25,6 +26,11 @@ DX12RHIDevice::~DX12RHIDevice()
     }
 
     std::cout << "[DX12RHIDevice] Destroyed.\n";
+}
+
+std::shared_ptr<RHIBuffer> DX12RHIDevice::createBuffer(const RHIBufferDesc &desc)
+{
+    return std::make_shared<DX12RHIBuffer(this, desc);
 }
 
 void DX12RHIDevice::createDevice()

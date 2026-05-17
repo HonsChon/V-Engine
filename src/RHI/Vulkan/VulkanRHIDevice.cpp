@@ -1,6 +1,15 @@
 #include "VulkanRHIDevice.h"
 #include "VulkanTypeConversions.h"
 #include "IVulkanNative.h"
+#include "VulkanRHIBuffer.h"
+#include "VulkanRHITexture.h"
+#include "VulkanRHISampler.h"
+#include "VulkanRHIShader.h"
+#include "VulkanRHIDescriptor.h"
+#include "VulkanRHIPipeline.h"
+#include "VulkanRHIRenderPass.h"
+#include "VulkanRHICommandBuffer.h"
+
 
 #include <iostream>
 #include <stdexcept>
@@ -79,15 +88,6 @@ VulkanRHIDevice::~VulkanRHIDevice() {
 // RHIDevice interface — factory stubs (implemented after backend classes exist)
 // =============================================================================
 
-// Forward-declared in separate compilation units; include headers here
-#include "VulkanRHIBuffer.h"
-#include "VulkanRHITexture.h"
-#include "VulkanRHISampler.h"
-#include "VulkanRHIShader.h"
-#include "VulkanRHIDescriptor.h"
-#include "VulkanRHIPipeline.h"
-#include "VulkanRHIRenderPass.h"
-#include "VulkanRHICommandBuffer.h"
 
 std::shared_ptr<RHIBuffer> VulkanRHIDevice::createBuffer(const RHIBufferDesc& desc) {
     return std::make_shared<VulkanRHIBuffer>(this, desc);
