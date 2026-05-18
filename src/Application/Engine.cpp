@@ -76,7 +76,10 @@ void Engine::initializeSubsystems() {
     std::cout << "[Engine] RHI device created (standalone)\n";
 
     // 3. SwapChain (via RHI Device factory)
-    m_rhiSwapChain = m_rhiDevice->createSwapChain(m_config.width, m_config.height);
+    RHISwapChainDesc swapChainDesc;
+    swapChainDesc.width  = m_config.width;
+    swapChainDesc.height = m_config.height;
+    m_rhiSwapChain = m_rhiDevice->createSwapChain(swapChainDesc);
     std::cout << "[Engine] SwapChain created\n";
 
     // 4. Command Buffers

@@ -303,8 +303,8 @@ void VulkanRHIDevice::endSingleTimeCommands(void* commandBuffer) {
 
 #include "VulkanRHISwapChain.h"
 
-std::shared_ptr<RHISwapChain> VulkanRHIDevice::createSwapChain(uint32_t width, uint32_t height) {
-    return std::make_shared<VulkanRHISwapChain>(this, width, height);
+std::shared_ptr<RHISwapChain> VulkanRHIDevice::createSwapChain(const RHISwapChainDesc& desc) {
+    return std::make_shared<VulkanRHISwapChain>(this, desc);
 }
 
 // =============================================================================

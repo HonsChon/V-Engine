@@ -44,8 +44,23 @@ private:
     /// @brief Block until all GPU work on commandQueue has completed (equivalent to vkDeviceWaitIdle).
     void waitForGPU();
 
+    /// @brief Check if the validation layers are supported.
     bool checkValidationLayerSupport();
+
+    /// @brief Enable the debug layer for the device.
     bool enableDebugLayer();
+
+    /// @brief Get the D3D12Device.
+    ID3D12Device* getDevice() const { return device.Get(); };
+
+    /// @brief Get the DXGIFactory.
+    IDXGIFactory4* getFactory() const { return factory.Get(); };
+
+    /// @brief Get the D3D12CommandQueue.
+    ID3D12CommandQueue* getCommandQueue() const { return commandQueue.Get(); };
+
+    /// @brief Get the glfwWindow. 
+    GLFWwindow* getWindow() const { return window; }
 
     GLFWwindow* window = nullptr;
 

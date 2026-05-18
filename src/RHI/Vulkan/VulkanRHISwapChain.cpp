@@ -12,8 +12,8 @@ using namespace VulkanTypeConversions;
 // =============================================================================
 
 VulkanRHISwapChain::VulkanRHISwapChain(VulkanRHIDevice* device,
-                                       uint32_t width, uint32_t height)
-    : device_(device), requestedWidth_(width), requestedHeight_(height)
+                                       const RHISwapChainDesc& desc)
+    : device_(device), desc_(desc)
 {
     createSwapChain();
     createImageViews();
@@ -68,8 +68,8 @@ void* VulkanRHISwapChain::getNativeFramebuffer(uint32_t imageIndex) const {
 }
 
 void VulkanRHISwapChain::recreate(uint32_t width, uint32_t height) {
-    requestedWidth_ = width;
-    requestedHeight_ = height;
+    desc_.width  = width;
+    desc_.height = height;
     device_->waitIdle();
     cleanup();
     createSwapChain();
@@ -122,7 +122,8 @@ void VulkanRHISwapChain::createSwapChain() {
     VkPresentModeKHR presentMode = chooseSwapPresentMode();
     VkExtent2D extent = chooseSwapExtent(caps);
 
-    uint32_t imageCount = caps.minImageCount + 1;
+    // Use requested buffer count from desc, clamped to device limits
+    uint32_t imageCount = std::max(desc_.bufferCount, caps.minImageCount);
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
         imageCount = caps.maxImageCount;
     }
@@ -360,6 +361,15 @@ VkSurfaceFormatKHR VulkanRHISwapChain::chooseSwapSurfaceFormat() {
     std::vector<VkSurfaceFormatKHR> formats(fmtCount);
     vkGetPhysicalDeviceSurfaceFormatsKHR(device_->getVkPhysicalDevice(), device_->getSurface(), &fmtCount, formats.data());
 
+    // Try to match the format requested in desc
+    VkFormat requested = toVkFormat(desc_.format);
+    for (const auto& f : formats) {
+        if (f.format == requested) {
+            return f;
+        }
+    }
+
+    // Fallback: prefer SRGB
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return f;
@@ -374,9 +384,17 @@ VkPresentModeKHR VulkanRHISwapChain::chooseSwapPresentMode() {
     std::vector<VkPresentModeKHR> modes(modeCount);
     vkGetPhysicalDeviceSurfacePresentModesKHR(device_->getVkPhysicalDevice(), device_->getSurface(), &modeCount, modes.data());
 
-    for (auto m : modes) {
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    if (desc_.presentMode == RHIPresentMode::Immediate) {
+        // Prefer MAILBOX (no tearing, low latency), fallback to IMMEDIATE
+        for (auto m : modes) {
+            if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+        }
+        for (auto m : modes) {
+            if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) return m;
+        }
     }
+
+    // VSync: FIFO is always supported
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -384,7 +402,7 @@ VkExtent2D VulkanRHISwapChain::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& 
     if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return caps.currentExtent;
     }
-    VkExtent2D actual = { requestedWidth_, requestedHeight_ };
+    VkExtent2D actual = { desc_.width, desc_.height };
     actual.width  = std::clamp(actual.width,  caps.minImageExtent.width,  caps.maxImageExtent.width);
     actual.height = std::clamp(actual.height, caps.minImageExtent.height, caps.maxImageExtent.height);
     return actual;

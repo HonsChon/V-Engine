@@ -15,7 +15,7 @@ class VulkanRHIDevice;
 
 class VulkanRHISwapChain : public RHISwapChain {
 public:
-    VulkanRHISwapChain(VulkanRHIDevice* device, uint32_t width, uint32_t height);
+    VulkanRHISwapChain(VulkanRHIDevice* device, const RHISwapChainDesc& desc);
     ~VulkanRHISwapChain() override;
 
     RHIFormat    getFormat() const override { return format_; }
@@ -54,8 +54,7 @@ private:
     VkExtent2D         chooseSwapExtent(const VkSurfaceCapabilitiesKHR& caps);
 
     VulkanRHIDevice* device_;
-    uint32_t requestedWidth_  = 0;
-    uint32_t requestedHeight_ = 0;
+    RHISwapChainDesc desc_;
 
     // RHI-level state
     RHIFormat   format_ = RHIFormat::Undefined;

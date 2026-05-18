@@ -70,7 +70,7 @@ public:
     uint32_t findMemoryType(uint32_t typeFilter, uint32_t propertyFlags) override;
 
     // ---- SwapChain factory ----
-    std::shared_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) override;
+    std::shared_ptr<RHISwapChain> createSwapChain(const RHISwapChainDesc& desc) override;
 
     // ---- Format query ----
     RHIFormat findSupportedFormat(const std::vector<RHIFormat>& candidates,

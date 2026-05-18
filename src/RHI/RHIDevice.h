@@ -57,7 +57,7 @@ public:
     virtual std::shared_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) = 0;
 
     // ---- SwapChain factory ----
-    virtual std::shared_ptr<RHISwapChain> createSwapChain(uint32_t width, uint32_t height) = 0;
+    virtual std::shared_ptr<RHISwapChain> createSwapChain(const RHISwapChainDesc& desc) = 0;
 
     // ---- Wrapping external resources ----
     virtual std::shared_ptr<RHIRenderPass> wrapExternalRenderPass(void* nativeHandle) = 0;

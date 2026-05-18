@@ -22,5 +22,6 @@ public:
 private:
     DX12RHIDevice* device_;
     RHIBufferDesc  desc_;
+    Comptr<D3D12Buffer>
 
 }

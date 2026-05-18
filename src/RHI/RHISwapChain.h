@@ -21,6 +21,29 @@ enum class RHISwapChainResult {
     Error
 };
 
+// =============================================================================
+// RHI SwapChain Description
+// =============================================================================
+
+enum class RHIPresentMode {
+    Immediate,    // No VSync, tearing allowed (DX12: allow tearing, Vulkan: MAILBOX/IMMEDIATE)
+    VSync,        // VSync enabled (DX12: normal present, Vulkan: FIFO)
+};
+
+struct RHISwapChainDesc {
+    uint32_t       width       = 0;
+    uint32_t       height      = 0;
+    RHIFormat      format      = RHIFormat::R8G8B8A8_UNORM;
+    uint32_t       bufferCount = 2;       // Double buffering (2) or triple buffering (3)
+    RHIPresentMode presentMode = RHIPresentMode::VSync;
+
+    RHISwapChainDesc& setWidth(uint32_t w)              { width = w; return *this; }
+    RHISwapChainDesc& setHeight(uint32_t h)             { height = h; return *this; }
+    RHISwapChainDesc& setFormat(RHIFormat f)            { format = f; return *this; }
+    RHISwapChainDesc& setBufferCount(uint32_t c)        { bufferCount = c; return *this; }
+    RHISwapChainDesc& setPresentMode(RHIPresentMode m)  { presentMode = m; return *this; }
+};
+
 class RHISwapChain {
 public:
     virtual ~RHISwapChain() = default;
