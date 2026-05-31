@@ -1,6 +1,6 @@
 #pragma once
 
-
+#include "DX12TypeConversion.h"
 #include "RHIBuffer.h"
 
 class DX12RHIDevice;
@@ -22,6 +22,6 @@ public:
 private:
     DX12RHIDevice* device_;
     RHIBufferDesc  desc_;
-    Comptr<D3D12Buffer>
+    Comptr<ID3D12Resource> buffer_;
 
 }
