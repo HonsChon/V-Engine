@@ -190,6 +190,7 @@ include_directories(src)
 include_directories(src/Application)
 include_directories(src/RHI)
 include_directories(src/RHI/Vulkan)
+include_directories(src/RHI/DX12)
 include_directories(src/Core)
 include_directories(src/renderer)
 include_directories(src/renderer/passes)
@@ -228,6 +229,38 @@ set(APPLICATION_HEADERS
     src/Application/Input.h
 )
 
+# RHI - DX12 后端 (仅 Windows)
+if(WIN32)
+    set(DX12_SOURCES
+        src/RHI/DX12/DX12RHIDevice.cpp
+        src/RHI/DX12/DX12RHIBuffer.cpp
+        src/RHI/DX12/DX12RHICommandBuffer.cpp
+        src/RHI/DX12/DX12RHITexture.cpp
+        src/RHI/DX12/DX12RHIPipeline.cpp
+        src/RHI/DX12/DX12RHIRenderPass.cpp
+        src/RHI/DX12/DX12RHIFramebuffer.cpp
+        src/RHI/DX12/DX12RHIBindingGroup.cpp
+        src/RHI/DX12/DX12RHISampler.cpp
+        src/RHI/DX12/DX12RHISwapChain.cpp
+    )
+
+    set(DX12_HEADERS
+        src/RHI/DX12/DX12RHIDevice.h
+        src/RHI/DX12/DX12RHIBuffer.h
+        src/RHI/DX12/DX12RHICommandBuffer.h
+        src/RHI/DX12/DX12RHITexture.h
+        src/RHI/DX12/DX12RHIPipeline.h
+        src/RHI/DX12/DX12RHIRenderPass.h
+        src/RHI/DX12/DX12RHIFramebuffer.h
+        src/RHI/DX12/DX12RHIBindingGroup.h
+        src/RHI/DX12/DX12RHISampler.h
+        src/RHI/DX12/DX12RHISwapChain.h
+        src/RHI/DX12/DX12TypeConversions.h
+    )
+else()
+    set(DX12_SOURCES "")
+    set(DX12_HEADERS "")
+endif()
 # RHI - 渲染硬件接口层：RHI 抽象层 + Vulkan 后端
 set(RHI_SOURCES
     src/RHI/RHI.cpp
@@ -426,6 +459,7 @@ set(ALL_SOURCES
     src/main.cpp
     ${APPLICATION_SOURCES}
     ${RHI_SOURCES}
+    ${DX12_SOURCES}
     ${CORE_SOURCES}
     ${PASSES_SOURCES}
     ${RENDERER_SOURCES}
@@ -440,6 +474,7 @@ set(ALL_SOURCES
 set(ALL_HEADERS
     ${APPLICATION_HEADERS}
     ${RHI_HEADERS}
+    ${DX12_HEADERS}
     ${CORE_HEADERS}
     ${PASSES_HEADERS}
     ${RENDERER_HEADERS}
@@ -462,6 +497,7 @@ add_executable(${PROJECT_NAME} ${ALL_SOURCES} ${ALL_HEADERS})
 # ============================================================
 source_group("Source Files/Application" FILES ${APPLICATION_SOURCES})
 source_group("Source Files/RHI" FILES ${RHI_SOURCES})
+source_group("Source Files/RHI/DX12" FILES ${DX12_SOURCES})
 source_group("Source Files/Core" FILES ${CORE_SOURCES})
 source_group("Source Files/Renderer" FILES ${RENDERER_SOURCES})
 source_group("Source Files/Renderer/Passes" FILES ${PASSES_SOURCES})
@@ -474,6 +510,7 @@ source_group("Source Files/UI" FILES ${UI_SOURCES})
 
 source_group("Header Files/Application" FILES ${APPLICATION_HEADERS})
 source_group("Header Files/RHI" FILES ${RHI_HEADERS})
+source_group("Header Files/RHI/DX12" FILES ${DX12_HEADERS})
 source_group("Header Files/Core" FILES ${CORE_HEADERS})
 source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
 source_group("Header Files/Renderer/Passes" FILES ${PASSES_HEADERS})

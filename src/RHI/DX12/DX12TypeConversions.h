@@ -219,4 +219,38 @@ inline DXGI_FORMAT toTypelessDepthFormat(RHIFormat format) {
     }
 }
 
+// ---- Image Layout -> D3D12_RESOURCE_STATES ----
+inline D3D12_RESOURCE_STATES toD3D12ResourceStates(RHIImageLayout layout) {
+    switch (layout) {
+        case RHIImageLayout::Undefined:               return D3D12_RESOURCE_STATE_COMMON;
+        case RHIImageLayout::General:                  return D3D12_RESOURCE_STATE_COMMON;
+        case RHIImageLayout::ColorAttachment:          return D3D12_RESOURCE_STATE_RENDER_TARGET;
+        case RHIImageLayout::DepthStencilAttachment:   return D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        case RHIImageLayout::DepthStencilReadOnly:     return D3D12_RESOURCE_STATE_DEPTH_READ;
+        case RHIImageLayout::ShaderReadOnly:           return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+                                                             | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        case RHIImageLayout::TransferSrc:              return D3D12_RESOURCE_STATE_COPY_SOURCE;
+        case RHIImageLayout::TransferDst:              return D3D12_RESOURCE_STATE_COPY_DEST;
+        case RHIImageLayout::PresentSrc:               return D3D12_RESOURCE_STATE_PRESENT;
+        default: return D3D12_RESOURCE_STATE_COMMON;
+    }
+}
+
+// ---- RHIPipelineStage -> appropriate resource states (for buffer barriers) ----
+inline D3D12_RESOURCE_STATES toD3D12BufferStates(RHIAccessFlags access) {
+    D3D12_RESOURCE_STATES states = D3D12_RESOURCE_STATE_COMMON;
+    uint32_t a = static_cast<uint32_t>(access);
+    if (a & static_cast<uint32_t>(RHIAccessFlags::VertexAttributeRead))  states |= D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::IndexRead))            states |= D3D12_RESOURCE_STATE_INDEX_BUFFER;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::UniformRead))          states |= D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::ShaderRead))           states |= D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::ShaderWrite))          states |= D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::TransferRead))         states |= D3D12_RESOURCE_STATE_COPY_SOURCE;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::TransferWrite))        states |= D3D12_RESOURCE_STATE_COPY_DEST;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::IndirectCommandRead))  states |= D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::HostWrite))            states |= D3D12_RESOURCE_STATE_GENERIC_READ;
+    if (a & static_cast<uint32_t>(RHIAccessFlags::HostRead))             states |= D3D12_RESOURCE_STATE_COPY_DEST;
+    return states;
+}
+
 } // namespace DX12TypeConversions
