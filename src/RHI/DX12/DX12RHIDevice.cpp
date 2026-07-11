@@ -1,5 +1,8 @@
 #include "DX12RHIDevice.h"
 #include "DX12RHIBuffer.h"
+#include "DX12RHIShader.h"
+#include "DX12RHIDescriptor.h"
+#include "DX12RHIPipeline.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -28,9 +31,54 @@ DX12RHIDevice::~DX12RHIDevice()
     std::cout << "[DX12RHIDevice] Destroyed.\n";
 }
 
+void DX12RHIDevice::GetHardwareAdapter(IDXGIFactory2* pFactory, IDXGIAdapter1** ppAdapter)
+{
+    *ppAdapter = nullptr;
+    ComPtr<IDXGIAdapter1> adapter;
+
+    for (UINT adapterIndex = 0;
+         pFactory->EnumAdapters1(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND;
+         ++adapterIndex)
+    {
+        DXGI_ADAPTER_DESC1 desc;
+        adapter->GetDesc1(&desc);
+
+        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+            continue;
+        }
+
+        if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0,
+                                        __uuidof(ID3D12Device), nullptr))) {
+            break;
+        }
+    }
+
+    *ppAdapter = adapter.Detach();
+}
+
 std::shared_ptr<RHIBuffer> DX12RHIDevice::createBuffer(const RHIBufferDesc &desc)
 {
-    return std::make_shared<DX12RHIBuffer(this, desc);
+    return std::make_shared<DX12RHIBuffer>(this, desc);
+}
+
+std::shared_ptr<RHIShader> DX12RHIDevice::createShader(RHIShaderStage stage, const std::string& filePath)
+{
+    return std::make_shared<DX12RHIShader>(this, stage, filePath);
+}
+
+std::shared_ptr<RHIBindingLayout> DX12RHIDevice::createBindingLayout(const RHIBindingLayoutDesc& desc)
+{
+    return std::make_shared<DX12RHIBindingLayout>(this, desc);
+}
+
+std::shared_ptr<RHIGraphicsPipelineBuilder> DX12RHIDevice::createGraphicsPipelineBuilder()
+{
+    return std::make_shared<DX12GraphicsPipelineBuilder>(this);
+}
+
+std::shared_ptr<RHIComputePipelineBuilder> DX12RHIDevice::createComputePipelineBuilder()
+{
+    return std::make_shared<DX12ComputePipelineBuilder>(this);
 }
 
 void DX12RHIDevice::createDevice()

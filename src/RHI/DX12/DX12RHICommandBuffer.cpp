@@ -3,7 +3,7 @@
 #include "DX12RHIBuffer.h"
 #include "DX12RHITexture.h"
 #include "DX12RHIPipeline.h"
-#include "DX12RHIBindingGroup.h"
+#include "DX12RHIDescriptor.h"
 #include "DX12RHIRenderPass.h"
 #include "DX12RHIFramebuffer.h"
 #include "DX12TypeConversions.h"

@@ -32,6 +32,18 @@ public:
     // ---- RHIDevice factory methods ----
     std::shared_ptr<RHIBuffer> createBuffer(const RHIBufferDesc& desc) override;
 
+    std::shared_ptr<RHIShader>               createShader(RHIShaderStage stage, const std::string& filePath) override;
+    std::shared_ptr<RHIBindingLayout>        createBindingLayout(const RHIBindingLayoutDesc& desc) override;
+
+    std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() override;
+    std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() override;
+
+    // ---- Accessors ----
+    ID3D12Device* getDevice() const { return device.Get(); }
+    IDXGIFactory4* getFactory() const { return factory.Get(); }
+    ID3D12CommandQueue* getCommandQueue() const { return commandQueue.Get(); }
+    GLFWwindow* getWindow() const { return window; }
+
 private:
     void createDevice();
 
@@ -50,17 +62,8 @@ private:
     /// @brief Enable the debug layer for the device.
     bool enableDebugLayer();
 
-    /// @brief Get the D3D12Device.
-    ID3D12Device* getDevice() const { return device.Get(); };
-
-    /// @brief Get the DXGIFactory.
-    IDXGIFactory4* getFactory() const { return factory.Get(); };
-
-    /// @brief Get the D3D12CommandQueue.
-    ID3D12CommandQueue* getCommandQueue() const { return commandQueue.Get(); };
-
-    /// @brief Get the glfwWindow. 
-    GLFWwindow* getWindow() const { return window; }
+    /// @brief Enumerate hardware adapters and find the first one that supports D3D12.
+    static void GetHardwareAdapter(IDXGIFactory2* pFactory, IDXGIAdapter1** ppAdapter);
 
     GLFWwindow* window = nullptr;
 

@@ -239,9 +239,10 @@ if(WIN32)
         src/RHI/DX12/DX12RHIPipeline.cpp
         src/RHI/DX12/DX12RHIRenderPass.cpp
         src/RHI/DX12/DX12RHIFramebuffer.cpp
-        src/RHI/DX12/DX12RHIBindingGroup.cpp
+        src/RHI/DX12/DX12RHIDescriptor.cpp
         src/RHI/DX12/DX12RHISampler.cpp
         src/RHI/DX12/DX12RHISwapChain.cpp
+        src/RHI/DX12/DX12RHIShader.cpp
     )
 
     set(DX12_HEADERS
@@ -252,10 +253,11 @@ if(WIN32)
         src/RHI/DX12/DX12RHIPipeline.h
         src/RHI/DX12/DX12RHIRenderPass.h
         src/RHI/DX12/DX12RHIFramebuffer.h
-        src/RHI/DX12/DX12RHIBindingGroup.h
+        src/RHI/DX12/DX12RHIDescriptor.h
         src/RHI/DX12/DX12RHISampler.h
         src/RHI/DX12/DX12RHISwapChain.h
         src/RHI/DX12/DX12TypeConversions.h
+        src/RHI/DX12/DX12RHIShader.h
     )
 else()
     set(DX12_SOURCES "")
