@@ -3,6 +3,7 @@
 #include "DX12RHIShader.h"
 #include "DX12RHIDescriptor.h"
 #include "DX12RHIPipeline.h"
+#include "DX12RHIFramebuffer.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -79,6 +80,10 @@ std::shared_ptr<RHIGraphicsPipelineBuilder> DX12RHIDevice::createGraphicsPipelin
 std::shared_ptr<RHIComputePipelineBuilder> DX12RHIDevice::createComputePipelineBuilder()
 {
     return std::make_shared<DX12ComputePipelineBuilder>(this);
+}
+
+std::shared_ptr<RHIFramebuffer> DX12RHIDevice::createFramebuffer(const RHIFramebufferDesc& desc) {
+    return std::make_shared<DX12RHIFramebuffer>(this, desc);
 }
 
 void DX12RHIDevice::createDevice()

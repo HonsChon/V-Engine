@@ -38,6 +38,8 @@ public:
     std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() override;
     std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() override;
 
+    std::shared_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) override;
+
     // ---- Accessors ----
     ID3D12Device* getDevice() const { return device.Get(); }
     IDXGIFactory4* getFactory() const { return factory.Get(); }
