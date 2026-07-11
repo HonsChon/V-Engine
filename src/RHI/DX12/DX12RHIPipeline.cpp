@@ -217,51 +217,47 @@ RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setRenderPass(
 // ---- Root Signature ----
 
 void DX12GraphicsPipelineBuilder::buildRootSignature(ComPtr<ID3D12RootSignature>& outRootSig) {
-    std::vector<D3D12_ROOT_PARAMETER> rootParams;
-    std::vector<std::vector<D3D12_DESCRIPTOR_RANGE>> allRanges;
+    // First pass: count total descriptor entries across all binding layouts
+    size_t totalEntries = 0;
+    for (const auto* layout : bindingLayouts_) {
+        auto* dxLayout = static_cast<const DX12RHIBindingLayout*>(layout);
+        totalEntries += dxLayout->getDesc().entries.size();
+    }
 
-    // Build root parameters from binding layouts
+    // Pre-allocate so pointers remain stable
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(totalEntries);
+    std::vector<D3D12_ROOT_PARAMETER> rootParams(totalEntries + pushConstantRanges_.size());
+
+    // Second pass: fill root parameters from binding layouts
+    size_t rangeIdx = 0;
+    size_t paramIdx = 0;
     for (const auto* layout : bindingLayouts_) {
         auto* dxLayout = static_cast<const DX12RHIBindingLayout*>(layout);
         for (const auto& entry : dxLayout->getDesc().entries) {
-            D3D12_DESCRIPTOR_RANGE_TYPE rangeType = toD3D12RangeType(entry.type);
+            ranges[rangeIdx].RangeType = toD3D12RangeType(entry.type);
+            ranges[rangeIdx].NumDescriptors = entry.count;
+            ranges[rangeIdx].BaseShaderRegister = entry.binding;
+            ranges[rangeIdx].RegisterSpace = 0;
+            ranges[rangeIdx].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-            std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-            D3D12_DESCRIPTOR_RANGE range = {};
-            range.RangeType = rangeType;
-            range.NumDescriptors = entry.count;
-            range.BaseShaderRegister = entry.binding;
-            range.RegisterSpace = 0;
-            range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-            ranges.push_back(range);
+            rootParams[paramIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            rootParams[paramIdx].ShaderVisibility = toD3D12ShaderVisibility(entry.stageFlags);
+            rootParams[paramIdx].DescriptorTable.NumDescriptorRanges = 1;
+            rootParams[paramIdx].DescriptorTable.pDescriptorRanges = &ranges[rangeIdx];
 
-            D3D12_ROOT_PARAMETER param = {};
-            param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            param.ShaderVisibility = toD3D12ShaderVisibility(entry.stageFlags);
-
-            allRanges.push_back(std::move(ranges));
-            param.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(allRanges.back().size());
-            param.DescriptorTable.pDescriptorRanges = allRanges.back().data();
-
-            rootParams.push_back(param);
+            ++rangeIdx;
+            ++paramIdx;
         }
     }
 
     // Build root constants from push constants
-    std::vector<D3D12_ROOT_PARAMETER> pcParams;
     for (const auto& pc : pushConstantRanges_) {
-        D3D12_ROOT_PARAMETER param = {};
-        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        param.ShaderVisibility = toD3D12ShaderVisibility(pc.stageFlags);
-        param.Constants.Num32BitValues = pc.size / sizeof(uint32_t);
-        param.Constants.ShaderRegister = 0;
-        param.Constants.RegisterSpace = 0;
-        pcParams.push_back(param);
-    }
-
-    // Put push constants after descriptor tables
-    for (auto& p : pcParams) {
-        rootParams.push_back(p);
+        rootParams[paramIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParams[paramIdx].ShaderVisibility = toD3D12ShaderVisibility(pc.stageFlags);
+        rootParams[paramIdx].Constants.Num32BitValues = pc.size / sizeof(uint32_t);
+        rootParams[paramIdx].Constants.ShaderRegister = 0;
+        rootParams[paramIdx].Constants.RegisterSpace = 0;
+        ++paramIdx;
     }
 
     D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
@@ -437,44 +433,47 @@ RHIComputePipelineBuilder& DX12ComputePipelineBuilder::addPushConstant(
 
 std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
     // --- Root Signature ---
-    std::vector<D3D12_ROOT_PARAMETER> rootParams;
-    std::vector<std::vector<D3D12_DESCRIPTOR_RANGE>> allRanges;
+    // First pass: count total descriptor entries
+    size_t totalEntries = 0;
+    for (const auto* layout : bindingLayouts_) {
+        auto* dxLayout = static_cast<const DX12RHIBindingLayout*>(layout);
+        totalEntries += dxLayout->getDesc().entries.size();
+    }
 
+    // Pre-allocate so pointers remain stable
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(totalEntries);
+    std::vector<D3D12_ROOT_PARAMETER> rootParams(totalEntries + pushConstantRanges_.size());
+
+    // Second pass: fill root parameters from binding layouts
+    size_t rangeIdx = 0;
+    size_t paramIdx = 0;
     for (const auto* layout : bindingLayouts_) {
         auto* dxLayout = static_cast<const DX12RHIBindingLayout*>(layout);
         for (const auto& entry : dxLayout->getDesc().entries) {
-            D3D12_DESCRIPTOR_RANGE_TYPE rangeType = toD3D12RangeType(entry.type);
+            ranges[rangeIdx].RangeType = toD3D12RangeType(entry.type);
+            ranges[rangeIdx].NumDescriptors = entry.count;
+            ranges[rangeIdx].BaseShaderRegister = entry.binding;
+            ranges[rangeIdx].RegisterSpace = 0;
+            ranges[rangeIdx].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-            std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-            D3D12_DESCRIPTOR_RANGE range = {};
-            range.RangeType = rangeType;
-            range.NumDescriptors = entry.count;
-            range.BaseShaderRegister = entry.binding;
-            range.RegisterSpace = 0;
-            range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-            ranges.push_back(range);
+            rootParams[paramIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            rootParams[paramIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+            rootParams[paramIdx].DescriptorTable.NumDescriptorRanges = 1;
+            rootParams[paramIdx].DescriptorTable.pDescriptorRanges = &ranges[rangeIdx];
 
-            D3D12_ROOT_PARAMETER param = {};
-            param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-            allRanges.push_back(std::move(ranges));
-            param.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(allRanges.back().size());
-            param.DescriptorTable.pDescriptorRanges = allRanges.back().data();
-
-            rootParams.push_back(param);
+            ++rangeIdx;
+            ++paramIdx;
         }
     }
 
     // Push constants as root constants
     for (const auto& pc : pushConstantRanges_) {
-        D3D12_ROOT_PARAMETER param = {};
-        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        param.Constants.Num32BitValues = pc.size / sizeof(uint32_t);
-        param.Constants.ShaderRegister = 0;
-        param.Constants.RegisterSpace = 0;
-        rootParams.push_back(param);
+        rootParams[paramIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        rootParams[paramIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParams[paramIdx].Constants.Num32BitValues = pc.size / sizeof(uint32_t);
+        rootParams[paramIdx].Constants.ShaderRegister = 0;
+        rootParams[paramIdx].Constants.RegisterSpace = 0;
+        ++paramIdx;
     }
 
     D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
