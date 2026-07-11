@@ -243,3 +243,185 @@ nvrhi 的 DX12 后端设计要点：
 - **Buffer 使用引用计数**（`RefCountPtr`），CommandList 内部 hold 住资源引用防止提交期间释放
 - **资源状态自动追踪**（`BufferStateExtension`）
 - **描述符视图管理**（Buffer 自己创建 CBV/SRV/UAV 到 Descriptor Heap）
+
+
+## 九、IDXGIFactory vs IDXGIAdapter
+
+| 组件 | 职责 | 类比 |
+|------|------|------|
+| `IDXGIFactory` | 枚举和创建 `IDXGIAdapter`，创建 SwapChain | Vulkan 的 `VkInstance` |
+| `IDXGIAdapter` | 代表一块物理 GPU，查询设备信息（显存、功能级别），创建 `ID3D12Device` | Vulkan 的 `VkPhysicalDevice` |
+
+**典型流程：**
+
+```
+CreateDXGIFactory → IDXGIFactory
+    └── factory->EnumAdapters1(idx, &adapter) → 遍历所有 GPU
+        └── adapter->GetDesc1(&desc) → 查询名称、显存、架构
+        └── D3D12CreateDevice(adapter, ...) → 找到支持 D3D12 的首个物理设备
+```
+
+**筛选逻辑**（`GetHardwareAdapter`）：
+1. 跳过软件适配器（`DXGI_ADAPTER_FLAG_SOFTWARE`）
+2. 尝试 `D3D12CreateDevice`，失败则继续枚举下一个
+3. 选中第一个支持 D3D12 Feature Level 12.0 的物理设备
+
+
+## 十、VertexBinding / VertexAttribute（顶点输入布局）
+
+### 概念
+
+两个结构体共同定义 D3D12 Input Layout：
+
+```cpp
+struct VertexBinding {
+    uint32_t binding;                    // Input Slot 索引（0 ~ N-1）
+    uint32_t stride;                     // 每个顶点/实例的字节步长
+    RHIVertexInputRate inputRate;        // PerVertex 或 PerInstance
+};
+
+struct VertexAttribute {
+    uint32_t binding;                    // 关联的 Input Slot
+    uint32_t location;                   // Shader 语义索引（SemanticIndex）
+    RHIFormat format;                    // 属性格式
+    uint32_t offset;                     // 在顶点中的字节偏移
+};
+```
+
+### 为什么是 vector？
+
+GPU 允许从**多个 Vertex Buffer Slot** 同时读取数据：
+
+| Slot | 数据 | 速率 |
+|------|------|------|
+| 0 | 位置、法线、UV | 逐顶点 |
+| 1 | 实例颜色、实例矩阵 | 逐实例 |
+
+每个 slot 就是一个 `VertexBinding`。attribute 可以指向不同的 slot，实现**逐顶点 + 逐实例**混合输入。
+
+### 示例
+
+```cpp
+// Slot 0: 逐顶点数据 (stride=32)
+addVertexBinding(0, 32, RHIVertexInputRate::Vertex);
+addVertexAttribute(0, 0, RHIFormat::R32G32B32_FLOAT, 0);   // pos,    offset=0
+addVertexAttribute(0, 1, RHIFormat::R32G32B32_FLOAT, 12);  // normal, offset=12
+addVertexAttribute(0, 2, RHIFormat::R32G32_FLOAT,   24);   // uv,     offset=24
+
+// Slot 1: 逐实例数据 (stride=16)
+addVertexBinding(1, 16, RHIVertexInputRate::Instance);
+addVertexAttribute(1, 3, RHIFormat::R32G32B32A32_FLOAT, 0); // instanceColor
+```
+
+生成 D3D12 Input Layout：
+
+```
+Slot 0 (32 bytes, PerVertex)     Slot 1 (16 bytes, PerInstance)
+  [0~11]  pos      → TEXCOORD0    [0~15] instanceColor → TEXCOORD3
+  [12~23] normal   → TEXCOORD1
+  [24~31] uv       → TEXCOORD2
+```
+
+### 传入的数据不限于顶点
+
+Vertex Buffer + Input Layout 本质是**二进制数据搬运工**——告诉 GPU stride、format、offset，它就从 Buffer 里取出数据塞给 VS 输入语义。可传入：
+
+| 数据 | 示例格式 | 用途 |
+|------|---------|------|
+| 位置 | `R32G32B32_FLOAT` | 常规顶点 |
+| 法线 | `R32G32B32_FLOAT` | 光照 |
+| UV | `R32G32_FLOAT` | 纹理采样 |
+| 顶点颜色 | `R32G32B32A32_FLOAT` | 逐顶点着色 |
+| 骨骼索引/权重 | `R32G32B32A32_UINT` + `R32G32B32A32_FLOAT` | 蒙皮动画 |
+| 实例矩阵 | 4 × `R32G32B32A32_FLOAT` | Instance 渲染 |
+
+### 对应关系
+
+| DX12 | Vulkan |
+|------|--------|
+| `VertexBinding`（Input Slot） | `VkVertexInputBindingDescription` |
+| `VertexAttribute`（Input Element） | `VkVertexInputAttributeDescription` |
+| `IASetVertexBuffers(binding, ...)` | `vkCmdBindVertexBuffers(binding, ...)` |
+| `IASetPrimitiveTopology()` | `vkCmdSetPrimitiveTopologyEXT()`（或 PSO 中固定） |
+| SemanticName = "TEXCOORD" + SemanticIndex | `location = entry.location`（Vulkan 直接用 location） |
+
+
+## 十一、Root Signature 构建（PipelineLayout 的 DX12 等价物）
+
+### 概念映射
+
+| DX12 | Vulkan | 说明 |
+|------|--------|------|
+| `D3D12_ROOT_PARAMETER`（descriptor table） | `VkDescriptorSetLayout` | 描述 descriptor 的绑定方式 |
+| `D3D12_ROOT_PARAMETER`（32-bit constants） | `VkPushConstantRange` | 根常量 |
+| `D3D12_ROOT_SIGNATURE` | `VkPipelineLayout` | 最终产物，绑定到 CommandList |
+| 构建时机 | 构建时机 | 都在 Pipeline Builder 的 build() 中创建 |
+
+### 构建流程（两趟法）
+
+```cpp
+// 第一趟：统计所有 binding layout 的 entry 总数
+size_t totalEntries = 0;
+for (const auto* layout : bindingLayouts_)
+    totalEntries += static_cast<const DX12RHIBindingLayout*>(layout)->getDesc().entries.size();
+
+// 预分配（指针永不失效）
+std::vector<D3D12_DESCRIPTOR_RANGE> ranges(totalEntries);
+std::vector<D3D12_ROOT_PARAMETER> rootParams(totalEntries + pushConstantRanges_.size());
+
+// 第二趟：填充
+//   1) descriptor table 参数（每个 entry 一个 range + 一个 root parameter）
+//   2) 32-bit constants 参数（push constants 放在 descriptor tables 后面）
+//   3) 序列化 + 创建 RootSignature
+```
+
+### 为什么需要两趟 + 预分配
+
+**错误模式**（之前代码的问题）：
+
+```cpp
+for (auto& entry : ...) {
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;  // 每个 entry 一个临时 vector
+    ranges.push_back(range);                       // 其实只需 1 个元素
+    allRanges.push_back(std::move(ranges));         // vector 被 move 到 allRanges
+    param.pDescriptorRanges = allRanges.back().data();  // 存指针
+    rootParams.push_back(param);
+}
+```
+
+两个问题：
+1. **`vector<D3D12_DESCRIPTOR_RANGE>` 多余**——每个 entry 总是只需要一个 range，临时 vector 毫无必要
+2. **`allRanges` reallocation → 指针悬空**——后续 `push_back` 触发 `allRanges` reallocation 时，之前存的 `pDescriptorRanges` 指向被销毁的旧内存
+
+**正确做法**：预分配后直接用 `&ranges[idx]`，指针永远稳定。
+
+### Root Parameter 布局
+
+```
+Root Signature Layout:
+┌──────────────────────────────────────────────┐
+│ Root Parameter 0: DescriptorTable (Set 0)    │  ← bindingLayouts_[0]
+│ Root Parameter 1: DescriptorTable (Set 1)    │  ← bindingLayouts_[1]
+│ ...                                          │
+│ Root Parameter N: 32BitConstants             │  ← pushConstants (所有 staging)
+└──────────────────────────────────────────────┘
+```
+
+### ShaderVisibility
+
+| RHI Stage 组合 | DX12 `D3D12_SHADER_VISIBILITY` | Vulkan 对应 |
+|----------------|--------------------------------|-------------|
+| Vertex 仅 | `VERTEX` | `VK_SHADER_STAGE_VERTEX_BIT` |
+| Fragment 仅 | `PIXEL` | `VK_SHADER_STAGE_FRAGMENT_BIT` |
+| 同时含 Vertex + Fragment | `ALL` | `VK_SHADER_STAGE_VERTEX | FRAGMENT` |
+| Compute | `ALL` | `VK_SHADER_STAGE_COMPUTE_BIT` |
+
+### Descriptor Range Type 映射
+
+| RHI `RHIDescriptorType` | DX12 `D3D12_DESCRIPTOR_RANGE_TYPE` | Vulkan `VkDescriptorType` |
+|------------------------|-------------------------------------|--------------------------|
+| `UniformBuffer` / `UniformBufferDynamic` | `CBV` | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` / `UNIFORM_BUFFER_DYNAMIC` |
+| `StorageBuffer` / `StorageBufferDynamic` | `UAV` | `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` / `STORAGE_BUFFER_DYNAMIC` |
+| `SampledImage` / `CombinedImageSampler` / `InputAttachment` | `SRV` | `VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE` / `COMBINED_IMAGE_SAMPLER` / `INPUT_ATTACHMENT` |
+| `StorageImage` | `UAV` | `VK_DESCRIPTOR_TYPE_STORAGE_IMAGE` |
+| `Sampler` | `SAMPLER` | `VK_DESCRIPTOR_TYPE_SAMPLER` |
