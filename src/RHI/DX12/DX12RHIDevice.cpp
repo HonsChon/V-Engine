@@ -98,7 +98,7 @@ void DX12RHIDevice::createDevice()
     }
 
     // create factory
-    uint factoryFlags = 0;
+    UINT factoryFlags = 0;
     
 #ifdef NDEBUG
     factoryFlags = 0;

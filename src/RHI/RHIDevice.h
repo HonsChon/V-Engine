@@ -28,6 +28,7 @@ struct RHIBindingLayoutDesc;
 struct RHIBindingGroupDesc;
 struct RHIRenderPassDesc;
 struct RHIFramebufferDesc;
+struct RHISwapChainDesc;
 
 // =============================================================================
 // RHI Device — Abstract Core Factory Interface

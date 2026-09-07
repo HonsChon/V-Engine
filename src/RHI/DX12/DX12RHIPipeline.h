@@ -83,9 +83,9 @@ public:
     std::shared_ptr<RHIPipeline> build() override;
 
 private:
-    void buildRootSignature(ComPtr<ID3D12RootSignature>& outRootSig);
-    void buildGraphicsPipelineState(ComPtr<ID3D12RootSignature>& rootSig,
-                                     ComPtr<ID3D12PipelineState>& outPSO);
+    void buildRootSignature(Microsoft::WRL::ComPtr<ID3D12RootSignature>& outRootSig);
+    void buildGraphicsPipelineState(Microsoft::WRL::ComPtr<ID3D12RootSignature>& rootSig,
+                                     Microsoft::WRL::ComPtr<ID3D12PipelineState>& outPSO);
 
     DX12RHIDevice* device_;
 

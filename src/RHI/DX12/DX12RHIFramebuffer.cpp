@@ -6,6 +6,8 @@
 
 #include <stdexcept>
 
+using namespace DX12TypeConversions;
+
 DX12RHIFramebuffer::DX12RHIFramebuffer(DX12RHIDevice* device, const RHIFramebufferDesc& desc)
     : width_(desc.width)
     , height_(desc.height)

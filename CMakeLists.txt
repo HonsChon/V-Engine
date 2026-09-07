@@ -555,6 +555,7 @@ if(WIN32)
     # DirectX 12 支持 (通过 DirectX-Headers 开源项目)
     target_link_libraries(${PROJECT_NAME} PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX-Guids)
     target_link_libraries(${PROJECT_NAME} PRIVATE d3d12 dxgi dxguid)
+    target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler)  # D3DReadFileToBlob (DX12RHIShader)
     
     # Visual Studio 特定设置
     if(MSVC)
@@ -599,6 +600,51 @@ elseif(UNIX)
         VK_USE_PLATFORM_XCB_KHR
         GLFW_INCLUDE_VULKAN
     )
+endif()
+
+# ============================================================
+# DX12 冒烟 demo target (仅 Windows): GLFW 窗口 + 裸 D3D12 device/swapchain
+# ============================================================
+# 仅验证编译基线与设备/交换链创建链路,不画内容。
+# Phase 1 之后此处可改用 DX12 RHI 类并升级为真实 demo。
+if(WIN32)
+    add_executable(rhi_dx12_smoke src/smoke/dx12_smoke/main.cpp)
+
+    target_compile_definitions(rhi_dx12_smoke PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        UNICODE
+        _UNICODE
+    )
+
+    # DirectX-Headers 子模块 + Windows 平台库
+    target_link_libraries(rhi_dx12_smoke PRIVATE Microsoft::DirectX-Headers)
+    target_link_libraries(rhi_dx12_smoke PRIVATE d3d12 dxgi dxguid)
+
+    if(glfw3_FOUND)
+        target_link_libraries(rhi_dx12_smoke PRIVATE glfw)
+    elseif(DEFINED GLFW_LIBRARY)
+        target_link_libraries(rhi_dx12_smoke PRIVATE ${GLFW_LIBRARY})
+    endif()
+
+    if(MSVC)
+        target_compile_options(rhi_dx12_smoke PRIVATE /W4 /MP)
+        set_target_properties(rhi_dx12_smoke PROPERTIES
+            VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        )
+    endif()
+
+    source_group("Source Files/Smoke" FILES src/smoke/dx12_smoke/main.cpp)
+
+    # 运行时依赖: 将 vcpkg 的 glfw DLL 拷贝到冒烟目标旁
+    if(TARGET glfw)
+        add_custom_command(TARGET rhi_dx12_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:glfw>"
+                "$<TARGET_FILE_DIR:rhi_dx12_smoke>/$<TARGET_FILE_NAME:glfw>"
+            COMMENT "Copying glfw DLL next to rhi_dx12_smoke"
+        )
+    endif()
 endif()
 
 # ============================================================
