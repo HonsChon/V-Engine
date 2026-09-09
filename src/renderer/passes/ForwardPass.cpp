@@ -1,6 +1,7 @@
 #include "ForwardPass.h"
 
 // Pure RHI headers — NO Vulkan backend headers
+#include "Mesh.h"
 #include "RHIDevice.h"
 #include "RHIBuffer.h"
 #include "RHIDescriptor.h"
@@ -82,17 +83,16 @@ void ForwardPass::createBindingLayouts() {
 }
 
 void ForwardPass::createPipeline() {
-    constexpr uint32_t vertexStride = sizeof(float) * 11;
+    const auto vertexAttrs = Vertex::getRHIAttributes();
 
     auto builder = rhiDevice_->createGraphicsPipelineBuilder();
     builder->setVertexShader("shaders/pbr_vert.spv")
         .setFragmentShader("shaders/pbr_frag.spv")
-        .addVertexBinding(0, vertexStride, RHIVertexInputRate::Vertex)
-        .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0)
-        .addVertexAttribute(0, 1, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 3)
-        .addVertexAttribute(0, 2, RHIFormat::R32G32_SFLOAT,    sizeof(float) * 6)
-        .addVertexAttribute(0, 3, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 8)
-        .setTopology(RHIPrimitiveTopology::TriangleList)
+        .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+    for (const auto& a : vertexAttrs) {
+        builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+    }
+    builder->setTopology(RHIPrimitiveTopology::TriangleList)
         .setCullMode(RHICullMode::Back)
         .setFrontFace(RHIFrontFace::CounterClockwise)
         .setPolygonMode(RHIPolygonMode::Fill)

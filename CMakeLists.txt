@@ -305,12 +305,11 @@ set(RHI_HEADERS
 )
 
 # Core - 核心工具层：与渲染无关的基础设施
+# (Utils.h/.cpp 已删除 — Vulkan debug messenger 与 radian/degree 辅助均无调用者)
 set(CORE_SOURCES
-    src/Core/Utils.cpp
 )
 
 set(CORE_HEADERS
-    src/Core/Utils.h
 )
 
 # Renderer Passes - 渲染通道

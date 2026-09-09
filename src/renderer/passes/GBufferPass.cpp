@@ -1,6 +1,7 @@
 #include "GBufferPass.h"
 
 // RHI headers (Pure RHI — no backend includes)
+#include "Mesh.h"
 #include "RHIDevice.h"
 #include "RHIBuffer.h"
 #include "RHITexture.h"
@@ -227,18 +228,17 @@ void GBufferPass::createBindingLayouts() {
 }
 
 void GBufferPass::createPipeline() {
-    constexpr uint32_t vertexStride = sizeof(float) * 11;
+    const auto vertexAttrs = Vertex::getRHIAttributes();
 
     auto builder = rhiDevice_->createGraphicsPipelineBuilder();
 
     builder->setVertexShader("shaders/gbuffer_vert.spv")
         .setFragmentShader("shaders/gbuffer_frag.spv")
-        .addVertexBinding(0, vertexStride, RHIVertexInputRate::Vertex)
-        .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0)                      // Position
-        .addVertexAttribute(0, 1, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 3)       // Normal
-        .addVertexAttribute(0, 2, RHIFormat::R32G32_SFLOAT,    sizeof(float) * 6)       // TexCoord
-        .addVertexAttribute(0, 3, RHIFormat::R32G32B32_SFLOAT, sizeof(float) * 8)       // Tangent
-        .setTopology(RHIPrimitiveTopology::TriangleList)
+        .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+    for (const auto& a : vertexAttrs) {
+        builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+    }
+    builder->setTopology(RHIPrimitiveTopology::TriangleList)
         .setCullMode(RHICullMode::Back)
         .setFrontFace(RHIFrontFace::CounterClockwise)
         .setPolygonMode(RHIPolygonMode::Fill)

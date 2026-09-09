@@ -200,7 +200,7 @@ public:
     // 获取 ClusterCullingPass（用于访问GPU 选择结果）
     ClusterCullingPass* getCullingPass() const { return m_cullingPass.get(); }
     
-    // 帧结束后读取 GPU 数据（在 vkWaitForFences 之后、命令录制之前调用）
+    // 帧结束后读取 GPU 数据（在等待该帧 fence 之后、命令录制之前调用）
     // @param frameIndex 当前帧索引（与渲染器的currentFrame 对应）
     void readbackCullingResults(uint32_t frameIndex) {
         if (m_cullingPass) {

@@ -138,7 +138,7 @@ void WaterPass::createBindingGroups() {
 }
 
 void WaterPass::createPipeline() {
-    constexpr uint32_t stride = sizeof(Vertex);
+    const auto vertexAttrs = Vertex::getRHIAttributes();
     RHIColorBlendAttachment blend{};
     blend.blendEnable = true;
     blend.srcColorFactor = RHIBlendFactor::SrcAlpha;
@@ -151,12 +151,11 @@ void WaterPass::createPipeline() {
     auto builder = rhiDevice_->createGraphicsPipelineBuilder();
     builder->setVertexShader("shaders/water_vert.spv")
         .setFragmentShader("shaders/water_frag.spv")
-        .addVertexBinding(0, stride, RHIVertexInputRate::Vertex)
-        .addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, pos))
-        .addVertexAttribute(0, 1, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, normal))
-        .addVertexAttribute(0, 2, RHIFormat::R32G32_SFLOAT,    offsetof(Vertex, texCoord))
-        .addVertexAttribute(0, 3, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, tangent))
-        .setTopology(RHIPrimitiveTopology::TriangleList)
+        .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+    for (const auto& a : vertexAttrs) {
+        builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+    }
+    builder->setTopology(RHIPrimitiveTopology::TriangleList)
         .setCullMode(RHICullMode::None)
         .setFrontFace(RHIFrontFace::CounterClockwise)
         .setPolygonMode(RHIPolygonMode::Fill)

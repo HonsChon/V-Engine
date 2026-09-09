@@ -112,7 +112,7 @@ void ClusterCullingPass::updateDescriptorSet() {
     if (!m_clusterBuffer_) return;
 
     m_bindingGroup_->updateBuffer(0, m_uniformBuffer_.get(), 0, sizeof(ClusterCullingUniforms));
-    m_bindingGroup_->updateBuffer(1, m_clusterBuffer_, 0, 0);  // 0 = VK_WHOLE_SIZE equivalent
+    m_bindingGroup_->updateBuffer(1, m_clusterBuffer_, 0, 0);  // size 0 = whole buffer (backend-specific)
     RHIBuffer* transformBuf = m_transformBuffer_ ? m_transformBuffer_ : m_dummyStorageBuffer_.get();
     m_bindingGroup_->updateBuffer(2, transformBuf, 0, 0);
     m_bindingGroup_->updateBuffer(3, m_visibleIndicesBuffer_.get(), 0, sizeof(uint32_t) * MAX_CLUSTERS);
