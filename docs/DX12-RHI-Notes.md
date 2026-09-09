@@ -425,3 +425,43 @@ Root Signature Layout:
 | `SampledImage` / `CombinedImageSampler` / `InputAttachment` | `SRV` | `VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE` / `COMBINED_IMAGE_SAMPLER` / `INPUT_ATTACHMENT` |
 | `StorageImage` | `UAV` | `VK_DESCRIPTOR_TYPE_STORAGE_IMAGE` |
 | `Sampler` | `SAMPLER` | `VK_DESCRIPTOR_TYPE_SAMPLER` |
+
+### 附录：register / space 映射约定（实现为准）
+
+> 此附录是代码注释（`DX12RHIPipeline.h`、`scripts/dx12/inject_hlsl.ps1`）引用的
+> "docs/DX12-RHI-Notes.md §11 appendix"，在此正式落档。Phase 1 实现比上文
+> "每个 entry 一个 root parameter" 的旧草图更进了一步，以 **layout 分组** 构建：
+
+#### 已落地的最终结构（与上文代码草图不同，以此为准）
+
+1. **每个 binding layout 最多产生两个 root parameter 表**：
+   - 资源表：该 layout 内所有 CBV/SRV/UAV entry（合并到一个 `D3D12_DESCRIPTOR_RANGE` 数组）
+   - 采样器表：该 layout 内所有 `Sampler` entry（D3D12 禁止把 SAMPLER range 混进资源表）
+   - 同一 layout 内同 stage 的 entry 按 binding 升序合并到同一 range 数组。
+2. **root parameter 顺序**：所有 layout 的表按 layout 顺序排列，32-bit constants
+   （push constants）参数放在最后。
+3. **ShaderVisibility**：取该表内 entry 的 stage 并集 —— 仅 Vertex → `VERTEX`；
+   仅 Fragment → `PIXEL`；Vertex+Fragment / Compute → `ALL`。
+4. **register / space 约定**（spirv-cross 产物与 C++ root signature 必须一致）：
+   - binding layout `i` → **register space `i`**
+   - layout 内 entry `binding b` → **register `b`**（`ShaderRegister = b, RegisterSpace = i`）
+   - push constants → 单个 32-bit constants 参数，`ShaderRegister 0`，
+     **register space = bindingLayouts_.size()**（`scripts/dx12/inject_hlsl.ps1`
+     给 spirv-cross 生成的 push-constant `cbuffer` 追加 `register(b0, space=N)`，N 即该值）
+5. **descriptor 类型映射**：`UniformBuffer/Dynamic→CBV`、`StorageBuffer/Dynamic + StorageImage→UAV`、
+   `SampledImage/CombinedImageSampler/InputAttachment→SRV`、`Sampler→SAMPLER`（见上表）。
+6. **采样器**：root signature 不声明 static sampler（`NumStaticSamplers = 0`），
+   采样器走独立 shader-visible SAMPLER 描述符堆 + 每 layout 的采样器表。
+7. **CommandBuffer 侧消费**：`DX12RHICommandBuffer::setBindingGroup(set, group)` 用
+   pipeline 缓存的 `getTableRootParam(set, isSamplerTable)` 找到对应 root 参数；
+   `pushConstants` 用 `getPushConstantRootParam()`，不再假设 index 0。
+
+#### 版本对齐清单（改动 root signature 时必须同步）
+
+| 位置 | 内容 |
+|------|------|
+| `DX12RHIPipeline::build()` | 表分组 + visibility + 参数顺序 |
+| `DX12RHIDescriptor.cpp` | binding group 描述符按"资源组 + 采样器组"顺序写入 ring |
+| `scripts/dx12/inject_hlsl.ps1` | push-constant `space = layout 数` |
+| CMake `CompileDX12Shaders` | 每 shader 传入该 shader 对应管线的 layout 数 |
+| smoke demo 断言 | DXIL 的 root 绑定与 C++ root signature 一致 |

@@ -1,6 +1,7 @@
 # DX12 后端补齐计划
 
 > 状态: 草案(2026/09/07 制定)
+> Phase 0/1/2 已完成(2026/09/09,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
 > 背景: 基于对 `src/RHI/DX12` 与 `src/RHI/Vulkan` 全量对比分析,以及上层 RHI 消费方式调研。Vulkan 是完整可运行后端;DX12 目前是"可编译的部分脚手架",且从未在真实 MSVC/Windows 上编译过。
 
 ## 目标与约束(已确认的方向)
@@ -188,3 +189,28 @@ Phase 0 → Phase 1(1a → 1c → 1d → 1e → 1f,Windows 上持续冒烟)→ P
 ```
 
 Phase 2 的 RHI 接口收敛项(submit 签名、command buffer 会话语义)尽量前移与 Phase 1 并行,避免 DX12 demo 代码随后返工。
+
+---
+
+## 执行记录
+
+### Phase 0 & Phase 1 — 已完成(2026/09/09, commit c51fbb5 及之前)
+DX12 后端全接口实现 + `rhi_dx12_smoke` 冒烟 demo(纹理三角形、2-frame、resize、debug layer 自检)。
+
+### Phase 2 — 已完成(2026/09/09, commit af1358e / 3c638ef / b63c237)
+- `submitGraphicsQueue` 删除泄漏的 `uint32_t waitStages`;Vulkan 内部默认 `COLOR_ATTACHMENT_OUTPUT` wait stage(`RHIDevice.h`)
+- `RHICommandBuffer` 增加 `begin()/end()/getNativeHandle()`(Vulkan: vkReset/vkBegin/vkEnd;DX12: allocator+list Reset / Close);`begin()` 清空 wrapper 缓存状态
+- `Engine.cpp` 每帧持有一个持久 RHICommandBuffer wrapper,`drawFrame()` 内裸 `vkReset/Begin/EndCommandBuffer` 全部移除
+- `SceneRenderer` 删除过渡 `VkCommandBuffer` 与 12 处每段 `wrapCommandBuffer`,record 系列签名全部 `RHICommandBuffer*`
+- ImGui 后端化:`RHIDevice::getBackend()`;`ImGuiLayer` pimpl 化并按后端分发(Vulkan 路径保留;**DX12 分支编译就绪**,运行时验证在 Phase 3)。DX12 分支自建 shader-visible SRV heap + bump 分配回调;CMake WIN32 编译 `imgui_impl_dx12.cpp`
+- 死代码清理:`Window::createSurface`/`getRequiredInstanceExtensions`、`Core/Utils.*`(全文件零调用)删除;`Mesh.h` 的 Vk vertex-input helper 替换为 RHI 约定单一事实来源(`Vertex::getStride()/getRHIAttributes()`),Forward/GBuffer/NaniteDebug/Water 四个 pass 统一消费
+- 构建卫生:MSVC 增加 `/utf-8`(源文件为 UTF-8,CP936 误读会产生假续行符破坏代码结构 —— ImGuiLayer 重构时实际踩到)
+- 验收(Windows):VulkanPBR 构建并运行无回归;`rhi_dx12_smoke` 改用新会话 API + submit 签名,exit 0、validation errors 0
+
+**与计划偏差**
+- ImGui DX12 分支不再需要 swapchain 暴露 per-image RTV handle:`imgui_impl_dx12` 主视口 `RenderDrawData` 不设置 RTV,引擎在 RHI `beginRenderPass`(已绑定 back-buffer RTV)内渲染 UI —— 与本仓库现有"render pass 内嵌 UI"模式一致;仅需 device/queue/RTV format 的 native 访问(已有)
+- Phase 2 验收原本含"Windows 上 Vulkan 分支可编译(可选)" —— 实际在 Windows 上完整构建并运行了 Vulkan 引擎
+
+### 待办(进入 Phase 3)
+- `Engine.cpp:75` 仍硬编码 `VulkanRHIDevice`;`RHI::CreateDevice` 的 DX12 分支仍 throw(Phase 3 首项)
+- ImGui DX12 分支、`.dxil` shader 内容管线为全引擎 shader 集落地后,运行期验证
