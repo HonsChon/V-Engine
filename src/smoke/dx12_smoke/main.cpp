@@ -302,9 +302,9 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            dx12->resetCommandBuffer(frame);
             std::shared_ptr<RHICommandBuffer> cmd =
                 device->wrapCommandBuffer(commandBuffers[frame]);
+            cmd->begin();   // resets per-frame allocator + list, starts recording
 
             std::vector<RHIClearValue> clears;
             clears.push_back(RHIClearValue::Color(0.10f, 0.16f, 0.30f, 1.0f));
@@ -331,12 +331,10 @@ int main(int argc, char** argv) {
                 cmd->draw(3, 1, 0, 0);
             }
             cmd->endRenderPass();
+            cmd->end();     // Close the command list (was: dx12->getCommandList(frame)->Close())
             cmd.reset();
 
-            // Close the raw command list, then submit + present (Engine order).
-            dx12->getCommandList(frame)->Close();
-
-            device->submitGraphicsQueue({}, {}, { commandBuffers[frame] }, {}, fences[frame]);
+            device->submitGraphicsQueue({}, { commandBuffers[frame] }, {}, fences[frame]);
             swapChain->present(nullptr, imageIndex);
             ++frameCount;
 

@@ -18,8 +18,10 @@ public:
     VulkanRHICommandBuffer(VulkanRHIDevice* device, VkCommandBuffer cmd);
     ~VulkanRHICommandBuffer() override = default;
 
-    // Replace the underlying command buffer (for per-frame reuse)
-    void reset(VkCommandBuffer cmd);
+    // ---- Record session (RHICommandBuffer) ----
+    void begin() override;                  // vkReset + vkBeginCommandBuffer
+    void end() override;                    // vkEndCommandBuffer
+    void* getNativeHandle() const override { return (void*)cmd_; }
     VkCommandBuffer getVkCommandBuffer() const { return cmd_; }
 
     // ---- RenderPass ----

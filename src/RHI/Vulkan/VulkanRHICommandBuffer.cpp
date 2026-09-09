@@ -8,15 +8,31 @@
 #include "VulkanTypeConversions.h"
 #include "IVulkanNative.h"
 
+#include <stdexcept>
+
 using namespace VulkanTypeConversions;
 
 VulkanRHICommandBuffer::VulkanRHICommandBuffer(VulkanRHIDevice* device, VkCommandBuffer cmd)
     : device_(device), cmd_(cmd) {}
 
-void VulkanRHICommandBuffer::reset(VkCommandBuffer cmd) {
-    cmd_ = cmd;
+void VulkanRHICommandBuffer::begin() {
+    if (vkResetCommandBuffer(cmd_, 0) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHICommandBuffer] Failed to reset command buffer!");
+    }
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(cmd_, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHICommandBuffer] Failed to begin command buffer!");
+    }
+    // Clear per-session cached state (fresh wrapper equivalent).
     currentPipelineLayout_ = VK_NULL_HANDLE;
     currentBindPoint_ = VK_PIPELINE_BIND_POINT_GRAPHICS;
+}
+
+void VulkanRHICommandBuffer::end() {
+    if (vkEndCommandBuffer(cmd_) != VK_SUCCESS) {
+        throw std::runtime_error("[VulkanRHICommandBuffer] Failed to record command buffer!");
+    }
 }
 
 // ---- RenderPass ----

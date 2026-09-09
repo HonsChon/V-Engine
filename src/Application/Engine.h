@@ -21,6 +21,7 @@ class ImGuiLayer;
 class Camera;
 class RHIDevice;
 class RHISwapChain;
+class RHICommandBuffer;
 
 namespace VulkanEngine {
     class Scene;
@@ -100,6 +101,9 @@ private:
     std::vector<void*> m_inFlightFences;
     std::vector<void*> m_imagesInFlight;
     std::vector<void*> m_commandBuffers;
+    // Persistent RHI wrappers over m_commandBuffers (one per frame; begin/end
+    // the record session each frame). Index-aligned with m_commandBuffers.
+    std::vector<std::shared_ptr<RHICommandBuffer>> m_rhiCommandBuffers;
     uint32_t m_currentFrame = 0;
     bool m_framebufferResized = false;
 

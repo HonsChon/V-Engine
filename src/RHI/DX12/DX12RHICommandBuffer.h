@@ -18,9 +18,11 @@ public:
     DX12RHICommandBuffer(DX12RHIDevice* device, ID3D12GraphicsCommandList* cmdList);
     ~DX12RHICommandBuffer() override = default;
 
-    /// Re-point the wrapper at a (freshly reset) command list. All cached state
-    /// is cleared.
-    void reset(ID3D12GraphicsCommandList* cmdList);
+    // ---- Record session (RHICommandBuffer) ----
+    // begin() = allocator Reset + list Reset (device pool), end() = list Close().
+    void begin() override;
+    void end() override;
+    void* getNativeHandle() const override { return cmdList_; }
     ID3D12GraphicsCommandList* getD3D12CommandList() const { return cmdList_; }
 
     void beginRenderPass(RHIRenderPass* renderPass, RHIFramebuffer* framebuffer,

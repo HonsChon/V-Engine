@@ -109,7 +109,6 @@ public:
 
     // ---- Queue submission ----
     void submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
-                              const std::vector<uint32_t>& waitStages,
                               const std::vector<void*>& commandBuffers,
                               const std::vector<void*>& signalSemaphores,
                               void* fence) override;

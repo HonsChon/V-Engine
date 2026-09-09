@@ -28,12 +28,20 @@ DX12RHICommandBuffer::DX12RHICommandBuffer(DX12RHIDevice* device, ID3D12Graphics
 {
 }
 
-void DX12RHICommandBuffer::reset(ID3D12GraphicsCommandList* cmdList) {
-    cmdList_ = cmdList;
+void DX12RHICommandBuffer::begin() {
+    // Reset the per-frame allocator + list through the device pool (the list is
+    // left in the recording state), then clear all cached session state.
+    device_->resetCommandBuffer(cmdList_);
     currentPipeline_ = nullptr;
     isCompute_ = false;
     activeRenderPass_ = nullptr;
     activeFramebuffer_ = nullptr;
+}
+
+void DX12RHICommandBuffer::end() {
+    if (FAILED(cmdList_->Close())) {
+        throw std::runtime_error("[DX12RHICommandBuffer] failed to close command list");
+    }
 }
 
 // =============================================================================

@@ -21,6 +21,22 @@ class RHICommandBuffer {
 public:
     virtual ~RHICommandBuffer() = default;
 
+    // ---- Record session ----
+    /// Reset any previous recording and begin a new recording session on the
+    /// underlying native command buffer. Must be paired with end() before the
+    /// command buffer is submitted (Vulkan: vkReset/vkBeginCommandBuffer;
+    /// DX12: allocator + list Reset, leaving the list in recording state).
+    virtual void begin() = 0;
+
+    /// Stop recording. After end() the native command buffer is ready for
+    /// submission (Vulkan: vkEndCommandBuffer; DX12: list Close()).
+    virtual void end() = 0;
+
+    /// Native command buffer handle (e.g. VkCommandBuffer or
+    /// ID3D12GraphicsCommandList cast to void*) for backend-integration
+    /// layers (ImGui, tooling). Valid while the wrapper is alive.
+    virtual void* getNativeHandle() const = 0;
+
     // ---- RenderPass ----
     virtual void beginRenderPass(RHIRenderPass* renderPass, RHIFramebuffer* framebuffer,
                                   const std::vector<RHIClearValue>& clearValues) = 0;

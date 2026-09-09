@@ -139,8 +139,8 @@ public:
     // ---- Queue submission ----
     /// Submit command buffers to the graphics queue.
     /// All parameters are arrays of native handles (void*).
+    /// The backend chooses the default wait stage for waitSemaphores.
     virtual void submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
-                                      const std::vector<uint32_t>& waitStages,
                                       const std::vector<void*>& commandBuffers,
                                       const std::vector<void*>& signalSemaphores,
                                       void* fence) = 0;

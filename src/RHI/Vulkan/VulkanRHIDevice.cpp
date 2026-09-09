@@ -542,7 +542,6 @@ std::vector<void*> VulkanRHIDevice::allocateCommandBuffers(uint32_t count) {
 // =============================================================================
 
 void VulkanRHIDevice::submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
-                                           const std::vector<uint32_t>& waitStages,
                                            const std::vector<void*>& commandBuffers,
                                            const std::vector<void*>& signalSemaphores,
                                            void* fence) {
@@ -551,7 +550,10 @@ void VulkanRHIDevice::submitGraphicsQueue(const std::vector<void*>& waitSemaphor
     for (size_t i = 0; i < waitSemaphores.size(); i++)
         vkWaitSems[i] = static_cast<VkSemaphore>(waitSemaphores[i]);
 
-    std::vector<VkPipelineStageFlags> vkWaitStages(waitStages.begin(), waitStages.end());
+    // Backend-chosen default wait stage (single graphics queue; matches the
+    // color-attachment wait the engine historically passed for acquire).
+    std::vector<VkPipelineStageFlags> vkWaitStages(
+        vkWaitSems.size(), VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
     std::vector<VkCommandBuffer> vkCmds(commandBuffers.size());
     for (size_t i = 0; i < commandBuffers.size(); i++)

@@ -287,7 +287,7 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
 // 命令录制 — 入口
 // ============================================================
 
-void SceneRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
+void SceneRenderer::recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
         recordDeferredCommands(cmd, imageIndex, frameIndex);
     } else {
@@ -299,11 +299,10 @@ void SceneRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uin
 // 命令录制 — 前向渲染
 // ============================================================
 
-void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
+void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     // GPU Culling (Compute, before render pass)
     if (m_settings.enableGPUCulling && m_gpuDrivenRenderer) {
-        auto rhiCmdCull = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-        m_gpuDrivenRenderer->executeCulling(rhiCmdCull.get());
+        m_gpuDrivenRenderer->executeCulling(cmd);
         // Barrier already handled inside FrustumCullingPass::record()
     }
 
@@ -314,29 +313,26 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
 
     // Begin render pass (Pure RHI)
     {
-        auto rhiCmdRP = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
         std::vector<RHIClearValue> clears = {
             RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
             RHIClearValue::DepthStencil(1.0f, 0)
         };
-        rhiCmdRP->beginRenderPass(
+        cmd->beginRenderPass(
             m_swapChain->getRHIRenderPass(),
             m_swapChain->getRHIFramebuffer(imageIndex),
             clears);
     }
 
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
 
     if (m_forwardPass && m_scene && m_renderSystem) {
-        auto rhiCmd = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-
-        m_forwardPass->begin(rhiCmd.get());
-        m_forwardPass->bindPipeline(rhiCmd.get());
+        m_forwardPass->begin(cmd);
+        m_forwardPass->bindPipeline(cmd);
 
         if (m_settings.enableGPUCulling && m_gpuDrivenRenderer) {
             RHIBuffer* indirectBuffer = m_gpuDrivenRenderer->getIndirectDrawBuffer();
             if (indirectBuffer != nullptr) {
-                m_forwardPass->bindGlobalDescriptorSet(rhiCmd.get(), frameIndex);
+                m_forwardPass->bindGlobalDescriptorSet(cmd, frameIndex);
 
                 const auto& visibleIndices = m_gpuDrivenRenderer->getVisibleIndices();
                 uint32_t visibleCount = static_cast<uint32_t>(visibleIndices.size());
@@ -357,7 +353,7 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
                     auto gpuMesh = VulkanEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
                     if (!gpuMesh) continue;
 
-                    m_forwardPass->pushModelMatrix(rhiCmd.get(), transform.getTransform());
+                    m_forwardPass->pushModelMatrix(cmd, transform.getTransform());
 
                     ForwardPass::MaterialDescriptor* matDesc = nullptr;
                     for (const auto& r : m_renderSystem->getRenderables()) {
@@ -366,174 +362,164 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
                         }
                     }
                     if (!matDesc || !matDesc->valid) continue;
-                    m_forwardPass->bindMaterialDescriptorSet(rhiCmd.get(), frameIndex, matDesc);
+                    m_forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, matDesc);
 
-                    m_forwardPass->drawMesh(rhiCmd.get(),
+                    m_forwardPass->drawMesh(cmd,
                         gpuMesh->getVertexBuffer(),
                         gpuMesh->getIndexBuffer(),
                         gpuMesh->getIndexCount());
                 }
             } else {
-                m_renderSystem->render(rhiCmd.get(), m_forwardPass.get(), frameIndex);
+                m_renderSystem->render(cmd, m_forwardPass.get(), frameIndex);
             }
         } else {
             if (m_settings.showClusterVisualization && m_naniteDebugPass) {
                 recordNaniteDebugCommands(cmd, imageIndex);
             } else {
-                m_renderSystem->render(rhiCmd.get(), m_forwardPass.get(), frameIndex);
+                m_renderSystem->render(cmd, m_forwardPass.get(), frameIndex);
             }
         }
     }
 
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // UI
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
     updateUI();
     renderUI(cmd);
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-    {
-        auto rhiCmdEnd = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-        rhiCmdEnd->endRenderPass();
-    }
+    cmd->endRenderPass();
 }
 
 // ============================================================
 // 命令录制 — 延迟渲染
 // ============================================================
 
-void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Deferred Pipeline", 0.2f, 0.6f, 0.9f, 1.0f);
+void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Deferred Pipeline", 0.2f, 0.6f, 0.9f, 1.0f);
 
     auto dExtent = m_swapChain->getExtent();
     uint32_t w = dExtent.width;
     uint32_t h = dExtent.height;
 
     // === Pass 1: GBuffer ===
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "GBuffer Pass", 0.4f, 0.8f, 0.2f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "GBuffer Pass", 0.4f, 0.8f, 0.2f, 1.0f);
     if (m_gbuffer && m_scene) {
-        auto rhiCmdGBuffer = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-        m_gbuffer->beginRenderPass(rhiCmdGBuffer.get());
-        m_gbuffer->bindPipeline(rhiCmdGBuffer.get());
+        m_gbuffer->beginRenderPass(cmd);
+        m_gbuffer->bindPipeline(cmd);
 
         if (m_renderSystem) {
-            m_renderSystem->render(rhiCmdGBuffer.get(), m_gbuffer.get(), frameIndex);
+            m_renderSystem->render(cmd, m_gbuffer.get(), frameIndex);
         }
-        m_gbuffer->endRenderPass(rhiCmdGBuffer.get());
+        m_gbuffer->endRenderPass(cmd);
     }
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 1.5: Blit Albedo → SceneColor ===
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Blit Albedo -> SceneColor", 0.9f, 0.7f, 0.2f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Blit Albedo -> SceneColor", 0.9f, 0.7f, 0.2f, 1.0f);
     if (m_gbuffer && m_sceneColorTexture) {
-        auto rhiCmdBlit = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-
         // Pre-blit transitions
-        rhiCmdBlit->transitionImageLayout(
+        cmd->transitionImageLayout(
             m_gbuffer->getAlbedoTexture(),
             RHIImageLayout::ShaderReadOnly, RHIImageLayout::TransferSrc,
             RHIPipelineStage::ColorAttachmentOutput, RHIPipelineStage::Transfer);
 
-        rhiCmdBlit->transitionImageLayout(
+        cmd->transitionImageLayout(
             m_sceneColorTexture.get(),
             RHIImageLayout::Undefined, RHIImageLayout::TransferDst,
             RHIPipelineStage::TopOfPipe, RHIPipelineStage::Transfer);
 
         // Blit
-        rhiCmdBlit->blitImage(
+        cmd->blitImage(
             m_gbuffer->getAlbedoTexture(), RHIImageLayout::TransferSrc,
             m_sceneColorTexture.get(), RHIImageLayout::TransferDst,
             w, h, w, h, RHIFilter::Linear);
 
         // Post-blit transitions
-        rhiCmdBlit->transitionImageLayout(
+        cmd->transitionImageLayout(
             m_gbuffer->getAlbedoTexture(),
             RHIImageLayout::TransferSrc, RHIImageLayout::ShaderReadOnly,
             RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
 
-        rhiCmdBlit->transitionImageLayout(
+        cmd->transitionImageLayout(
             m_sceneColorTexture.get(),
             RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
             RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
     }
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 1.8: SSAO ===
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "SSAO Pass", 0.6f, 0.3f, 0.8f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "SSAO Pass", 0.6f, 0.3f, 0.8f, 1.0f);
     if (m_ssaoPass && m_gbuffer) {
         if (m_settings.enableSSAO) {
-            auto rhiCmdSSAO = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
             float aspect = (float)w / (float)h;
             glm::mat4 projection = glm::perspective(
                 glm::radians(m_camera ? m_camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f);
             projection[1][1] *= -1;
             glm::mat4 view = m_camera ? m_camera->getViewMatrix() : glm::mat4(1.0f);
-            m_ssaoPass->execute(rhiCmdSSAO.get(), m_gbuffer.get(), frameIndex, projection, view);
+            m_ssaoPass->execute(cmd, m_gbuffer.get(), frameIndex, projection, view);
         } else {
             // SSAO 关闭：清空 AO 纹理为白色（1.0 = 无遮蔽）
-            auto rhiCmdClear = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-            rhiCmdClear->transitionImageLayout(
+            cmd->transitionImageLayout(
                 m_ssaoPass->getOutputAOTexture(),
                 RHIImageLayout::ShaderReadOnly, RHIImageLayout::TransferDst,
                 RHIPipelineStage::FragmentShader, RHIPipelineStage::Transfer);
-            rhiCmdClear->clearColorImage(
+            cmd->clearColorImage(
                 m_ssaoPass->getOutputAOTexture(), 1.0f, 1.0f, 1.0f, 1.0f);
-            rhiCmdClear->transitionImageLayout(
+            cmd->transitionImageLayout(
                 m_ssaoPass->getOutputAOTexture(),
                 RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
                 RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
         }
     }
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 2: SSR ===
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "SSR Pass", 0.2f, 0.8f, 0.8f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "SSR Pass", 0.2f, 0.8f, 0.8f, 1.0f);
     if (m_ssrPass && m_gbuffer && m_sceneColorTexture) {
-        auto rhiCmdSSR = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-        m_ssrPass->execute(rhiCmdSSR.get(), m_gbuffer.get(),
+        m_ssrPass->execute(cmd, m_gbuffer.get(),
             m_sceneColorTexture.get(), m_sceneColorSampler.get(), frameIndex);
     }
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 3: Final Composition (Swapchain RenderPass) ===
-    m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Final Composition", 0.9f, 0.4f, 0.1f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Final Composition", 0.9f, 0.4f, 0.1f, 1.0f);
     {
-        auto rhiCmdFinal = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
         std::vector<RHIClearValue> clears = {
             RHIClearValue::Color(0.02f, 0.05f, 0.1f, 1.0f),
             RHIClearValue::DepthStencil(1.0f, 0)
         };
-        rhiCmdFinal->beginRenderPass(
+        cmd->beginRenderPass(
             m_swapChain->getRHIRenderPass(),
             m_swapChain->getRHIFramebuffer(imageIndex),
             clears);
 
         // Deferred Lighting
-        m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Lighting Pass", 1.0f, 0.9f, 0.3f, 1.0f);
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Lighting Pass", 1.0f, 0.9f, 0.3f, 1.0f);
         if (m_lightingPass && m_gbuffer) {
-            m_lightingPass->render(rhiCmdFinal.get(), frameIndex);
+            m_lightingPass->render(cmd, frameIndex);
         }
-        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
         // Water
-        m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
         if (m_waterPass) {
-            m_waterPass->render(rhiCmdFinal.get(), frameIndex);
+            m_waterPass->render(cmd, frameIndex);
         }
-        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
         // UI
-        m_rhiDevice->beginDebugLabel(static_cast<void*>(cmd), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
         updateUI();
         renderUI(cmd);
-        m_rhiDevice->endDebugLabel(static_cast<void*>(cmd));
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-        rhiCmdFinal->endRenderPass();
+        cmd->endRenderPass();
     }
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd)); // end Final Composition
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle()); // end Final Composition
 
-    m_rhiDevice->endDebugLabel(static_cast<void*>(cmd)); // end Deferred Pipeline
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle()); // end Deferred Pipeline
 }
 
 // ============================================================
@@ -556,11 +542,11 @@ void SceneRenderer::updateUI() {
     }
 }
 
-void SceneRenderer::renderUI(VkCommandBuffer cmd) {
+void SceneRenderer::renderUI(RHICommandBuffer* cmd) {
     if (!m_imguiLayer || !m_uiManager || !m_settings.showUI) return;
     m_imguiLayer->beginFrame();
     m_uiManager->render();
-    m_imguiLayer->endFrame(cmd);
+    m_imguiLayer->endFrame(cmd->getNativeHandle());
 }
 
 // ============================================================
@@ -750,7 +736,7 @@ void SceneRenderer::testNaniteClustering() {
     std::cout << "Clustering done: " << processedMeshes << " meshes, " << totalClusters << " clusters\n";
 }
 
-void SceneRenderer::prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageIndex) {
+void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex) {
     if (!m_naniteManager || !m_naniteDebugPass) return;
 
     m_naniteDebugPass->setRenderAllMeshes();
@@ -764,10 +750,9 @@ void SceneRenderer::prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageInde
     glm::vec3 camPos = m_camera->getPosition();
 
     m_naniteManager->setScreenParams(nExtent.width, nExtent.height);
-    auto rhiCmd = m_rhiDevice->wrapCommandBuffer((void*)cmd);
-    m_naniteManager->performCulling(rhiCmd.get(), view, proj, camPos, imageIndex);
+    m_naniteManager->performCulling(cmd, view, proj, camPos, imageIndex);
 
-    rhiCmd->pipelineBarrier(
+    cmd->pipelineBarrier(
         RHIPipelineStage::ComputeShader | RHIPipelineStage::Transfer,
         RHIPipelineStage::VertexInput | RHIPipelineStage::VertexShader | RHIPipelineStage::FragmentShader,
         RHIAccessFlags::ShaderWrite,
@@ -777,7 +762,7 @@ void SceneRenderer::prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageInde
         glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 }
 
-void SceneRenderer::recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
+void SceneRenderer::recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex) {
     if (!m_naniteDebugPass || !m_settings.showClusterVisualization) return;
 
     std::unordered_map<std::string, glm::mat4> meshMatrices;
@@ -797,6 +782,5 @@ void SceneRenderer::recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imag
     }
     if (meshMatrices.empty()) return;
 
-    auto rhiCmdNanite = getRHIDevice()->wrapCommandBuffer(static_cast<void*>(cmd));
-    m_naniteDebugPass->recordCommandsWithLOD(rhiCmdNanite.get(), imageIndex, meshMatrices, m_naniteManager.get());
+    m_naniteDebugPass->recordCommandsWithLOD(cmd, imageIndex, meshMatrices, m_naniteManager.get());
 }

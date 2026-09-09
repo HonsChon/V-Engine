@@ -129,7 +129,6 @@ public:
 
     // ---- Queue submission ----
     void submitGraphicsQueue(const std::vector<void*>& waitSemaphores,
-                             const std::vector<uint32_t>& waitStages,
                              const std::vector<void*>& commandBuffers,
                              const std::vector<void*>& signalSemaphores,
                              void* fence) override;
@@ -171,6 +170,8 @@ public:
     /// Reset the per-frame allocator + command list (equivalent of vkResetCommandBuffer
     /// + vkBeginCommandBuffer; the list is left in the recording state).
     void resetCommandBuffer(uint32_t index);
+    /// Same as above, addressed by list pointer (used by RHICommandBuffer::begin).
+    void resetCommandBuffer(ID3D12GraphicsCommandList* cmdList);
 
     // ---- Lazily-created scaled-blit pipeline (vkCmdBlit parity) ----
     std::shared_ptr<DX12RHIPipeline> getOrCreateBlitPipeline();

@@ -18,9 +18,6 @@
 
 #include "RenderSettings.h"
 
-// Vulkan forward declaration (for recordCommands / renderUI signatures — transitional)
-typedef struct VkCommandBuffer_T* VkCommandBuffer;
-
 // RHI forward declarations
 class RHIDevice;
 class RHISwapChain;
@@ -111,11 +108,11 @@ public:
     
     /**
      * 在给定 command buffer 上录制完整渲染命令
-     * @param cmd 命令缓冲区
+     * @param cmd 命令缓冲区（已 begin，由 Engine 的帧循环管理会话）
      * @param imageIndex swapchain image index
      * @param frameIndex 帧槽索引（0 or 1）
      */
-    void recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
 
     /** 更新所有 Uniform（每帧调用一次） */
     void updateUniforms(uint32_t frameIndex);
@@ -141,7 +138,7 @@ public:
     // ========== UI ==========
     
     void updateUI();
-    void renderUI(VkCommandBuffer cmd);
+    void renderUI(RHICommandBuffer* cmd);
 
     // ========== 设置 & 状态 ==========
 
@@ -166,10 +163,10 @@ public:
 
 private:
     // ========== 命令录制子方法 ==========
-    void recordForwardCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
-    void recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
-    void prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageIndex);
-    void recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imageIndex);
+    void recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordDeferredCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex);
+    void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex);
 
     // ========== 资源创建 ==========
     void createSceneColorImage();

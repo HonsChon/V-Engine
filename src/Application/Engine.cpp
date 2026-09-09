@@ -23,9 +23,8 @@
 #include "RHI.h"
 #include "RHIDevice.h"
 #include "RHISwapChain.h"
+#include "RHICommandBuffer.h"
 #include "Vulkan/VulkanRHIDevice.h"
-
-#include <vulkan/vulkan.h>
 
 #include "panels/DebugPanel.h"
 #include "panels/SceneHierarchyPanel.h"
@@ -309,6 +308,10 @@ void Engine::createSyncObjects() {
 
 void Engine::createCommandBuffers() {
     m_commandBuffers = m_rhiDevice->allocateCommandBuffers(MAX_FRAMES_IN_FLIGHT);
+    m_rhiCommandBuffers.clear();
+    for (void* native : m_commandBuffers) {
+        m_rhiCommandBuffers.push_back(m_rhiDevice->wrapCommandBuffer(native));
+    }
 }
 
 // ============================================================
@@ -402,13 +405,8 @@ void Engine::drawFrame() {
     // Reset fence and record commands
     m_rhiDevice->resetFence(m_inFlightFences[m_currentFrame]);
 
-    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(m_commandBuffers[m_currentFrame]);
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS)
-        throw std::runtime_error("Failed to begin command buffer!");
+    RHICommandBuffer* cmd = m_rhiCommandBuffers[m_currentFrame].get();
+    cmd->begin();
 
     // Update debug panel stats
     if (m_uiManager) {
@@ -419,13 +417,11 @@ void Engine::drawFrame() {
     // Record all rendering commands (including UI)
     m_renderer->recordCommands(cmd, imageIndex, m_currentFrame);
 
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
-        throw std::runtime_error("Failed to record command buffer!");
+    cmd->end();
 
     // Submit via RHI
     m_rhiDevice->submitGraphicsQueue(
         { m_imageAvailableSemaphores[m_currentFrame] },
-        { (uint32_t)VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT },
         { m_commandBuffers[m_currentFrame] },
         { m_renderFinishedSemaphores[m_currentFrame] },
         m_inFlightFences[m_currentFrame]

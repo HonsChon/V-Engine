@@ -707,8 +707,18 @@ void DX12RHIDevice::resetCommandBuffer(uint32_t index) {
     }
 }
 
+void DX12RHIDevice::resetCommandBuffer(ID3D12GraphicsCommandList* cmdList) {
+    for (auto& pair : commandLists_) {
+        if (pair.list.Get() == cmdList) {
+            resetCommandBuffer(static_cast<uint32_t>(&pair - commandLists_.data()));
+            return;
+        }
+    }
+    throw std::runtime_error("[DX12RHIDevice] resetCommandBuffer: "
+                             "command list is not from the device pool");
+}
+
 void DX12RHIDevice::submitGraphicsQueue(const std::vector<void*>& /*waitSemaphores*/,
-                                        const std::vector<uint32_t>& /*waitStages*/,
                                         const std::vector<void*>& commandBuffers,
                                         const std::vector<void*>& signalSemaphores,
                                         void* fenceHandle)
