@@ -603,12 +603,76 @@ elseif(UNIX)
 endif()
 
 # ============================================================
-# DX12 冒烟 demo target (仅 Windows): GLFW 窗口 + 裸 D3D12 device/swapchain
+# DX12 冒烟 demo target (仅 Windows): RHI 全链路纹理三角形
 # ============================================================
-# 仅验证编译基线与设备/交换链创建链路,不画内容。
-# Phase 1 之后此处可改用 DX12 RHI 类并升级为真实 demo。
+# Phase 1 验收: 2-frame 主循环 + 描述符链 + push constants + 读回 + 验证层自检。
+# shader 策略: GLSL -> glslc(.spv) -> spirv-cross(--hlsl sm60) -> 注入 push
+# constant register -> dxc(.dxil); 输出到 bin/shaders_dx12。
 if(WIN32)
-    add_executable(rhi_dx12_smoke src/smoke/dx12_smoke/main.cpp)
+    # ---- DX12 shader 内容管线工具 ----
+    find_program(DX12_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin")
+    find_program(DX12_SPIRV_CROSS spirv-cross HINTS "$ENV{VULKAN_SDK}/Bin")
+    find_program(DX12_DXC dxc HINTS "$ENV{VULKAN_SDK}/Bin")
+
+    if(DX12_GLSLC AND DX12_SPIRV_CROSS AND DX12_DXC)
+        message(STATUS "DX12 shader chain: ${DX12_GLSLC} + ${DX12_SPIRV_CROSS} + ${DX12_DXC}")
+
+        set(DX12_SMOKE_GLSL_DIR "${CMAKE_SOURCE_DIR}/src/smoke/dx12_smoke/shaders")
+        set(DX12_SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/bin/shaders_dx12")
+        set(DX12_SHADER_CACHE_DIR "${CMAKE_BINARY_DIR}/shaders_dx12_intermediate")
+        file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR})
+        file(MAKE_DIRECTORY ${DX12_SHADER_CACHE_DIR})
+
+        # name;stage(vs/ps);pushConstantSpace(layout count of the owning pipeline)
+        set(DX12_SHADERS_TO_COMPILE
+            demo.vert|vs|2
+            demo.frag|ps|2
+            blit.vert|vs|0
+            blit.frag|ps|0
+            clear.vert|vs|0
+            clear.frag|ps|0
+        )
+
+        foreach(SHADER_SPEC ${DX12_SHADERS_TO_COMPILE})
+            string(REPLACE "|" ";" SHADER_PARTS ${SHADER_SPEC})
+            list(GET SHADER_PARTS 0 SHADER_SRC)
+            list(GET SHADER_PARTS 1 SHADER_STAGE)
+            list(GET SHADER_PARTS 2 SHADER_PC_SPACE)
+
+            string(REPLACE "." "_" SHADER_BASE ${SHADER_SRC})
+            set(GLSL_IN   "${DX12_SMOKE_GLSL_DIR}/${SHADER_SRC}")
+            set(SPV_OUT   "${DX12_SHADER_CACHE_DIR}/${SHADER_BASE}.spv")
+            set(HLSL_OUT  "${DX12_SHADER_CACHE_DIR}/${SHADER_BASE}.hlsl")
+            set(DXIL_OUT  "${DX12_SHADER_OUT_DIR}/${SHADER_BASE}.dxil")
+
+            if(SHADER_STAGE STREQUAL "vs")
+                set(DXC_PROFILE "vs_6_0")
+            else()
+                set(DXC_PROFILE "ps_6_0")
+            endif()
+
+            add_custom_command(
+                OUTPUT ${DXIL_OUT}
+                COMMAND ${DX12_GLSLC} ${GLSL_IN} -o ${SPV_OUT}
+                COMMAND ${DX12_SPIRV_CROSS} ${SPV_OUT} --hlsl --shader-model 60 --output ${HLSL_OUT}
+                COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                    "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
+                    -InFile ${HLSL_OUT} -OutFile ${HLSL_OUT}
+                    -PushConstantSpace ${SHADER_PC_SPACE}
+                COMMAND ${DX12_DXC} -T ${DXC_PROFILE} -E main -Fo ${DXIL_OUT} ${HLSL_OUT}
+                DEPENDS ${GLSL_IN} "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
+                COMMENT "DX12 shader: ${SHADER_SRC} -> ${SHADER_BASE}.dxil (space=${SHADER_PC_SPACE})"
+            )
+            list(APPEND DX12_SHADER_OUTPUTS ${DXIL_OUT})
+        endforeach()
+
+        add_custom_target(CompileDX12Shaders ALL DEPENDS ${DX12_SHADER_OUTPUTS})
+    else()
+        message(WARNING "DX12 shader tools (glslc/spirv-cross/dxc) not found; skipping DX12 shader compilation")
+    endif()
+
+    # ---- demo executable: DX12 RHI 后端 + 冒烟 demo ----
+    add_executable(rhi_dx12_smoke src/smoke/dx12_smoke/main.cpp ${DX12_SOURCES})
 
     target_compile_definitions(rhi_dx12_smoke PRIVATE
         WIN32_LEAN_AND_MEAN
@@ -618,8 +682,8 @@ if(WIN32)
     )
 
     # DirectX-Headers 子模块 + Windows 平台库
-    target_link_libraries(rhi_dx12_smoke PRIVATE Microsoft::DirectX-Headers)
-    target_link_libraries(rhi_dx12_smoke PRIVATE d3d12 dxgi dxguid)
+    target_link_libraries(rhi_dx12_smoke PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX-Guids)
+    target_link_libraries(rhi_dx12_smoke PRIVATE d3d12 dxgi dxguid d3dcompiler)
 
     if(glfw3_FOUND)
         target_link_libraries(rhi_dx12_smoke PRIVATE glfw)
@@ -635,6 +699,10 @@ if(WIN32)
     endif()
 
     source_group("Source Files/Smoke" FILES src/smoke/dx12_smoke/main.cpp)
+
+    if(TARGET CompileDX12Shaders)
+        add_dependencies(rhi_dx12_smoke CompileDX12Shaders)
+    endif()
 
     # 运行时依赖: 将 vcpkg 的 glfw DLL 拷贝到冒烟目标旁
     if(TARGET glfw)

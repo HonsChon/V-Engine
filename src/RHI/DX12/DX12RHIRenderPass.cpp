@@ -1,18 +1,13 @@
 #include "DX12RHIRenderPass.h"
 
+// D3D12 has no render-pass object: the desc is kept alive so that
+// DX12RHICommandBuffer::beginRenderPass can honor per-attachment loadOp /
+// final layout semantics at record time.
 DX12RHIRenderPass::DX12RHIRenderPass(const RHIRenderPassDesc& desc)
+    : colorAttachments_(desc.colorAttachments)
+    , hasDepth_(desc.hasDepthAttachment)
 {
-    colorAttachmentCount_ = static_cast<uint32_t>(desc.colorAttachments.size());
-    for (const auto& att : desc.colorAttachments) {
-        colorFormats_.push_back(att.format);
+    if (hasDepth_) {
+        depthAttachment_ = desc.depthAttachment;
     }
-    hasDepth_ = desc.hasDepthAttachment;
-    depthFormat_ = desc.depthAttachment.format;
-}
-
-RHIFormat DX12RHIRenderPass::getColorFormat(uint32_t index) const {
-    if (index < colorFormats_.size()) {
-        return colorFormats_[index];
-    }
-    return RHIFormat::Undefined;
 }

@@ -11,16 +11,19 @@ public:
     DX12RHIRenderPass(const RHIRenderPassDesc& desc);
     ~DX12RHIRenderPass() override = default;
 
-    uint32_t getColorAttachmentCount() const override { return colorAttachmentCount_; }
+    uint32_t getColorAttachmentCount() const override { return static_cast<uint32_t>(colorAttachments_.size()); }
 
-    RHIFormat       getColorFormat(uint32_t index) const;
-    RHIFormat       getDepthFormat() const { return depthFormat_; }
-    bool            hasDepthAttachment() const { return hasDepth_; }
+    RHIFormat getColorFormat(uint32_t index) const {
+        return (index < colorAttachments_.size()) ? colorAttachments_[index].format : RHIFormat::Undefined;
+    }
+    const RHIAttachmentDesc& getColorAttachment(uint32_t index) const { return colorAttachments_[index]; }
+
+    const RHIAttachmentDesc* getDepthAttachment() const { return hasDepth_ ? &depthAttachment_ : nullptr; }
+    RHIFormat getDepthFormat() const { return depthAttachment_.format; }
+    bool      hasDepthAttachment() const { return hasDepth_; }
 
 private:
-    uint32_t                colorAttachmentCount_ = 0;
-    std::vector<RHIFormat>  colorFormats_;
-    RHIFormat               depthFormat_ = RHIFormat::Undefined;
-    bool                    hasDepth_ = false;
+    std::vector<RHIAttachmentDesc> colorAttachments_;
+    RHIAttachmentDesc              depthAttachment_;
+    bool                           hasDepth_ = false;
 };
-

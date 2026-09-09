@@ -7,39 +7,100 @@
 #include <vector>
 #include <string>
 
+using Microsoft::WRL::ComPtr;
+
 class DX12RHIDevice;
 
+// Vertex input semantic convention: spirv-cross HLSL emits TEXCOORD<location>
+// for vertex inputs, so the input layout always uses semantic "TEXCOORD" with
+// SemanticIndex == attribute location.
+constexpr const char* kDX12VertexInputSemantic = "TEXCOORD";
+
 // =============================================================================
-// DX12RHIPipeline — wraps ID3D12PipelineState + ID3D12RootSignature
+// DX12RHIPipeline — ID3D12PipelineState + ID3D12RootSignature + the mapping
+// tables that let the command buffer translate (set, push constants) into
+// concrete root parameters.
 // =============================================================================
 
 class DX12RHIPipeline : public RHIPipeline
 {
 public:
+    /// Per binding layout: indices of the descriptor tables inside the root
+    /// signature (-1 when the layout has no such table).
+    struct LayoutTables {
+        int resourceParam = -1;   // CBV/SRV/UAV table
+        int samplerParam  = -1;   // SAMPLER table
+    };
+
+    DX12RHIDevice* device_;
+
     DX12RHIPipeline(DX12RHIDevice* device,
                     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso,
                     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSig,
-                    RHIPipelineType type);
+                    RHIPipelineType type,
+                    std::vector<LayoutTables> layoutTables,
+                    int pushConstantRootParam,
+                    std::vector<std::pair<uint32_t, uint32_t>> vertexBindingStrides,
+                    RHIPrimitiveTopology topology);
     ~DX12RHIPipeline() override = default;
 
     RHIPipelineType getType() const override { return type_; }
 
-    ID3D12PipelineState*  getD3D12PipelineState() const { return pso_.Get(); }
-    ID3D12RootSignature*  getD3D12RootSignature() const { return rootSig_.Get(); }
-    ID3D12CommandSignature* getDrawCommandSignature() const { return drawCmdSig_.Get(); }
-    ID3D12CommandSignature* getDispatchCommandSignature() const { return dispatchCmdSig_.Get(); }
+    ID3D12PipelineState* getD3D12PipelineState() const { return pso_.Get(); }
+    ID3D12RootSignature* getD3D12RootSignature() const { return rootSig_.Get(); }
 
-    void setDrawCommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> sig) { drawCmdSig_ = sig; }
-    void setDispatchCommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> sig) { dispatchCmdSig_ = sig; }
+    // ---- Root-signature mapping (used by DX12RHICommandBuffer) ----
+    int getTableRootParam(uint32_t set, bool samplerTable) const {
+        if (set >= layoutTables_.size()) return -1;
+        return samplerTable ? layoutTables_[set].samplerParam
+                            : layoutTables_[set].resourceParam;
+    }
+    int  getPushConstantRootParam() const { return pushConstantRootParam_; }
+    bool hasPushConstants() const { return pushConstantRootParam_ >= 0; }
+
+    /// Stride of a vertex input slot (from the input layout); -1 if unknown.
+    int  getVertexBindingStride(uint32_t binding) const;
+    const std::vector<std::pair<uint32_t, uint32_t>>& getVertexBindingStrides() const {
+        return vertexBindingStrides_;
+    }
+    RHIPrimitiveTopology getPrimitiveTopology() const { return topology_; }
+
+    uint32_t getBindingLayoutCount() const { return static_cast<uint32_t>(layoutTables_.size()); }
 
 private:
-    DX12RHIDevice*                            device_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState>  pso_;
     Microsoft::WRL::ComPtr<ID3D12RootSignature>  rootSig_;
-    Microsoft::WRL::ComPtr<ID3D12CommandSignature> drawCmdSig_;
-    Microsoft::WRL::ComPtr<ID3D12CommandSignature> dispatchCmdSig_;
     RHIPipelineType type_ = RHIPipelineType::Graphics;
+
+    std::vector<LayoutTables> layoutTables_;
+    int                       pushConstantRootParam_ = -1;
+    std::vector<std::pair<uint32_t, uint32_t>> vertexBindingStrides_;
+    RHIPrimitiveTopology topology_ = RHIPrimitiveTopology::TriangleList;
 };
+
+// =============================================================================
+// Shared root-signature build (used by graphics + compute builders)
+// =============================================================================
+
+struct DX12RootSignatureResult {
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSig;
+    std::vector<DX12RHIPipeline::LayoutTables>  layoutTables;
+    int pushConstantRootParam = -1;
+};
+
+/// Build the root signature for a pipeline.
+/// Convention (see docs/DX12-RHI-Notes.md §11 appendix):
+///   - binding layout `i` lives in register space `i`
+///   - descriptor binding `b` maps to register `b` inside that space
+///   - a layout maps to up to two tables: one CBV/SRV/UAV table and one
+///     SAMPLER table (D3D12 forbids mixing sampler ranges into a resource table)
+///   - push constants become one root 32-bit-constants parameter at
+///     register b0 in space `layoutCount`
+DX12RootSignatureResult DX12BuildRootSignature(
+    DX12RHIDevice* device,
+    const std::vector<const RHIBindingLayout*>& bindingLayouts,
+    const std::vector<RHIPushConstantRange>& pushConstantRanges,
+    bool allowInputAssembler);
 
 // =============================================================================
 // DX12GraphicsPipelineBuilder
@@ -83,9 +144,9 @@ public:
     std::shared_ptr<RHIPipeline> build() override;
 
 private:
-    void buildRootSignature(Microsoft::WRL::ComPtr<ID3D12RootSignature>& outRootSig);
-    void buildGraphicsPipelineState(Microsoft::WRL::ComPtr<ID3D12RootSignature>& rootSig,
-                                     Microsoft::WRL::ComPtr<ID3D12PipelineState>& outPSO);
+    void buildGraphicsPipelineState(ID3D12RootSignature* rootSig,
+                                    ComPtr<ID3D12PipelineState>& outPSO,
+                                    const DX12RootSignatureResult& rootResult);
 
     DX12RHIDevice* device_;
 

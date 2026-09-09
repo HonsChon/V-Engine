@@ -1,11 +1,16 @@
 #pragma once
 
 #include "RHICommandBuffer.h"
+#include "DX12TypeConversions.h"
 
 #include <directx/d3d12.h>
 #include <wrl/client.h>
 
 class DX12RHIDevice;
+class DX12RHIPipeline;
+class DX12RHITexture;
+class DX12RHIRenderPass;
+class DX12RHIFramebuffer;
 
 class DX12RHICommandBuffer : public RHICommandBuffer
 {
@@ -13,6 +18,8 @@ public:
     DX12RHICommandBuffer(DX12RHIDevice* device, ID3D12GraphicsCommandList* cmdList);
     ~DX12RHICommandBuffer() override = default;
 
+    /// Re-point the wrapper at a (freshly reset) command list. All cached state
+    /// is cleared.
     void reset(ID3D12GraphicsCommandList* cmdList);
     ID3D12GraphicsCommandList* getD3D12CommandList() const { return cmdList_; }
 
@@ -68,18 +75,21 @@ public:
     void clearColorImage(RHITexture* texture, float r, float g, float b, float a) override;
 
 private:
-    void ensureTempCPUDescriptorHeap();
-    D3D12_CPU_DESCRIPTOR_HANDLE allocateTempUAV(ID3D12Resource* resource, DXGI_FORMAT format);
+    void bindPipelineInternal(DX12RHIPipeline* pipeline, bool isCompute);
+    void setDescriptorHeaps();
+    void transitionTo(ID3D12Resource* resource, D3D12_RESOURCE_STATES from,
+                      D3D12_RESOURCE_STATES to);
+    // Target resource state for an image layout, honoring UAV-capable textures
+    // (layout "General" must become UNORDERED_ACCESS when the texture has Storage usage).
+    D3D12_RESOURCE_STATES textureStateFor(DX12RHITexture* texture, RHIImageLayout layout);
+    void ensureState(DX12RHITexture* texture, D3D12_RESOURCE_STATES state);
 
     DX12RHIDevice*                device_;
     ID3D12GraphicsCommandList*    cmdList_ = nullptr;
 
-    ID3D12RootSignature*          currentRootSig_ = nullptr;
-    bool                          isCompute_ = false;
+    DX12RHIPipeline*  currentPipeline_ = nullptr;
+    bool              isCompute_ = false;
 
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> tempCPUHeap_;
-    UINT                          tempDescriptorSize_ = 0;
-    UINT                          tempDescriptorsAllocated_ = 0;
-    static constexpr UINT         kMaxTempDescriptors = 4;
+    DX12RHIRenderPass*    activeRenderPass_  = nullptr;
+    DX12RHIFramebuffer*   activeFramebuffer_ = nullptr;
 };
-

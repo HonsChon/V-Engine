@@ -6,11 +6,22 @@
 #include "DX12RHIDescriptor.h"
 #include "DX12RHIRenderPass.h"
 #include "DX12RHIFramebuffer.h"
-#include "DX12TypeConversions.h"
+#include "DX12RHISampler.h"
 
 #include <stdexcept>
+#include <algorithm>
+#include <vector>
 
 using namespace DX12TypeConversions;
+
+namespace {
+
+D3D12_RESOURCE_STATES shaderReadStates() {
+    return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+         | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+}
+
+} // namespace
 
 DX12RHICommandBuffer::DX12RHICommandBuffer(DX12RHIDevice* device, ID3D12GraphicsCommandList* cmdList)
     : device_(device), cmdList_(cmdList)
@@ -19,130 +30,225 @@ DX12RHICommandBuffer::DX12RHICommandBuffer(DX12RHIDevice* device, ID3D12Graphics
 
 void DX12RHICommandBuffer::reset(ID3D12GraphicsCommandList* cmdList) {
     cmdList_ = cmdList;
-    currentRootSig_ = nullptr;
+    currentPipeline_ = nullptr;
     isCompute_ = false;
-    tempDescriptorsAllocated_ = 0;
+    activeRenderPass_ = nullptr;
+    activeFramebuffer_ = nullptr;
 }
 
-void DX12RHICommandBuffer::ensureTempCPUDescriptorHeap() {
-    if (tempCPUHeap_) return;
+// =============================================================================
+// State plumbing
+// =============================================================================
 
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = kMaxTempDescriptors;
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+void DX12RHICommandBuffer::setDescriptorHeaps() {
+    ID3D12DescriptorHeap* heaps[] = {
+        device_->getShaderVisibleResourceHeap(),
+        device_->getShaderVisibleSamplerHeap(),
+    };
+    cmdList_->SetDescriptorHeaps(2, heaps);
+}
 
-    if (FAILED(device_->getDevice()->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&tempCPUHeap_)))) {
-        throw std::runtime_error("Failed to create temp descriptor heap");
+void DX12RHICommandBuffer::transitionTo(ID3D12Resource* resource,
+                                        D3D12_RESOURCE_STATES from,
+                                        D3D12_RESOURCE_STATES to) {
+    if (from == to) {
+        return;
     }
-    tempDescriptorSize_ = device_->getDevice()->GetDescriptorHandleIncrementSize(
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    barrier.Transition.pResource = resource;
+    barrier.Transition.StateBefore = from;
+    barrier.Transition.StateAfter = to;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    cmdList_->ResourceBarrier(1, &barrier);
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE DX12RHICommandBuffer::allocateTempUAV(ID3D12Resource* resource,
-                                                                    DXGI_FORMAT format) {
-    ensureTempCPUDescriptorHeap();
-    if (tempDescriptorsAllocated_ >= kMaxTempDescriptors) {
-        throw std::runtime_error("Temp descriptor heap exhausted");
+D3D12_RESOURCE_STATES DX12RHICommandBuffer::textureStateFor(DX12RHITexture* texture,
+                                                            RHIImageLayout layout) {
+    D3D12_RESOURCE_STATES state = toD3D12ResourceStates(layout);
+    if (layout == RHIImageLayout::General && texture) {
+        // UAV writes from compute need the real UNORDERED_ACCESS state, not COMMON.
+        if (hasFlag(texture->getUsage(), RHITextureUsage::Storage)) {
+            state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        }
     }
-
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = tempCPUHeap_->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += static_cast<SIZE_T>(tempDescriptorsAllocated_) * tempDescriptorSize_;
-
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = format;
-    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-    uavDesc.Buffer.FirstElement = 0;
-    uavDesc.Buffer.NumElements = static_cast<UINT>(
-        resource->GetDesc().Width / std::max(1u, static_cast<UINT>(sizeof(uint32_t))));
-    uavDesc.Buffer.StructureByteStride = 0;
-    uavDesc.Buffer.CounterOffsetInBytes = 0;
-    uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-
-    device_->getDevice()->CreateUnorderedAccessView(resource, nullptr, &uavDesc, handle);
-
-    ++tempDescriptorsAllocated_;
-    return handle;
+    return state;
 }
 
-// ---- RenderPass ----
+void DX12RHICommandBuffer::ensureState(DX12RHITexture* texture, D3D12_RESOURCE_STATES state) {
+    if (!texture) {
+        return;
+    }
+    transitionTo(texture->getD3D12Resource(), texture->getCurrentState(), state);
+    texture->setCurrentState(state);
+}
+
+// =============================================================================
+// Pipeline binding
+// =============================================================================
+
+void DX12RHICommandBuffer::bindPipelineInternal(DX12RHIPipeline* pipeline, bool isCompute) {
+    setDescriptorHeaps();
+    if (isCompute) {
+        cmdList_->SetPipelineState(pipeline->getD3D12PipelineState());
+        cmdList_->SetComputeRootSignature(pipeline->getD3D12RootSignature());
+    } else {
+        cmdList_->SetPipelineState(pipeline->getD3D12PipelineState());
+        cmdList_->SetGraphicsRootSignature(pipeline->getD3D12RootSignature());
+        cmdList_->IASetPrimitiveTopology(toD3DPrimitiveTopology(pipeline->getPrimitiveTopology()));
+    }
+    currentPipeline_ = pipeline;
+    isCompute_ = isCompute;
+}
+
+void DX12RHICommandBuffer::bindGraphicsPipeline(RHIPipeline* pipeline) {
+    bindPipelineInternal(static_cast<DX12RHIPipeline*>(pipeline), false);
+}
+
+void DX12RHICommandBuffer::bindComputePipeline(RHIPipeline* pipeline) {
+    bindPipelineInternal(static_cast<DX12RHIPipeline*>(pipeline), true);
+}
+
+// ---- Render pass ----
 
 void DX12RHICommandBuffer::beginRenderPass(RHIRenderPass* renderPass,
-                                            RHIFramebuffer* framebuffer,
-                                            const std::vector<RHIClearValue>& clearValues) {
+                                           RHIFramebuffer* framebuffer,
+                                           const std::vector<RHIClearValue>& clearValues) {
+    auto* dxRP = static_cast<DX12RHIRenderPass*>(renderPass);
     auto* dxFB = static_cast<DX12RHIFramebuffer*>(framebuffer);
 
-    UINT numRTVs = dxFB->getColorAttachmentCount();
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[8] = {};
-    for (UINT i = 0; i < numRTVs && i < 8; ++i) {
-        rtvHandles[i] = dxFB->getRTVHandle(i);
+    const UINT numRTVs = dxFB->getColorAttachmentCount();
+    if (numRTVs > 8) {
+        throw std::runtime_error("[DX12RHICommandBuffer] more than 8 render targets");
     }
 
+    // Vulkan render passes transition attachments implicitly; do it explicitly here.
+    for (UINT i = 0; i < numRTVs; ++i) {
+        DX12RHITexture* tex = dxFB->getColorTexture(i);
+        ensureState(tex, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+    if (dxFB->hasDepthAttachment()) {
+        ensureState(dxFB->getDepthTexture(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[8] = {};
+    for (UINT i = 0; i < numRTVs; ++i) {
+        rtvHandles[i] = dxFB->getRTVHandle(i);
+    }
     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
     D3D12_CPU_DESCRIPTOR_HANDLE* pDSV = nullptr;
     if (dxFB->hasDepthAttachment()) {
         dsvHandle = dxFB->getDSVHandle();
         pDSV = &dsvHandle;
     }
-
     cmdList_->OMSetRenderTargets(numRTVs, rtvHandles, FALSE, pDSV);
 
+    // Honor per-attachment loadOp: clear only attachments whose loadOp == Clear,
+    // using the matching clear value (fixes the old "clear every RTV for every
+    // clear value" N^2 bug).
+    const RHIAttachmentDesc* depthAtt = dxRP->getDepthAttachment();
+
+    UINT colorClearIndex = 0;
+    bool depthClear = false;
     for (const auto& cv : clearValues) {
         if (cv.type == RHIClearValue::Type::Color) {
-            float color[4] = { cv.color.r, cv.color.g, cv.color.b, cv.color.a };
-            for (UINT i = 0; i < numRTVs && i < 8; ++i) {
-                cmdList_->ClearRenderTargetView(rtvHandles[i], color, 0, nullptr);
+            const UINT attach = colorClearIndex++;
+            if (attach < numRTVs &&
+                dxRP->getColorAttachment(attach).loadOp == RHILoadOp::Clear) {
+                const float color[4] = { cv.color.r, cv.color.g, cv.color.b, cv.color.a };
+                cmdList_->ClearRenderTargetView(rtvHandles[attach], color, 0, nullptr);
             }
-        }
-        else if (cv.type == RHIClearValue::Type::DepthStencil) {
-            if (dxFB->hasDepthAttachment()) {
-                cmdList_->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH,
+        } else if (cv.type == RHIClearValue::Type::DepthStencil && depthAtt && !depthClear) {
+            depthClear = true;
+            if (depthAtt->loadOp == RHILoadOp::Clear && dxFB->hasDepthAttachment()) {
+                D3D12_CLEAR_FLAGS flags = D3D12_CLEAR_FLAG_DEPTH;
+                if (depthAtt->stencilLoadOp == RHILoadOp::Clear && hasStencil(depthAtt->format)) {
+                    flags |= D3D12_CLEAR_FLAG_STENCIL;
+                }
+                cmdList_->ClearDepthStencilView(dsvHandle, flags,
                                                 cv.depthStencil.depth, cv.depthStencil.stencil,
                                                 0, nullptr);
             }
         }
     }
+
+    activeRenderPass_ = dxRP;
+    activeFramebuffer_ = dxFB;
 }
 
 void DX12RHICommandBuffer::endRenderPass() {
+    // D3D12 has no render-pass object, so this method itself is a no-op; the
+    // Vulkan-equivalent "final layout" transitions are emitted here instead so
+    // tracked resource states stay accurate for the next pass / present.
+    if (!activeRenderPass_ || !activeFramebuffer_) {
+        return;
+    }
+    auto* dxRP = activeRenderPass_;
+    auto* dxFB = activeFramebuffer_;
+
+    for (UINT i = 0; i < dxFB->getColorAttachmentCount(); ++i) {
+        const RHIAttachmentDesc& att = dxRP->getColorAttachment(i);
+        if (att.finalLayout == RHIImageLayout::Undefined) {
+            continue;
+        }
+        DX12RHITexture* tex = dxFB->getColorTexture(i);
+        D3D12_RESOURCE_STATES target = textureStateFor(tex, att.finalLayout);
+        ensureState(tex, target);
+    }
+    if (dxFB->hasDepthAttachment() && dxRP->getDepthAttachment()) {
+        RHIImageLayout final = dxRP->getDepthAttachment()->finalLayout;
+        if (final != RHIImageLayout::Undefined) {
+            DX12RHITexture* tex = dxFB->getDepthTexture();
+            D3D12_RESOURCE_STATES target = textureStateFor(tex, final);
+            if (final == RHIImageLayout::DepthStencilReadOnly) {
+                target = D3D12_RESOURCE_STATE_DEPTH_READ;
+            }
+            ensureState(tex, target);
+        }
+    }
+
+    activeRenderPass_ = nullptr;
+    activeFramebuffer_ = nullptr;
 }
 
-// ---- Pipeline Binding ----
-
-void DX12RHICommandBuffer::bindGraphicsPipeline(RHIPipeline* pipeline) {
-    auto* dxPipeline = static_cast<DX12RHIPipeline*>(pipeline);
-    cmdList_->SetPipelineState(dxPipeline->getD3D12PipelineState());
-    cmdList_->SetGraphicsRootSignature(dxPipeline->getD3D12RootSignature());
-    cmdList_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    currentRootSig_ = dxPipeline->getD3D12RootSignature();
-    isCompute_ = false;
-}
-
-void DX12RHICommandBuffer::bindComputePipeline(RHIPipeline* pipeline) {
-    auto* dxPipeline = static_cast<DX12RHIPipeline*>(pipeline);
-    cmdList_->SetPipelineState(dxPipeline->getD3D12PipelineState());
-    cmdList_->SetComputeRootSignature(dxPipeline->getD3D12RootSignature());
-    currentRootSig_ = dxPipeline->getD3D12RootSignature();
-    isCompute_ = true;
-}
-
-// ---- Descriptor / Binding Group ----
+// ---- Descriptor / Binding group ----
 
 void DX12RHICommandBuffer::setBindingGroup(uint32_t set, RHIBindingGroup* group) {
+    if (!currentPipeline_) {
+        throw std::runtime_error("[DX12RHICommandBuffer] setBindingGroup without a bound pipeline");
+    }
     auto* dxGroup = static_cast<DX12RHIBindingGroup*>(group);
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = dxGroup->getGPUDescriptorHandle();
+    setDescriptorHeaps();
+
+    const int resourceParam = currentPipeline_->getTableRootParam(set, /*sampler=*/false);
+    const int samplerParam  = currentPipeline_->getTableRootParam(set, /*sampler=*/true);
 
     if (isCompute_) {
-        cmdList_->SetComputeRootDescriptorTable(set, gpuHandle);
+        if (resourceParam >= 0) {
+            cmdList_->SetComputeRootDescriptorTable(static_cast<UINT>(resourceParam),
+                                                    dxGroup->getResourceGPUHandle());
+        }
+        if (samplerParam >= 0 && dxGroup->hasSamplerBlock()) {
+            cmdList_->SetComputeRootDescriptorTable(static_cast<UINT>(samplerParam),
+                                                    dxGroup->getSamplerGPUHandle());
+        }
     } else {
-        cmdList_->SetGraphicsRootDescriptorTable(set, gpuHandle);
+        if (resourceParam >= 0) {
+            cmdList_->SetGraphicsRootDescriptorTable(static_cast<UINT>(resourceParam),
+                                                     dxGroup->getResourceGPUHandle());
+        }
+        if (samplerParam >= 0 && dxGroup->hasSamplerBlock()) {
+            cmdList_->SetGraphicsRootDescriptorTable(static_cast<UINT>(samplerParam),
+                                                     dxGroup->getSamplerGPUHandle());
+        }
     }
 }
 
 // ---- Viewport / Scissor ----
 
 void DX12RHICommandBuffer::setViewport(float x, float y, float width, float height,
-                                        float minDepth, float maxDepth) {
+                                       float minDepth, float maxDepth) {
     D3D12_VIEWPORT viewport = {};
     viewport.TopLeftX = x;
     viewport.TopLeftY = y;
@@ -162,100 +268,92 @@ void DX12RHICommandBuffer::setScissor(int32_t x, int32_t y, uint32_t width, uint
     cmdList_->RSSetScissorRects(1, &scissor);
 }
 
-// ---- Vertex / Index Buffer Binding ----
+// ---- Vertex / Index buffer binding ----
 
 void DX12RHICommandBuffer::bindVertexBuffer(uint32_t binding, RHIBuffer* buffer, uint64_t offset) {
     auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
+    const int stride = currentPipeline_ ? currentPipeline_->getVertexBindingStride(binding) : -1;
+    if (stride < 0) {
+        throw std::runtime_error("[DX12RHICommandBuffer] bindVertexBuffer: no input-layout stride known for slot "
+                                 + std::to_string(binding) + " (bind a graphics pipeline first)");
+    }
     D3D12_VERTEX_BUFFER_VIEW vbv = {};
     vbv.BufferLocation = dxBuf->getGPUVirtualAddress() + offset;
-    vbv.SizeInBytes = static_cast<UINT>(dxBuf->getSize() - offset);
-    vbv.StrideInBytes = 0; // stride is set by pipeline's input layout
+    vbv.SizeInBytes = static_cast<UINT>(dxBuf->getResourceSize() - offset);
+    vbv.StrideInBytes = static_cast<UINT>(stride);
     cmdList_->IASetVertexBuffers(binding, 1, &vbv);
 }
 
 void DX12RHICommandBuffer::bindIndexBuffer(RHIBuffer* buffer, uint64_t offset,
-                                            RHIIndexType indexType) {
+                                           RHIIndexType indexType) {
     auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
     D3D12_INDEX_BUFFER_VIEW ibv = {};
     ibv.BufferLocation = dxBuf->getGPUVirtualAddress() + offset;
-    ibv.SizeInBytes = static_cast<UINT>(dxBuf->getSize() - offset);
+    ibv.SizeInBytes = static_cast<UINT>(dxBuf->getResourceSize() - offset);
     ibv.Format = toD3D12IndexFormat(indexType);
     cmdList_->IASetIndexBuffer(&ibv);
 }
 
-// ---- Draw Commands ----
+// ---- Draw commands ----
 
 void DX12RHICommandBuffer::draw(uint32_t vertexCount, uint32_t instanceCount,
-                                 uint32_t firstVertex, uint32_t firstInstance) {
+                                uint32_t firstVertex, uint32_t firstInstance) {
     cmdList_->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
 void DX12RHICommandBuffer::drawIndexed(uint32_t indexCount, uint32_t instanceCount,
-                                        uint32_t firstIndex, int32_t vertexOffset,
-                                        uint32_t firstInstance) {
+                                       uint32_t firstIndex, int32_t vertexOffset,
+                                       uint32_t firstInstance) {
     cmdList_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
-void DX12RHICommandBuffer::drawIndexedIndirect(RHIBuffer* buffer, uint64_t offset,
-                                                uint32_t drawCount, uint32_t stride) {
-    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
-
-    ID3D12CommandSignature* cmdSig = nullptr;
-    if (currentRootSig_) {
-        // get command signature from bound pipeline — for now, pipeline info is not tracked separately.
-        // The command signature must be pre-created; if not available, skip.
-    }
-
-    if (cmdSig) {
-        cmdList_->ExecuteIndirect(cmdSig, drawCount,
-                                  dxBuf->getD3D12Resource(), offset,
-                                  nullptr, 0);
-    } else {
-        // Fallback: treat as regular indirect args buffer (DrawIndexedInstancedIndirect style)
-        // This requires a default command signature created at device level
-    }
+void DX12RHICommandBuffer::drawIndexedIndirect(RHIBuffer* /*buffer*/, uint64_t /*offset*/,
+                                               uint32_t /*drawCount*/, uint32_t /*stride*/) {
+    throw std::runtime_error("[DX12RHICommandBuffer] drawIndexedIndirect needs a command signature "
+                             "(ExecuteIndirect): not implemented (Phase 5 backlog)");
 }
 
-// ---- Compute Commands ----
+// ---- Compute commands ----
 
 void DX12RHICommandBuffer::dispatch(uint32_t groupCountX, uint32_t groupCountY,
-                                     uint32_t groupCountZ) {
+                                    uint32_t groupCountZ) {
     cmdList_->Dispatch(groupCountX, groupCountY, groupCountZ);
 }
 
-void DX12RHICommandBuffer::dispatchIndirect(RHIBuffer* buffer, uint64_t offset) {
-    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
-
-    ID3D12CommandSignature* cmdSig = nullptr;
-    if (currentRootSig_) {
-        // same as drawIndexedIndirect
-    }
-
-    if (cmdSig) {
-        cmdList_->ExecuteIndirect(cmdSig, 1,
-                                  dxBuf->getD3D12Resource(), offset,
-                                  nullptr, 0);
-    }
+void DX12RHICommandBuffer::dispatchIndirect(RHIBuffer* /*buffer*/, uint64_t /*offset*/) {
+    throw std::runtime_error("[DX12RHICommandBuffer] dispatchIndirect needs a command signature "
+                             "(ExecuteIndirect): not implemented (Phase 5 backlog)");
 }
 
-// ---- Push Constants ----
+// ---- Push constants ----
 
 void DX12RHICommandBuffer::pushConstants(RHIShaderStage /*stages*/, uint32_t offset,
-                                          uint32_t size, const void* data) {
-    UINT numValues = size / sizeof(uint32_t);
-    UINT destOffset = offset / sizeof(uint32_t);
-
+                                         uint32_t size, const void* data) {
+    if (!currentPipeline_ || !currentPipeline_->hasPushConstants()) {
+        throw std::runtime_error("[DX12RHICommandBuffer] pushConstants: pipeline has no push constant range");
+    }
+    if ((size & 3) != 0 || (offset & 3) != 0) {
+        throw std::runtime_error("[DX12RHICommandBuffer] pushConstants must be 4-byte aligned");
+    }
+    const UINT rootParam = static_cast<UINT>(currentPipeline_->getPushConstantRootParam());
+    const UINT numValues = size / sizeof(uint32_t);
+    const UINT destOffset = offset / sizeof(uint32_t);
     if (isCompute_) {
-        cmdList_->SetComputeRoot32BitConstants(0, numValues, data, destOffset);
+        cmdList_->SetComputeRoot32BitConstants(rootParam, numValues, data, destOffset);
     } else {
-        cmdList_->SetGraphicsRoot32BitConstants(0, numValues, data, destOffset);
+        cmdList_->SetGraphicsRoot32BitConstants(rootParam, numValues, data, destOffset);
     }
 }
 
 // ---- Barriers / Transitions ----
 
-void DX12RHICommandBuffer::pipelineBarrier(RHIPipelineStage /*srcStage*/, RHIPipelineStage /*dstStage*/,
-                                            RHIAccessFlags /*srcAccess*/, RHIAccessFlags /*dstAccess*/) {
+void DX12RHICommandBuffer::pipelineBarrier(RHIPipelineStage /*srcStage*/,
+                                           RHIPipelineStage /*dstStage*/,
+                                           RHIAccessFlags /*srcAccess*/,
+                                           RHIAccessFlags /*dstAccess*/) {
+    // The engine only submits compute->graphics ShaderWrite->ShaderRead barriers,
+    // i.e. UAV hazards on a single queue: a null-resource UAV barrier covers this
+    // without tracking individual resources (legacy barrier model).
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
     barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -264,130 +362,238 @@ void DX12RHICommandBuffer::pipelineBarrier(RHIPipelineStage /*srcStage*/, RHIPip
 }
 
 void DX12RHICommandBuffer::transitionImageLayout(RHITexture* texture,
-                                                  RHIImageLayout oldLayout,
-                                                  RHIImageLayout newLayout,
-                                                  RHIPipelineStage /*srcStage*/,
-                                                  RHIPipelineStage /*dstStage*/) {
+                                                 RHIImageLayout oldLayout,
+                                                 RHIImageLayout newLayout,
+                                                 RHIPipelineStage /*srcStage*/,
+                                                 RHIPipelineStage /*dstStage*/) {
+    (void)oldLayout; // the tracked current state is authoritative
     auto* dxTex = static_cast<DX12RHITexture*>(texture);
-
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.pResource = dxTex->getD3D12Resource();
-    barrier.Transition.StateBefore = toD3D12ResourceStates(oldLayout);
-    barrier.Transition.StateAfter = toD3D12ResourceStates(newLayout);
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-    cmdList_->ResourceBarrier(1, &barrier);
-
-    dxTex->setCurrentState(barrier.Transition.StateAfter);
+    D3D12_RESOURCE_STATES target = textureStateFor(dxTex, newLayout);
+    ensureState(dxTex, target);
 }
 
 // ---- Transfer ----
 
 void DX12RHICommandBuffer::copyBuffer(RHIBuffer* src, RHIBuffer* dst, uint64_t size,
-                                       uint64_t srcOffset, uint64_t dstOffset) {
+                                      uint64_t srcOffset, uint64_t dstOffset) {
     auto* dxSrc = static_cast<DX12RHIBuffer*>(src);
     auto* dxDst = static_cast<DX12RHIBuffer*>(dst);
+
+    const D3D12_RESOURCE_STATES srcBefore = dxSrc->getCurrentState();
+    const D3D12_RESOURCE_STATES dstBefore = dxDst->getCurrentState();
+
+    transitionTo(dxSrc->getD3D12Resource(), srcBefore, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    dxSrc->setCurrentState(D3D12_RESOURCE_STATE_COPY_SOURCE);
+    transitionTo(dxDst->getD3D12Resource(), dstBefore, D3D12_RESOURCE_STATE_COPY_DEST);
+    dxDst->setCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
 
     cmdList_->CopyBufferRegion(dxDst->getD3D12Resource(), dstOffset,
                                dxSrc->getD3D12Resource(), srcOffset,
                                size);
+
+    // Restore both buffers to their prior states so subsequent barriers issued by
+    // the caller stay consistent with the tracked states.
+    transitionTo(dxSrc->getD3D12Resource(), D3D12_RESOURCE_STATE_COPY_SOURCE, srcBefore);
+    dxSrc->setCurrentState(srcBefore);
+    transitionTo(dxDst->getD3D12Resource(), D3D12_RESOURCE_STATE_COPY_DEST, dstBefore);
+    dxDst->setCurrentState(dstBefore);
 }
 
-void DX12RHICommandBuffer::fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64_t /*size*/, uint32_t data) {
+void DX12RHICommandBuffer::fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64_t size,
+                                      uint32_t data) {
     auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
-    ID3D12Resource* resource = dxBuf->getD3D12Resource();
+    if (!hasFlag(dxBuf->getUsage(), RHIBufferUsage::Storage)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] fillBuffer requires Storage usage on the buffer");
+    }
+    if ((offset & 3) != 0 || (size & 3) != 0) {
+        throw std::runtime_error("[DX12RHICommandBuffer] fillBuffer requires 4-byte aligned offset/size");
+    }
 
-    ensureTempCPUDescriptorHeap();
-    tempDescriptorsAllocated_ = 0;
+    // UAV clear over exactly [offset, offset+size).
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    if (!device_->allocateResourceDescriptors(1, &cpu, &gpu)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] descriptor ring exhausted (fillBuffer)");
+    }
+    setDescriptorHeaps();
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = allocateTempUAV(resource, DXGI_FORMAT_R32_UINT);
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = {};
-    gpuHandle.ptr = tempCPUHeap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+    uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+    uav.Format = DXGI_FORMAT_R32_UINT;
+    uav.Buffer.FirstElement = static_cast<UINT>(offset / 4);
+    uav.Buffer.NumElements = static_cast<UINT>(std::max<uint64_t>(size / 4, 1));
+    uav.Buffer.StructureByteStride = 0;
+    uav.Buffer.CounterOffsetInBytes = 0;
+    uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+    device_->getDevice()->CreateUnorderedAccessView(dxBuf->getD3D12Resource(), nullptr, &uav, cpu);
 
-    ID3D12DescriptorHeap* heaps[] = { tempCPUHeap_.Get() };
-    cmdList_->SetDescriptorHeaps(1, heaps);
+    const D3D12_RESOURCE_STATES prior = dxBuf->getCurrentState();
+    transitionTo(dxBuf->getD3D12Resource(), prior, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    dxBuf->setCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    UINT values[4] = { data, data, data, data };
-    cmdList_->ClearUnorderedAccessViewUint(gpuHandle, cpuHandle, resource, values, 0, nullptr);
+    const UINT values[4] = { data, data, data, data };
+    cmdList_->ClearUnorderedAccessViewUint(gpu, cpu, dxBuf->getD3D12Resource(),
+                                           values, 0, nullptr);
+
+    transitionTo(dxBuf->getD3D12Resource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, prior);
+    dxBuf->setCurrentState(prior);
 }
 
 void DX12RHICommandBuffer::blitImage(RHITexture* src, RHIImageLayout /*srcLayout*/,
-                                      RHITexture* dst, RHIImageLayout /*dstLayout*/,
-                                      uint32_t srcWidth, uint32_t srcHeight,
-                                      uint32_t dstWidth, uint32_t dstHeight,
-                                      RHIFilter /*filter*/) {
+                                     RHITexture* dst, RHIImageLayout /*dstLayout*/,
+                                     uint32_t srcWidth, uint32_t srcHeight,
+                                     uint32_t dstWidth, uint32_t dstHeight,
+                                     RHIFilter filter) {
     auto* dxSrc = static_cast<DX12RHITexture*>(src);
     auto* dxDst = static_cast<DX12RHITexture*>(dst);
+    if (dstWidth == 0 || dstHeight == 0) {
+        return;
+    }
 
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource = dxSrc->getD3D12Resource();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex = 0;
+    // Transient view descriptors + RTV for the destination.
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE srvGpu = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE samCpu = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE samGpu = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvCpu = {};
+    if (!device_->allocateResourceDescriptors(1, &srvCpu, &srvGpu) ||
+        !device_->allocateSamplerDescriptors(1, &samCpu, &samGpu) ||
+        !device_->allocateRTVDescriptors(1, &rtvCpu)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] descriptor rings exhausted (blit)");
+    }
 
-    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-    dstLoc.pResource = dxDst->getD3D12Resource();
-    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex = 0;
+    ID3D12Device* d3d = device_->getDevice();
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = dxSrc->getSRVDesc();
+    d3d->CreateShaderResourceView(dxSrc->getD3D12Resource(), &srvDesc, srvCpu);
 
-    D3D12_BOX srcBox = {};
-    srcBox.left = 0;
-    srcBox.top = 0;
-    srcBox.front = 0;
-    srcBox.right = srcWidth;
-    srcBox.bottom = srcHeight;
-    srcBox.back = 1;
+    D3D12_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = (filter == RHIFilter::Nearest)
+        ? D3D12_FILTER_MIN_MAG_MIP_POINT : D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.MinLOD = 0;
+    samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+    d3d->CreateSampler(&samplerDesc, samCpu);
 
-    cmdList_->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &srcBox);
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = dxDst->getRTVDesc();
+    d3d->CreateRenderTargetView(dxDst->getD3D12Resource(), &rtvDesc, rtvCpu);
+
+    // dst must be a render target while the internal blit pipeline draws into it.
+    const D3D12_RESOURCE_STATES srcBefore = dxSrc->getCurrentState();
+    const D3D12_RESOURCE_STATES dstBefore = dxDst->getCurrentState();
+    ensureState(dxSrc, shaderReadStates());
+    ensureState(dxDst, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    std::shared_ptr<DX12RHIPipeline> blitPipeline = device_->getOrCreateBlitPipeline();
+    bindPipelineInternal(blitPipeline.get(), false);
+
+    setDescriptorHeaps();
+    cmdList_->SetGraphicsRootDescriptorTable(0, srvGpu);
+    cmdList_->SetGraphicsRootDescriptorTable(1, samGpu);
+
+    D3D12_VIEWPORT viewport = {};
+    viewport.TopLeftX = 0;
+    viewport.TopLeftY = 0;
+    viewport.Width = static_cast<float>(dstWidth);
+    viewport.Height = static_cast<float>(dstHeight);
+    viewport.MaxDepth = 1.0f;
+    cmdList_->RSSetViewports(1, &viewport);
+
+    D3D12_RECT scissor = { 0, 0, static_cast<LONG>(dstWidth), static_cast<LONG>(dstHeight) };
+    cmdList_->RSSetScissorRects(1, &scissor);
+
+    cmdList_->OMSetRenderTargets(1, &rtvCpu, FALSE, nullptr);
+    cmdList_->DrawInstanced(3, 1, 0, 0);
+
+    // Restore caller-visible states so subsequent barrier calls stay consistent.
+    ensureState(dxSrc, srcBefore);
+    ensureState(dxDst, dstBefore);
 }
 
-// ---- Buffer Barrier ----
+// ---- Buffer barrier ----
 
 void DX12RHICommandBuffer::bufferBarrier(RHIBuffer* buffer, uint64_t /*size*/,
-                                          RHIPipelineStage /*srcStage*/, RHIPipelineStage /*dstStage*/,
-                                          RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) {
+                                         RHIPipelineStage /*srcStage*/,
+                                         RHIPipelineStage /*dstStage*/,
+                                         RHIAccessFlags srcAccess, RHIAccessFlags dstAccess) {
     auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
 
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.pResource = dxBuf->getD3D12Resource();
-    barrier.Transition.StateBefore = toD3D12BufferStates(srcAccess);
-    barrier.Transition.StateAfter = toD3D12BufferStates(dstAccess);
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    auto stateFor = [&](RHIAccessFlags access) -> D3D12_RESOURCE_STATES {
+        const uint32_t a = static_cast<uint32_t>(access);
+        if (a & static_cast<uint32_t>(RHIAccessFlags::ShaderWrite)) {
+            return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::ShaderRead)) {
+            // UAV buffers (Storage usage) are read in UNORDERED_ACCESS state.
+            return hasFlag(dxBuf->getUsage(), RHIBufferUsage::Storage)
+                ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                : shaderReadStates();
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::TransferWrite)) {
+            return D3D12_RESOURCE_STATE_COPY_DEST;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::TransferRead)) {
+            return D3D12_RESOURCE_STATE_COPY_SOURCE;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::VertexAttributeRead)) {
+            return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::IndexRead)) {
+            return D3D12_RESOURCE_STATE_INDEX_BUFFER;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::UniformRead)) {
+            return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        }
+        return D3D12_RESOURCE_STATE_COMMON;
+    };
 
-    cmdList_->ResourceBarrier(1, &barrier);
-
-    dxBuf->setCurrentState(barrier.Transition.StateAfter);
+    const D3D12_RESOURCE_STATES before = dxBuf->getCurrentState();
+    const D3D12_RESOURCE_STATES after = stateFor(dstAccess);
+    (void)srcAccess;
+    if (before == after) {
+        return;   // no state change -> nothing to transition
+    }
+    transitionTo(dxBuf->getD3D12Resource(), before, after);
+    dxBuf->setCurrentState(after);
 }
 
 void DX12RHICommandBuffer::clearColorImage(RHITexture* texture, float r, float g, float b, float a) {
     auto* dxTex = static_cast<DX12RHITexture*>(texture);
-    ID3D12Resource* resource = dxTex->getD3D12Resource();
 
-    DXGI_FORMAT format = toDXGIFormat(dxTex->getFormat());
-    if (format == DXGI_FORMAT_UNKNOWN) {
-        format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    // Clear by rendering a constant-color fullscreen triangle (avoids the
+    // ALLOW_UNORDERED_ACCESS requirement of ClearUnorderedAccessViewFloat).
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvCpu = {};
+    if (!device_->allocateRTVDescriptors(1, &rtvCpu)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] RTV ring exhausted (clear)");
     }
+    ID3D12Device* d3d = device_->getDevice();
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = dxTex->getRTVDesc();
+    d3d->CreateRenderTargetView(dxTex->getD3D12Resource(), &rtvDesc, rtvCpu);
 
-    ensureTempCPUDescriptorHeap();
-    tempDescriptorsAllocated_ = 0;
+    const D3D12_RESOURCE_STATES prior = dxTex->getCurrentState();
+    ensureState(dxTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = tempCPUHeap_->GetCPUDescriptorHandleForHeapStart();
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = tempCPUHeap_->GetGPUDescriptorHandleForHeapStart();
+    std::shared_ptr<DX12RHIPipeline> clearPipeline = device_->getOrCreateClearPipeline();
+    bindPipelineInternal(clearPipeline.get(), false);
 
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = format;
-    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    uavDesc.Texture2D.MipSlice = 0;
-    uavDesc.Texture2D.PlaneSlice = 0;
+    const float color[4] = { r, g, b, a };
+    pushConstants(RHIShaderStage::Fragment, 0, sizeof(color), color);
 
-    device_->getDevice()->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
+    D3D12_VIEWPORT viewport = {};
+    viewport.TopLeftX = 0;
+    viewport.TopLeftY = 0;
+    viewport.Width = static_cast<float>(dxTex->getWidth());
+    viewport.Height = static_cast<float>(dxTex->getHeight());
+    viewport.MaxDepth = 1.0f;
+    cmdList_->RSSetViewports(1, &viewport);
 
-    ID3D12DescriptorHeap* heaps[] = { tempCPUHeap_.Get() };
-    cmdList_->SetDescriptorHeaps(1, heaps);
+    D3D12_RECT scissor = { 0, 0, static_cast<LONG>(dxTex->getWidth()),
+                           static_cast<LONG>(dxTex->getHeight()) };
+    cmdList_->RSSetScissorRects(1, &scissor);
 
-    float color[4] = { r, g, b, a };
-    cmdList_->ClearUnorderedAccessViewFloat(gpuHandle, cpuHandle, resource, color, 0, nullptr);
+    cmdList_->OMSetRenderTargets(1, &rtvCpu, FALSE, nullptr);
+    cmdList_->DrawInstanced(3, 1, 0, 0);
+
+    ensureState(dxTex, prior);
 }
