@@ -1,7 +1,7 @@
 # DX12 后端补齐计划
 
 > 状态: 草案(2026/09/07 制定)
-> Phase 0/1/2 已完成(2026/09/09,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
+> Phase 0/1/2/3 已完成(2026/09/09,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
 > 背景: 基于对 `src/RHI/DX12` 与 `src/RHI/Vulkan` 全量对比分析,以及上层 RHI 消费方式调研。Vulkan 是完整可运行后端;DX12 目前是"可编译的部分脚手架",且从未在真实 MSVC/Windows 上编译过。
 
 ## 目标与约束(已确认的方向)
@@ -211,6 +211,52 @@ DX12 后端全接口实现 + `rhi_dx12_smoke` 冒烟 demo(纹理三角形、2-fr
 - ImGui DX12 分支不再需要 swapchain 暴露 per-image RTV handle:`imgui_impl_dx12` 主视口 `RenderDrawData` 不设置 RTV,引擎在 RHI `beginRenderPass`(已绑定 back-buffer RTV)内渲染 UI —— 与本仓库现有"render pass 内嵌 UI"模式一致;仅需 device/queue/RTV format 的 native 访问(已有)
 - Phase 2 验收原本含"Windows 上 Vulkan 分支可编译(可选)" —— 实际在 Windows 上完整构建并运行了 Vulkan 引擎
 
-### 待办(进入 Phase 3)
-- `Engine.cpp:75` 仍硬编码 `VulkanRHIDevice`;`RHI::CreateDevice` 的 DX12 分支仍 throw(Phase 3 首项)
-- ImGui DX12 分支、`.dxil` shader 内容管线为全引擎 shader 集落地后,运行期验证
+### Phase 3 — 已完成(2026/09/09, commit 8cbbcec)
+DX12 跑通默认 Forward + ImGui,与 Vulkan 画面一致;D3D12 validation 0 error。
+
+- **后端选择(按确认改为 CMake 编译期选项)**:`-DVENGINE_RHI_BACKEND=dx12`(仅 Windows;
+  非 WIN32 选 dx12 → configure 报错);`Engine.cpp` 走 `RHI::CreateDevice`(RHI.cpp 补 DX12 分支,
+  不再 throw);默认 vulkan,引擎标题等不受影响。DX12 下 5/6/7/8/9 键(水场景/GPU culling/Nanite)
+  在 Engine key 回调拦截并提示"Phase 4",防止误入无 .dxil 的管线。
+- **引擎 .dxil 内容管线**:CMake `CompileDX12EngineShaders`(未按计划新增 shell 脚本,改为提炼
+  通用 `dx12_compile_shader()` 函数同时供 smoke/engine 两套清单复用);Phase 3 只编 Forward 所需
+  `pbr.vert/frag|space=2`;输出 `bin/shaders_dx12/pbr_{vert,frag}.dxil`。`DX12RHIShader` 对
+  `shaders/*.spv` 路径先转译 `shaders_dx12/*.dxil` 再回退原路径 —— 修复了"bin/shaders 下 .spv
+  存在时把 SPIR-V 当 DXIL 读"的隐患(debug layer 报 Encoded signature size mismatch)。
+- **DXIL↔root signature 反射断言**:`DX12RHIPipeline::build()` 内 Debug-only 对每个 stage 反射
+  并逐 binding 校验(space/register/class)被 root signature 覆盖。实现细节偏离计划:D3DReflect
+  在本机无 `dxil.dll` 时无法解析 DXIL(0x8876086C),改为动态加载 `dxcompiler.dll`
+  (`IDxcUtils::CreateReflection`,与 WinPix 同款按需加载模式),缺失时单次提示降级。该断言实战
+  抓到一个 CBV 表覆盖的语义 bug:表内 CBV 以"描述符个数"计(tablespan=BindCount),仅
+  root-constants 覆盖按 16B cbuffer register 计(cbuffer size/16)。
+- **ImGui 运行修整**:`ImGuiLayer::endFrame` DX12 分支先 `SetDescriptorHeaps(1, &dxSrvHeap)`
+  再 `RenderDrawData`(imgui_impl_dx12 主视口路径自身不绑 heap,仅 platform-window 路径绑)。
+  引擎侧每个 bindPipeline 都会重绑自己的双 heap,UI 又是 pass 内最后绘制,无需还原。
+- **Validation 清理(Phase 3 暴露的运行时问题)**:
+  - swapchain 内部 D32 depth 创建时带 `D3D12_CLEAR_VALUE`(1.0/0,与引擎每帧 clear 一致),消除
+    每帧 ClearDepthStencilView 无 optimized-clear 的性能警告(千级/分钟刷屏);
+  - 非 compare 采样器 `ComparisonFunc` 置 `NEVER`(此前 ALWAYS 触发 CreateSampler 告警 ×18/初始化);
+  - `DX12RHIDevice` Debug 下持有 InfoQueue,submit/waitIdle 时把新 validation 消息打到 stderr
+    (非破坏读取,smoke 自带的计数器不受影响)。
+- **坐标系修正(Y-flip 后端化)**:GLM perspective 面向 Y-up(GL/D3D),Vulkan NDC Y 向下需要翻转。
+  原 4 处 `proj[1][1] *= -1` 无条件执行导致 DX12 场景上下颠倒(ImGui 正常,因 UI 用自己的投影)。
+  收敛为 `SceneRenderer::applyApiYFlip()`:`getBackend()==Vulkan` 才翻转;4 个调用点
+  (updateUniforms 公共 UBO/SSAO/GPU culling/Nanite)统一。纹理 V、Cull front-face 均无需调整。
+- **验收**:Windows Debug 下 DX12 引擎默认 Forward + ImGui 与 Vulkan 同向同内容(几何/纹理/UI),
+  resize/F1/拖动稳定;stderr 连续运行 25s+ 无任何 D3D12 validation 消息;`rhi_dx12_smoke`
+  exit 0、readback PASS、validation errors 0;`build-win`(Vulkan 默认)重 configure+build+运行无回归
+  (Vulkan 侧仍有的 swapchain semaphore 复用告警为存量设计问题,与本次无关)。
+
+**与计划偏差**
+- 后端选择按用户确认落地为 CMake 编译期选项(`VENGINE_RHI_BACKEND`),而非运行时 CLI/env;
+  同时引擎与冒烟各自独立构建目录跑双后端
+- 反射断言改用 dxcompiler.dll 反射(计划写 D3DReflect,本机缺 dxil.dll 不可用);降级路径保留
+- shader 内容管线以 CMake 函数落地,未另建 `compile_shaders_dx12.sh`(Windows-only 工作流)
+- 顺带发现并修复:投影矩阵 Y-flip 需按后端区分(计划未预判,属于"修 Phase 1/2 暴露的运行时问题")
+
+### 待办(进入 Phase 4)
+- GBuffer(3×RTV+D32)、SSAO(16 层 array per-layer view/RTV/UAV、deinterleave/reinterleave 计算)、
+  SSR、Water、Lighting compose 的 `.dxil` 全部产出并入 `DX12_ENGINE_SHADERS` 清单
+  (每个 shader 的 pushConstantSpace = 所属管线 layout 数,见 DX12-RHI-Notes §11 附录);
+  去掉 Engine key 5-9 的 DX12 拦截
+- 全功能画面与 Vulkan 对齐(7/8/9 键、水场景),GPUToCPU 双缓冲 readback(fence 后 Map)若需
