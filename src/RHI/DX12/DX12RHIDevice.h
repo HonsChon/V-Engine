@@ -214,6 +214,10 @@ private:
     // ---- fence/event plumbing ----
     void waitForGPU();                       // queue idle
     void waitForFenceSync(DX12FenceSync* sync, uint64_t targetValue);
+    /// Print new debug-layer messages to stderr (Debug builds). Non-destructive:
+    /// messages stay in the queue so external monitors (e.g. the smoke demo)
+    /// still see them.
+    void reportValidationMessages();
 
     // ---- descriptor ring plumbing ----
     void ringWaitForSegment(const RingHeap& ring, UINT segment);
@@ -233,6 +237,10 @@ private:
     ComPtr<ID3D12Fence> fence;
     uint64_t            fenceValue = 0;
     HANDLE              fenceEvent = nullptr;
+
+    // Debug-layer message reporting (Debug builds only; see reportValidationMessages).
+    ComPtr<ID3D12InfoQueue> infoQueue_;
+    uint64_t                validationReported_ = 0;
 
     // Fence that gates descriptor-ring segment reuse.
     ComPtr<ID3D12Fence> ringFence;

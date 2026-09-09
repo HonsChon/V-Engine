@@ -28,7 +28,8 @@ uint32_t bytesPerPixel(RHIFormat format) {
 
 } // namespace
 
-DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc)
+DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc,
+                               const D3D12_CLEAR_VALUE* optimizedClearValue)
     : device_(device)
     , width_(desc.width)
     , height_(desc.height)
@@ -38,6 +39,9 @@ DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc
     , format_(desc.format)
     , usage_(desc.usage)
 {
+    if (optimizedClearValue) {
+        optimizedClearValue_ = *optimizedClearValue;
+    }
     // Sampled/stored depth textures must be created typeless so an SRV/UAV can
     // share the resource with the depth/stencil view.
     depthTypeless_ = isDepthFormat(format_)
@@ -66,7 +70,7 @@ DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc
             D3D12_HEAP_FLAG_NONE,
             &resourceDesc,
             initialState,
-            nullptr,
+            optimizedClearValue_.has_value() ? &optimizedClearValue_.value() : nullptr,
             IID_PPV_ARGS(&resource_))))
     {
         throw std::runtime_error("[DX12RHITexture] failed to create texture resource");

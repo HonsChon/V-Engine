@@ -35,6 +35,22 @@ std::wstring joinPath(const std::wstring& dir, const std::wstring& rel) {
     return dir + L"\\" + rel;
 }
 
+// Engine passes hard-code the Vulkan blob path ("shaders/X.spv"); on DX12 the
+// matching DXIL blob is produced by the CMake "CompileDX12EngineShaders" target
+// at "shaders_dx12/X.dxil". Translate when the as-given path fails to load.
+std::string dxilFromSpvPath(const std::string& spvPath) {
+    const std::string kShaderPrefix = "shaders/";
+    if (spvPath.rfind(kShaderPrefix, 0) != 0 || spvPath.size() <= kShaderPrefix.size() + 4) {
+        return {};
+    }
+    std::string rel = spvPath.substr(kShaderPrefix.size());
+    if (rel.compare(rel.size() - 4, 4, ".spv") != 0) {
+        return {};
+    }
+    rel = rel.substr(0, rel.size() - 4);
+    return "shaders_dx12/" + rel + ".dxil";
+}
+
 } // namespace
 
 DX12RHIShader::DX12RHIShader(DX12RHIDevice* device, RHIShaderStage stage,
@@ -44,20 +60,33 @@ DX12RHIShader::DX12RHIShader(DX12RHIDevice* device, RHIShaderStage stage,
 {
     // Prefer the path as given (matches the process CWD), then fall back to the
     // executable's directory so the demo works regardless of the shell's CWD.
-    const std::wstring wideRel = toWide(filePath);
-    std::vector<std::wstring> candidates;
-
-    // Raw path only when absolute; otherwise try CWD first then exe dir.
-    if (filePath.size() > 2 && filePath[1] == ':') {
-        candidates.push_back(wideRel);
-    } else {
-        candidates.push_back(wideRel);                       // CWD (e.g. bin/ when launched from bin)
-        candidates.push_back(joinPath(exeDirectory(), wideRel));
+    // Engine passes written against the Vulkan blob layout carry ".spv" paths
+    // that DO exist in bin/shaders next to the exe - those bytes are SPIR-V and
+    // must never reach a DXIL consumer. When the path looks like a .spv blob,
+    // the translated "shaders_dx12/X.dxil" candidate is tried FIRST.
+    std::vector<std::string> pathCandidates;
+    const std::string translated = dxilFromSpvPath(filePath);
+    if (!translated.empty()) {
+        pathCandidates.push_back(translated);
     }
+    pathCandidates.push_back(filePath);
 
-    for (const auto& candidate : candidates) {
-        if (SUCCEEDED(D3DReadFileToBlob(candidate.c_str(), &shaderBlob_))) {
-            return;
+    for (const std::string& candidatePath : pathCandidates) {
+        const std::wstring wideRel = toWide(candidatePath);
+        std::vector<std::wstring> candidates;
+
+        // Raw path only when absolute; otherwise try CWD first then exe dir.
+        if (candidatePath.size() > 2 && candidatePath[1] == ':') {
+            candidates.push_back(wideRel);
+        } else {
+            candidates.push_back(wideRel);                       // CWD (e.g. bin/ when launched from bin)
+            candidates.push_back(joinPath(exeDirectory(), wideRel));
+        }
+
+        for (const auto& candidate : candidates) {
+            if (SUCCEEDED(D3DReadFileToBlob(candidate.c_str(), &shaderBlob_))) {
+                return;
+            }
         }
     }
     throw std::runtime_error("[DX12RHIShader] Failed to load shader blob: " + filePath);

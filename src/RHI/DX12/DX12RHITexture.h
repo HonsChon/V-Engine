@@ -4,6 +4,7 @@
 
 #include <directx/d3d12.h>
 #include <wrl/client.h>
+#include <optional>
 
 class DX12RHIDevice;
 
@@ -12,7 +13,10 @@ class DX12RHITexture : public RHITexture
 {
 public:
     /// Create a real committed texture resource (state starts at COMMON).
-    DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc);
+    /// @param optimizedClearValue optional D3D12_CLEAR_VALUE passed to resource
+    ///        creation (enables fast clears; must match the format).
+    DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc,
+                   const D3D12_CLEAR_VALUE* optimizedClearValue = nullptr);
 
     /// Wrap an externally owned ID3D12Resource (AddRef; used by swapchain back buffers).
     DX12RHITexture(DX12RHIDevice* device,
@@ -75,6 +79,7 @@ protected:
     bool            depthTypeless_ = false;
     bool            isView_  = false;
     uint32_t        baseLayer_ = 0;
+    std::optional<D3D12_CLEAR_VALUE> optimizedClearValue_;
 };
 
 /// Non-owning single layer view: shares the parent resource (AddRef'd) and only

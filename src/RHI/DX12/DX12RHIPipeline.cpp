@@ -6,9 +6,216 @@
 #include "DX12TypeConversions.h"
 
 #include <stdexcept>
+#include <cstdio>
+#include <cstdlib>
+#include <windows.h>
 #include <d3dcompiler.h>
+#include <directx/d3d12shader.h>
+
+#if defined(_DEBUG)
+#include <dxc/dxcapi.h>
+#endif
 
 using namespace DX12TypeConversions;
+
+#if defined(_DEBUG)
+// =============================================================================
+// Debug-only: cross-check DXIL bindings against the root signature we built.
+//
+// spirv-cross/dxc assign every shader resource a fixed (space, register-class,
+// register) location. The C++ root signature (docs/DX12-RHI-Notes.md §11)
+// promises: layout i -> space i, binding b -> register b, push constants ->
+// 32-bit constants at b0 in space == layoutCount. If a shader binding is NOT
+// covered by the root signature, draws would sample descriptors that are never
+// bound. Throw at build() time instead of letting the debug layer (or worse, a
+// blank frame) surface it later.
+//
+// Reflection runs through dxcompiler.dll (IDxcUtils::CreateReflection) loaded
+// on demand: D3DReflect cannot parse DXIL containers when dxil.dll is absent
+// from System32, whereas dxcompiler ships with the Vulkan SDK and every dxc
+// toolchain. When the DLL is not found the check degrades to a one-time notice
+// (same spirit as the WinPixEventRuntime labels).
+// =============================================================================
+
+namespace {
+
+enum class RegClass { CBV, SRV, UAV, Sampler };
+
+RegClass toRegisterClass(D3D_SHADER_INPUT_TYPE type) {
+    switch (type) {
+        case D3D_SIT_CBUFFER:  return RegClass::CBV;
+        case D3D_SIT_SAMPLER:  return RegClass::Sampler;
+        case D3D_SIT_UAV_RWTYPED:
+        case D3D_SIT_UAV_RWSTRUCTURED:
+        case D3D_SIT_UAV_RWBYTEADDRESS:
+        case D3D_SIT_UAV_APPEND_STRUCTURED:
+        case D3D_SIT_UAV_CONSUME_STRUCTURED:
+        case D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER:
+        case D3D_SIT_UAV_FEEDBACKTEXTURE:
+            return RegClass::UAV;
+        case D3D_SIT_TBUFFER:
+        case D3D_SIT_TEXTURE:
+        case D3D_SIT_STRUCTURED:
+        case D3D_SIT_BYTEADDRESS:
+        default:
+            return RegClass::SRV;
+    }
+}
+
+const char* registerClassName(RegClass c) {
+    switch (c) {
+        case RegClass::CBV:     return "CBV (b)";
+        case RegClass::SRV:     return "SRV (t)";
+        case RegClass::UAV:     return "UAV (u)";
+        case RegClass::Sampler: return "Sampler (s)";
+    }
+    return "?";
+}
+
+// ---- dxcompiler.dll (dxc) reflection ----
+using DxcCreateInstanceFn = HRESULT(__stdcall*)(REFCLSID rclsid, REFIID riid, void** ppv);
+
+HMODULE dxcModule() {
+    static HMODULE module = []() -> HMODULE {
+        HMODULE result = nullptr;
+        wchar_t exePath[MAX_PATH];
+        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0) {
+            std::wstring dir(exePath);
+            const size_t slash = dir.find_last_of(L"\\/");
+            dir = (slash == std::wstring::npos) ? L"." : dir.substr(0, slash);
+            result = LoadLibraryW((dir + L"\\dxcompiler.dll").c_str());
+        }
+        if (!result) {
+            if (const char* sdkDir = std::getenv("VULKAN_SDK"); sdkDir && *sdkDir) {
+                result = LoadLibraryA((std::string(sdkDir) + "\\Bin\\dxcompiler.dll").c_str());
+            }
+        }
+        if (!result) {
+            result = LoadLibraryA("dxcompiler.dll");   // PATH / System32
+        }
+        return result;
+    }();
+    return module;
+}
+
+void dxcReflectionUnavailableNotice() {
+    static bool noticed = false;
+    if (!noticed) {
+        noticed = true;
+        std::fprintf(stderr,
+            "[DX12 root-sig check] dxcompiler.dll not found — shader/root-signature "
+            "cross check disabled for this session\n");
+    }
+}
+
+/// Reflect a DXIL blob through dxc. Returns null when dxcompiler.dll is missing
+/// or the blob cannot be reflected (callers degrade gracefully).
+ComPtr<ID3D12ShaderReflection> dx12ReflectShader(const D3D12_SHADER_BYTECODE& bytecode) {
+    HMODULE mod = dxcModule();
+    if (!mod) {
+        return nullptr;
+    }
+    auto createInstance = reinterpret_cast<DxcCreateInstanceFn>(
+        GetProcAddress(mod, "DxcCreateInstance"));
+    if (!createInstance) {
+        return nullptr;
+    }
+    ComPtr<IDxcUtils> utils;
+    if (FAILED(createInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils)))) {
+        return nullptr;
+    }
+    DxcBuffer buffer = {};
+    buffer.Ptr = bytecode.pShaderBytecode;
+    buffer.Size = bytecode.BytecodeLength;
+    buffer.Encoding = DXC_CP_ACP;
+    ComPtr<ID3D12ShaderReflection> refl;
+    if (FAILED(utils->CreateReflection(&buffer, IID_PPV_ARGS(&refl)))) {
+        return nullptr;
+    }
+    return refl;
+}
+
+} // namespace
+
+static void dx12ValidateShaderRootBindings(const D3D12_SHADER_BYTECODE& bytecode,
+                                           const char* stageLabel,
+                                           const DX12RootSignatureResult& rs) {
+    ComPtr<ID3D12ShaderReflection> refl = dx12ReflectShader(bytecode);
+    if (!refl) {
+        dxcReflectionUnavailableNotice();
+        return;
+    }
+
+    D3D12_SHADER_DESC shaderDesc = {};
+    refl->GetDesc(&shaderDesc);
+
+    for (UINT i = 0; i < shaderDesc.BoundResources; ++i) {
+        D3D12_SHADER_INPUT_BIND_DESC binding = {};
+        refl->GetResourceBindingDesc(i, &binding);
+
+        const RegClass regClass = toRegisterClass(binding.Type);
+
+        // Descriptor tables: one descriptor occupies one register (a CBV range
+        // with NumDescriptors=1 covers b0..b(Size/16) of the cbuffer in the
+        // shader, but the range itself is a single descriptor).
+        const UINT tableSpan = binding.BindCount;
+
+        // Root 32-bit constants: coverage is in 16-byte cbuffer registers, so
+        // the push-constant cbuffer's span must come from its byte size.
+        UINT cbufferRegisters = 1;
+        if (binding.Type == D3D_SIT_CBUFFER) {
+            if (auto* buffer = refl->GetConstantBufferByName(binding.Name)) {
+                D3D12_SHADER_BUFFER_DESC bufferDesc = {};
+                buffer->GetDesc(&bufferDesc);
+                cbufferRegisters = (bufferDesc.Size + 15) / 16;
+                if (cbufferRegisters == 0) cbufferRegisters = 1;
+            }
+        }
+
+        bool covered = false;
+
+        // 1) Descriptor-table ranges of the matching register class + space.
+        for (const auto& range : rs.ranges) {
+            bool classMatch = false;
+            switch (regClass) {
+                case RegClass::CBV:     classMatch = (range.type == D3D12_DESCRIPTOR_RANGE_TYPE_CBV); break;
+                case RegClass::SRV:     classMatch = (range.type == D3D12_DESCRIPTOR_RANGE_TYPE_SRV); break;
+                case RegClass::UAV:     classMatch = (range.type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV); break;
+                case RegClass::Sampler: classMatch = (range.type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER); break;
+            }
+            if (!classMatch || range.space != binding.Space) continue;
+            const UINT rangeEnd = range.baseRegister + range.numDescriptors;
+            const UINT bindEnd  = binding.BindPoint + tableSpan;
+            if (binding.BindPoint >= range.baseRegister && bindEnd <= rangeEnd) {
+                covered = true;
+                break;
+            }
+        }
+
+        // 2) Root 32-bit constants: the push-constant cbuffer sits at b0 in its
+        //    dedicated space.
+        if (!covered && regClass == RegClass::CBV && rs.hasRootConstants &&
+            binding.Space == rs.pcRegisterSpace && binding.BindPoint == 0) {
+            covered = (cbufferRegisters <= rs.pcNumRegisters);
+        }
+
+        if (!covered) {
+            throw std::runtime_error(
+                std::string("[DX12 root-sig check] ") + stageLabel + " stage binding '" +
+                binding.Name + "' (" + registerClassName(regClass) +
+                ", space " + std::to_string(binding.Space) +
+                ", register " + std::to_string(binding.BindPoint) +
+                ", table span " + std::to_string(tableSpan) +
+                (binding.Type == D3D_SIT_CBUFFER
+                     ? ", cbuffer registers " + std::to_string(cbufferRegisters)
+                     : std::string()) +
+                ") is not covered by the root signature. Register/space mapping "
+                "drift between the .dxil shader and the pipeline layout (see "
+                "docs/DX12-RHI-Notes.md §11 appendix).");
+        }
+    }
+}
+#endif // _DEBUG
 
 // =============================================================================
 // DX12RHIPipeline
@@ -275,6 +482,21 @@ DX12RootSignatureResult DX12BuildRootSignature(
     rootParams.resize(paramIdx);
     ranges.resize(rangeIdx);
 
+    // Snapshot for the Debug-only DXIL-vs-root-signature cross check.
+    for (const D3D12_ROOT_PARAMETER& param : rootParams) {
+        if (param.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE) {
+            for (UINT r = 0; r < param.DescriptorTable.NumDescriptorRanges; ++r) {
+                const D3D12_DESCRIPTOR_RANGE& rg = param.DescriptorTable.pDescriptorRanges[r];
+                result.ranges.push_back({ rg.RangeType, rg.RegisterSpace,
+                                          rg.BaseShaderRegister, rg.NumDescriptors });
+            }
+        } else if (param.ParameterType == D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS) {
+            result.hasRootConstants = true;
+            result.pcRegisterSpace = param.Constants.RegisterSpace;
+            result.pcNumRegisters  = param.Constants.Num32BitValues / 4;
+        }
+    }
+
     D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
     rootDesc.NumParameters = static_cast<UINT>(rootParams.size());
     rootDesc.pParameters = rootParams.empty() ? nullptr : rootParams.data();
@@ -416,6 +638,11 @@ void DX12GraphicsPipelineBuilder::buildGraphicsPipelineState(
 
     D3D12_SHADER_BYTECODE vsBytecode = vs.getBytecode();
     D3D12_SHADER_BYTECODE psBytecode = ps.getBytecode();
+
+#if defined(_DEBUG)
+    dx12ValidateShaderRootBindings(vsBytecode, "vertex", rootResult);
+    dx12ValidateShaderRootBindings(psBytecode, "pixel", rootResult);
+#endif
 
     // Input layout (semantic convention: TEXCOORD + location, see header).
     std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
@@ -572,6 +799,10 @@ std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
 
     DX12RHIShader cs(device_, RHIShaderStage::Compute, computeShaderPath_);
     D3D12_SHADER_BYTECODE csBytecode = cs.getBytecode();
+
+#if defined(_DEBUG)
+    dx12ValidateShaderRootBindings(csBytecode, "compute", rootResult);
+#endif
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.pRootSignature = rootResult.rootSig.Get();

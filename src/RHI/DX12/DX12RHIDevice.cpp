@@ -130,6 +130,9 @@ void DX12RHIDevice::createDevice()
     if (FAILED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)))) {
         throw std::runtime_error("failed to create D3D12 device!");
     }
+#if defined(_DEBUG)
+    device.As(&infoQueue_);
+#endif
 }
 
 void DX12RHIDevice::createCommandQueue()
@@ -219,6 +222,37 @@ void DX12RHIDevice::waitForGPU() {
         fence->SetEventOnCompletion(waitValue, fenceEvent);
         WaitForSingleObject(fenceEvent, INFINITE);
     }
+    reportValidationMessages();
+}
+
+void DX12RHIDevice::reportValidationMessages() {
+#if defined(_DEBUG)
+    if (!infoQueue_) {
+        return;
+    }
+    const UINT64 total = infoQueue_->GetNumStoredMessages();
+    if (total <= validationReported_) {
+        return;
+    }
+    for (UINT64 i = validationReported_; i < total; ++i) {
+        SIZE_T size = 0;
+        if (FAILED(infoQueue_->GetMessage(i, nullptr, &size)) || size == 0) {
+            continue;
+        }
+        std::vector<uint8_t> buffer(size);
+        D3D12_MESSAGE* message = reinterpret_cast<D3D12_MESSAGE*>(buffer.data());
+        if (FAILED(infoQueue_->GetMessage(i, message, &size))) {
+            continue;
+        }
+        const char* severity = "INFO";
+        if (message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION) severity = "CORRUPTION";
+        else if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR) severity = "ERROR";
+        else if (message->Severity == D3D12_MESSAGE_SEVERITY_WARNING) severity = "WARNING";
+        std::fprintf(stderr, "[D3D12 validation] %s: %s\n", severity,
+                     message->pDescription ? message->pDescription : "(no description)");
+    }
+    validationReported_ = total;
+#endif
 }
 
 void DX12RHIDevice::waitForFenceSync(DX12FenceSync* sync, uint64_t targetValue) {
@@ -752,6 +786,7 @@ void DX12RHIDevice::submitGraphicsQueue(const std::vector<void*>& /*waitSemaphor
 
     // Close the descriptor batch opened during recording of this frame.
     finalizeDescriptorBatch();
+    reportValidationMessages();
 }
 
 // =============================================================================

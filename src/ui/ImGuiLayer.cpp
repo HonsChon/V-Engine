@@ -368,7 +368,19 @@ void ImGuiLayer::endFrame(void* commandBuffer) {
     }
 #if defined(_WIN32)
     else if (d.backend == RHIBackend::DX12) {
-        ImGui_ImplDX12_RenderDrawData(drawData, static_cast<ID3D12GraphicsCommandList*>(commandBuffer));
+        auto* cmdList = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
+
+        // imgui_impl_dx12's main-viewport RenderDrawData does NOT call
+        // SetDescriptorHeaps itself (only its platform-window path does): it
+        // expects the caller to bind the SRV heap holding ImGui's font/texture
+        // descriptors. The RHI command buffer binds its own shader-visible
+        // heaps on every bindPipeline/setBindingGroup, and ImGui is recorded
+        // last inside the render pass, so no restoration is needed here.
+        if (d.dxSrvHeap) {
+            ID3D12DescriptorHeap* heaps[] = { d.dxSrvHeap };
+            cmdList->SetDescriptorHeaps(1, heaps);
+        }
+        ImGui_ImplDX12_RenderDrawData(drawData, cmdList);
     }
 #endif
 

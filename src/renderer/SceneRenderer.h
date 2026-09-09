@@ -168,6 +168,11 @@ private:
     void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex);
     void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex);
 
+    // ========== 矩阵工具 ==========
+    /// GLM 的 perspective 面向 Y-up 的 GL/D3D 惯例;Vulkan 的 NDC Y 向下,需要
+    /// 翻转投影的 Y 轴才与画面一致。DX12 直接使用标准矩阵。
+    glm::mat4 applyApiYFlip(const glm::mat4& proj) const;
+
     // ========== 资源创建 ==========
     void createSceneColorImage();
     void cleanupSceneColorImage();

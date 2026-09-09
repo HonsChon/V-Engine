@@ -24,7 +24,6 @@
 #include "RHIDevice.h"
 #include "RHISwapChain.h"
 #include "RHICommandBuffer.h"
-#include "Vulkan/VulkanRHIDevice.h"
 
 #include "panels/DebugPanel.h"
 #include "panels/SceneHierarchyPanel.h"
@@ -70,9 +69,17 @@ void Engine::initializeSubsystems() {
     m_window = std::make_unique<Window>(wc);
     std::cout << "[Engine] Window created\n";
 
-    // 2. RHI Device (standalone — owns Vulkan instance/device/surface)
-    m_rhiDevice = std::make_unique<VulkanRHIDevice>(m_window->getNativeHandle());
-    std::cout << "[Engine] RHI device created (standalone)\n";
+    // 2. RHI Device (factory — backend chosen at CMake configure time)
+    //    VENGINE_RHI_DX12 is defined by the build system when the engine is
+    //    configured with -DVENGINE_RHI_BACKEND=dx12 (Windows only).
+#if defined(VENGINE_RHI_DX12)
+    const RHIBackend backend = RHIBackend::DX12;
+#else
+    const RHIBackend backend = RHIBackend::Vulkan;
+#endif
+    m_rhiDevice = RHI::CreateDevice(backend, m_window->getNativeHandle());
+    std::cout << "[Engine] RHI device created (" << (backend == RHIBackend::DX12 ? "DX12" : "Vulkan")
+              << ")\n";
 
     // 3. SwapChain (via RHI Device factory)
     RHISwapChainDesc swapChainDesc;
@@ -230,6 +237,18 @@ void Engine::setupInputCallbacks() {
     m_window->setKeyCallback([this](int key, int scancode, int action, int mods) {
         if (action != GLFW_PRESS) return;
         auto& settings = m_renderer->getSettings();
+
+#if defined(VENGINE_RHI_DX12)
+        // Deferred shading / GPU culling / Nanite run on .dxil shaders that land
+        // in Phase 4 — ignore the toggles on the DX12 backend for now so users
+        // cannot enter a pipeline whose shaders do not exist yet.
+        if (key >= GLFW_KEY_5 && key <= GLFW_KEY_9) {
+            std::cout << "[Engine] Key " << static_cast<char>(key)
+                      << ": deferred/GPU-driven/Nanite features arrive on the DX12 backend "
+                         "in Phase 4 (skipped)\n";
+            return;
+        }
+#endif
 
         switch (key) {
         case GLFW_KEY_ESCAPE:

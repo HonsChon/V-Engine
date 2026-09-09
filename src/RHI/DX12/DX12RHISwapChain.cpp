@@ -127,7 +127,13 @@ void DX12RHISwapChain::createViewsAndWrappers() {
         depthDesc.height = height_;
         depthDesc.format = RHIFormat::D32_SFLOAT;
         depthDesc.usage  = RHITextureUsage::DepthStencilAttachment;
-        depthTexture_ = std::make_shared<DX12RHITexture>(device_, depthDesc);
+        // Fast-clear: the engine clears the swapchain depth to 1.0/0 every frame
+        // (matches the render pass clear values passed by the scene renderer).
+        D3D12_CLEAR_VALUE depthClear = {};
+        depthClear.Format = DXGI_FORMAT_D32_FLOAT;
+        depthClear.DepthStencil.Depth = 1.0f;
+        depthClear.DepthStencil.Stencil = 0;
+        depthTexture_ = std::make_shared<DX12RHITexture>(device_, depthDesc, &depthClear);
 
         D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
         dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;

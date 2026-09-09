@@ -86,6 +86,21 @@ struct DX12RootSignatureResult {
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSig;
     std::vector<DX12RHIPipeline::LayoutTables>  layoutTables;
     int pushConstantRootParam = -1;
+
+    // Snapshot of what the built root signature covers. Used (Debug builds
+    // only) to cross-check DXIL bindings against the C++ root signature, so a
+    // register/space mapping drift between shader content and pipeline layout
+    // fails loudly at build() time instead of as a runtime validation error.
+    struct RangeInfo {
+        D3D12_DESCRIPTOR_RANGE_TYPE type = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        UINT space = 0;
+        UINT baseRegister = 0;
+        UINT numDescriptors = 0;
+    };
+    std::vector<RangeInfo> ranges;        // every descriptor-table range
+    bool hasRootConstants = false;        // push-constant parameter present
+    UINT pcRegisterSpace  = 0;
+    UINT pcNumRegisters   = 0;            // 32-bit-constant coverage in 16-byte cbuffer registers
 };
 
 /// Build the root signature for a pipeline.

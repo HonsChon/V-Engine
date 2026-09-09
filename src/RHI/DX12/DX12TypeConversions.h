@@ -254,7 +254,11 @@ inline void toD3D12SamplerDesc(const RHISamplerDesc& in, D3D12_SAMPLER_DESC& out
     out.AddressW = toD3D12AddressMode(in.addressModeW);
     out.MipLODBias = in.mipLodBias;
     out.MaxAnisotropy = in.anisotropyEnable ? static_cast<UINT>(in.maxAnisotropy) : 0;
-    out.ComparisonFunc = toD3D12CompareFunc(in.compareOp);
+    // For a non-comparison filter the comparison function is ignored; leaving it
+    // at ALWAYS (or 0 from value-init) makes the debug layer warn on every
+    // CreateSampler call, so reset it to NEVER unless a real compare is enabled.
+    out.ComparisonFunc = in.compareEnable ? toD3D12CompareFunc(in.compareOp)
+                                          : D3D12_COMPARISON_FUNC_NEVER;
     out.MinLOD = in.minLod;
     out.MaxLOD = in.maxLod;
 

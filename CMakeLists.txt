@@ -60,6 +60,15 @@ project(VulkanPBR VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ============================================================
+# Engine RHI backend (compile-time selection)
+#   -DVENGINE_RHI_BACKEND=vulkan  (default, all platforms)
+#   -DVENGINE_RHI_BACKEND=dx12    (Windows only; DX12 requires no Vulkan device)
+# ============================================================
+set(VENGINE_RHI_BACKEND "vulkan" CACHE STRING
+    "RHI backend used by the engine executable (vulkan|dx12)")
+set_property(CACHE VENGINE_RHI_BACKEND PROPERTY STRINGS vulkan dx12)
+
 # 设置输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin)
@@ -546,6 +555,19 @@ if(glm_FOUND)
 endif()
 
 # ============================================================
+# Engine RHI backend compile definition
+# ============================================================
+if(VENGINE_RHI_BACKEND STREQUAL "dx12")
+    if(NOT WIN32)
+        message(FATAL_ERROR "VENGINE_RHI_BACKEND=dx12 is only supported on Windows")
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE VENGINE_RHI_DX12=1)
+    message(STATUS "Engine RHI backend: DX12 (VENGINE_RHI_DX12)")
+else()
+    message(STATUS "Engine RHI backend: Vulkan")
+endif()
+
+# ============================================================
 # 平台特定配置
 # ============================================================
 if(WIN32)
@@ -629,50 +651,86 @@ if(WIN32)
         file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR})
         file(MAKE_DIRECTORY ${DX12_SHADER_CACHE_DIR})
 
-        # name;stage(vs/ps);pushConstantSpace(layout count of the owning pipeline)
-        set(DX12_SHADERS_TO_COMPILE
-            demo.vert|vs|2
-            demo.frag|ps|2
-            blit.vert|vs|0
-            blit.frag|ps|0
-            clear.vert|vs|0
-            clear.frag|ps|0
-        )
+        # ---- 通用单 shader 编译链 ----
+        # GLSL -> glslc(.spv) -> spirv-cross(--hlsl sm60) -> inject_hlsl.ps1
+        # (push-constant cbuffer 注入 register(b0, space=N)) -> dxc(.dxil)
+        # 产物名与引擎运行时约定一致: pass 硬编码 "shaders/X.spv", DX12RHIShader
+        # 加载时转译为 "shaders_dx12/X.dxil"。
+        # 参数: <GLSL 全路径> <vs|ps|cs> <pushConstantSpace=所属管线 layout 数> <dxil 相对名> <输出列表变量名>
+        function(dx12_compile_shader DX12F_GLSL DX12F_STAGE DX12F_PC_SPACE DX12F_DXIL_REL DX12F_OUTVAR)
+            # Cache intermediates are named after the ASCII dxil output (paths
+            # may contain non-ASCII repo segments, which some tools mishandle).
+            string(REPLACE "/" "_" DX12F_STEM ${DX12F_DXIL_REL})
+            string(REPLACE "." "_" DX12F_STEM ${DX12F_STEM})
+            set(DX12F_SPV   "${DX12_SHADER_CACHE_DIR}/${DX12F_STEM}.spv")
+            set(DX12F_HLSL  "${DX12_SHADER_CACHE_DIR}/${DX12F_STEM}.hlsl")
+            set(DX12F_DXIL  "${DX12_SHADER_OUT_DIR}/${DX12F_DXIL_REL}")
 
-        foreach(SHADER_SPEC ${DX12_SHADERS_TO_COMPILE})
+            if(DX12F_STAGE STREQUAL "vs")
+                set(DX12F_PROFILE "vs_6_0")
+            elseif(DX12F_STAGE STREQUAL "cs")
+                set(DX12F_PROFILE "cs_6_0")
+            else()
+                set(DX12F_PROFILE "ps_6_0")
+            endif()
+
+            add_custom_command(
+                OUTPUT ${DX12F_DXIL}
+                COMMAND ${DX12_GLSLC} ${DX12F_GLSL} -o ${DX12F_SPV}
+                COMMAND ${DX12_SPIRV_CROSS} ${DX12F_SPV} --hlsl --shader-model 60 --output ${DX12F_HLSL}
+                COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                    "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
+                    -InFile ${DX12F_HLSL} -OutFile ${DX12F_HLSL}
+                    -PushConstantSpace ${DX12F_PC_SPACE}
+                COMMAND ${DX12_DXC} -T ${DX12F_PROFILE} -E main -Fo ${DX12F_DXIL} ${DX12F_HLSL}
+                DEPENDS ${DX12F_GLSL} "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
+                COMMENT "DX12 shader: ${DX12F_GLSL} -> shaders_dx12/${DX12F_DXIL_REL} (space=${DX12F_PC_SPACE})"
+            )
+            set(${DX12F_OUTVAR} ${${DX12F_OUTVAR}} ${DX12F_DXIL} PARENT_SCOPE)
+        endfunction()
+
+        # ---- DX12 smoke shader 集 (demo + 设备内置 blit/clear 管线) ----
+        # <glsl 名>|<stage>|<pushConstantSpace>|<dxil 相对名>
+        set(DX12_SMOKE_SHADERS
+            demo.vert|vs|2|demo_vert.dxil
+            demo.frag|ps|2|demo_frag.dxil
+            blit.vert|vs|0|blit_vert.dxil
+            blit.frag|ps|0|blit_frag.dxil
+            clear.vert|vs|0|clear_vert.dxil
+            clear.frag|ps|0|clear_frag.dxil
+        )
+        set(DX12_SMOKE_OUTPUTS)
+        foreach(SHADER_SPEC ${DX12_SMOKE_SHADERS})
             string(REPLACE "|" ";" SHADER_PARTS ${SHADER_SPEC})
             list(GET SHADER_PARTS 0 SHADER_SRC)
             list(GET SHADER_PARTS 1 SHADER_STAGE)
             list(GET SHADER_PARTS 2 SHADER_PC_SPACE)
-
-            string(REPLACE "." "_" SHADER_BASE ${SHADER_SRC})
-            set(GLSL_IN   "${DX12_SMOKE_GLSL_DIR}/${SHADER_SRC}")
-            set(SPV_OUT   "${DX12_SHADER_CACHE_DIR}/${SHADER_BASE}.spv")
-            set(HLSL_OUT  "${DX12_SHADER_CACHE_DIR}/${SHADER_BASE}.hlsl")
-            set(DXIL_OUT  "${DX12_SHADER_OUT_DIR}/${SHADER_BASE}.dxil")
-
-            if(SHADER_STAGE STREQUAL "vs")
-                set(DXC_PROFILE "vs_6_0")
-            else()
-                set(DXC_PROFILE "ps_6_0")
-            endif()
-
-            add_custom_command(
-                OUTPUT ${DXIL_OUT}
-                COMMAND ${DX12_GLSLC} ${GLSL_IN} -o ${SPV_OUT}
-                COMMAND ${DX12_SPIRV_CROSS} ${SPV_OUT} --hlsl --shader-model 60 --output ${HLSL_OUT}
-                COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
-                    "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
-                    -InFile ${HLSL_OUT} -OutFile ${HLSL_OUT}
-                    -PushConstantSpace ${SHADER_PC_SPACE}
-                COMMAND ${DX12_DXC} -T ${DXC_PROFILE} -E main -Fo ${DXIL_OUT} ${HLSL_OUT}
-                DEPENDS ${GLSL_IN} "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
-                COMMENT "DX12 shader: ${SHADER_SRC} -> ${SHADER_BASE}.dxil (space=${SHADER_PC_SPACE})"
-            )
-            list(APPEND DX12_SHADER_OUTPUTS ${DXIL_OUT})
+            list(GET SHADER_PARTS 3 SHADER_DXIL_NAME)
+            dx12_compile_shader("${DX12_SMOKE_GLSL_DIR}/${SHADER_SRC}"
+                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} DX12_SMOKE_OUTPUTS)
         endforeach()
 
-        add_custom_target(CompileDX12Shaders ALL DEPENDS ${DX12_SHADER_OUTPUTS})
+        add_custom_target(CompileDX12Shaders ALL DEPENDS ${DX12_SMOKE_OUTPUTS})
+
+        # ---- 引擎 shader 集 (默认 Forward 渲染路径; 其余 pass 随 Phase 4 逐个加入) ----
+        # pushConstantSpace = 该 shader 所属管线的 binding layout 数 (见 DX12-RHI-Notes §11)
+        set(DX12_ENGINE_SHADERS
+            pbr.vert|vs|2|pbr_vert.dxil
+            pbr.frag|ps|2|pbr_frag.dxil
+        )
+        set(DX12_ENGINE_OUTPUTS)
+        foreach(SHADER_SPEC ${DX12_ENGINE_SHADERS})
+            string(REPLACE "|" ";" SHADER_PARTS ${SHADER_SPEC})
+            list(GET SHADER_PARTS 0 SHADER_SRC)
+            list(GET SHADER_PARTS 1 SHADER_STAGE)
+            list(GET SHADER_PARTS 2 SHADER_PC_SPACE)
+            list(GET SHADER_PARTS 3 SHADER_DXIL_NAME)
+            dx12_compile_shader("${CMAKE_SOURCE_DIR}/shaders/${SHADER_SRC}"
+                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} DX12_ENGINE_OUTPUTS)
+        endforeach()
+
+        add_custom_target(CompileDX12EngineShaders ALL DEPENDS ${DX12_ENGINE_OUTPUTS})
+        add_dependencies(${PROJECT_NAME} CompileDX12EngineShaders)
     else()
         message(WARNING "DX12 shader tools (glslc/spirv-cross/dxc) not found; skipping DX12 shader compilation")
     endif()

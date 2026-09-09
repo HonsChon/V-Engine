@@ -228,6 +228,15 @@ void SceneRenderer::cleanupSceneColorImage() {
 // Uniform 更新
 // ============================================================
 
+glm::mat4 SceneRenderer::applyApiYFlip(const glm::mat4& proj) const {
+    if (m_rhiDevice && m_rhiDevice->getBackend() == RHIBackend::Vulkan) {
+        glm::mat4 flipped = proj;
+        flipped[1][1] *= -1.0f;
+        return flipped;
+    }
+    return proj;
+}
+
 void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     if (!m_camera) return;
 
@@ -236,8 +245,7 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     float fov = glm::radians(m_camera->getZoom());
     auto scExtent = m_swapChain->getExtent();
     float aspect = scExtent.width / (float)scExtent.height;
-    glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    proj[1][1] *= -1;
+    glm::mat4 proj = applyApiYFlip(glm::perspective(fov, aspect, 0.1f, 100.0f));
     glm::vec3 camPos = m_camera->getPosition();
 
     // 光源（固定位置）
@@ -454,9 +462,8 @@ void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t image
     if (m_ssaoPass && m_gbuffer) {
         if (m_settings.enableSSAO) {
             float aspect = (float)w / (float)h;
-            glm::mat4 projection = glm::perspective(
-                glm::radians(m_camera ? m_camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f);
-            projection[1][1] *= -1;
+            glm::mat4 projection = applyApiYFlip(glm::perspective(
+                glm::radians(m_camera ? m_camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f));
             glm::mat4 view = m_camera ? m_camera->getViewMatrix() : glm::mat4(1.0f);
             m_ssaoPass->execute(cmd, m_gbuffer.get(), frameIndex, projection, view);
         } else {
@@ -633,8 +640,7 @@ void SceneRenderer::prepareGPUCullingData() {
     float fov = glm::radians(m_camera->getZoom());
     auto gpuExtent = m_swapChain->getExtent();
     float aspect = gpuExtent.width / (float)gpuExtent.height;
-    glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    proj[1][1] *= -1;
+    glm::mat4 proj = applyApiYFlip(glm::perspective(fov, aspect, 0.1f, 100.0f));
     m_gpuDrivenRenderer->prepare(instances, m_camera->getViewMatrix(), proj, m_camera->getPosition());
 }
 
@@ -744,8 +750,7 @@ void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIn
 
     auto nExtent = m_swapChain->getExtent();
     float aspect = (float)nExtent.width / (float)nExtent.height;
-    glm::mat4 proj = m_camera->getProjectionMatrix(aspect, m_camera->getZoom());
-    proj[1][1] *= -1;
+    glm::mat4 proj = applyApiYFlip(m_camera->getProjectionMatrix(aspect, m_camera->getZoom()));
     glm::mat4 view = m_camera->getViewMatrix();
     glm::vec3 camPos = m_camera->getPosition();
 

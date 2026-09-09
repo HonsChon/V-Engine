@@ -29,7 +29,7 @@ struct GLFWwindow;  // Forward declaration — no GLFW dependency in this header
 namespace RHI {
 
 /// Create an RHIDevice for the specified backend.
-/// Currently only Vulkan is implemented; DX12 will throw.
+/// Vulkan is available on all platforms; DX12 is compiled only on Windows.
 std::unique_ptr<RHIDevice> CreateDevice(RHIBackend backend, GLFWwindow* window);
 
 } // namespace RHI
