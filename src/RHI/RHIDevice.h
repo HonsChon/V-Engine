@@ -145,6 +145,10 @@ public:
                                       const std::vector<void*>& signalSemaphores,
                                       void* fence) = 0;
 
+    // ---- Backend query ----
+    /// Which backend this device implements (drives e.g. ImGui backend choice).
+    virtual RHIBackend getBackend() const = 0;
+
     // ---- Native handle access (for ImGui and low-level integrations) ----
     virtual void*    getNativeDevice() const = 0;
     virtual void*    getNativeInstance() const = 0;

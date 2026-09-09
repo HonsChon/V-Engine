@@ -426,6 +426,11 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
 )
 
+if(WIN32)
+    # imgui_impl_dx12 仅供 ImGuiLayer 的 DX12 分支使用（Windows 专用）
+    list(APPEND IMGUI_SOURCES ${IMGUI_DIR}/backends/imgui_impl_dx12.cpp)
+endif()
+
 set(IMGUI_HEADERS
     ${IMGUI_DIR}/imgui.h
     ${IMGUI_DIR}/imgui_internal.h
@@ -435,6 +440,7 @@ set(IMGUI_HEADERS
     ${IMGUI_DIR}/imstb_truetype.h
     ${IMGUI_DIR}/backends/imgui_impl_vulkan.h
     ${IMGUI_DIR}/backends/imgui_impl_glfw.h
+    ${IMGUI_DIR}/backends/imgui_impl_dx12.h
 )
 
 # UI - 编辑器界面
@@ -567,8 +573,9 @@ if(WIN32)
             VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         )
         
-        # 编译选项
-        target_compile_options(${PROJECT_NAME} PRIVATE /W4 /MP)
+        # 编译选项 (/utf-8: 源码为 UTF-8;否则 MSVC 按代码页 936 读中文注释可能
+        # 把多字节序列误读为 '\' 续行符,破坏代码结构)
+        target_compile_options(${PROJECT_NAME} PRIVATE /W4 /MP /utf-8)
         
         # 使用 Unicode
         target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE)
@@ -692,7 +699,7 @@ if(WIN32)
     endif()
 
     if(MSVC)
-        target_compile_options(rhi_dx12_smoke PRIVATE /W4 /MP)
+        target_compile_options(rhi_dx12_smoke PRIVATE /W4 /MP /utf-8)
         set_target_properties(rhi_dx12_smoke PROPERTIES
             VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         )

@@ -114,6 +114,7 @@ public:
                               void* fence) override;
 
     // ---- Native handle access ----
+    RHIBackend getBackend() const override { return RHIBackend::Vulkan; }
     void*    getNativeDevice() const override { return (void*)device_; }
     void*    getNativeInstance() const override { return (void*)instance_; }
     void*    getNativePhysicalDevice() const override { return (void*)physicalDevice_; }

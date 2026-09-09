@@ -134,6 +134,7 @@ public:
                              void* fence) override;
 
     // ---- Native accessors ----
+    RHIBackend getBackend() const override { return RHIBackend::DX12; }
     void*    getNativeDevice() const override          { return device.Get(); }
     void*    getNativeInstance() const override        { return nullptr; }   // DX12 has no instance
     void*    getNativePhysicalDevice() const override  { return adapter.Get(); }
