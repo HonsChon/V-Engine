@@ -1,7 +1,7 @@
 # DX12 后端补齐计划
 
 > 状态: 草案(2026/09/07 制定)
-> Phase 0/1/2/3 已完成(2026/09/09,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
+> Phase 0/1/2/3/4 已完成(2026/09/10,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
 > 背景: 基于对 `src/RHI/DX12` 与 `src/RHI/Vulkan` 全量对比分析,以及上层 RHI 消费方式调研。Vulkan 是完整可运行后端;DX12 目前是"可编译的部分脚手架",且从未在真实 MSVC/Windows 上编译过。
 
 ## 目标与约束(已确认的方向)
@@ -260,3 +260,73 @@ DX12 跑通默认 Forward + ImGui,与 Vulkan 画面一致;D3D12 validation 0 err
   (每个 shader 的 pushConstantSpace = 所属管线 layout 数,见 DX12-RHI-Notes §11 附录);
   去掉 Engine key 5-9 的 DX12 拦截
 - 全功能画面与 Vulkan 对齐(7/8/9 键、水场景),GPUToCPU 双缓冲 readback(fence 后 Map)若需
+
+### Phase 4 — 已完成(2026/09/10)
+
+DX12 后端补齐 deferred 全功能:键 5-9(水场景/GPU culling/Nanite)全部解除拦截并跑通,
+D3D12 validation 0 error;Forward 与 Vulkan 像素级一致(同 run 截图 diff 0.01%);
+Vulkan 回归干净。
+
+**内容管线**
+- `DX12_ENGINE_SHADERS` 扩到 20 条(gbuffer、deferred_lighting、water、ssr、ssao 全家、
+  frustum_culling、cluster_culling、cluster_debug),`.dxil` 相对名镜像
+  `shaders/<rel>.spv → shaders_dx12/<rel>.dxil`(含子目录与 `.comp` 双点名)。
+- `dx12_compile_shader()` 增加 `flipY` 字段:`flipY=1` 时给 spirv-cross 加 `--flip-vert-y`
+  (仅 DX12 的 HLSL/DXIL 链,不影响 Vulkan 的 .spv 编译)。
+- 引擎 target 补 `CompileDX12Shaders` 依赖:内部 `blitImage/clearColorImage` 管线加载的是
+  smoke 集的 `blit_*.dxil/clear_*.dxil`,全新 Release 目录曾因此缺文件(blit 首帧抛异常)。
+
+**全屏 pass 坐标系(D3D NDC Y-up vs Vulkan Y-down)**
+- `deferred_lighting/ssr/ssao/ssao_blur/blit` 的顶点着色器用 Vulkan 约定生成全屏三角形,
+  D3D 下需要 `--flip-vert-y`;几何 pass(pbr/gbuffer/water/cluster_debug)不翻。
+- `water.frag`/`ssr.frag` 的 `worldToScreen()` 按 `projection[1][1]` 符号自适应翻转 UV.y:
+  D3D 上水面 SSR 倒影此前与物体同向(本应上下颠倒),修复后与 Vulkan 一致。
+- 水面动画:`SceneRenderer::m_totalTime` 自架构迁移后从未赋值(恒 0),Engine 每帧调用新增的
+  `setTotalTime()` 接线;两后端水面波浪恢复随时间扰动。
+
+**DX12 后端修复(Phase 4 暴露)**
+- compute SSBO 去 `readonly`:spirv-cross 对 readonly 输出 SRV,与 RHI 的 UAV 模型失配。
+- raw UAV view:spirv-cross 把 SSBO 降级成 `RWByteAddressBuffer`,UAV 需
+  `R32_TYPELESS + D3D12_BUFFER_UAV_FLAG_RAW`(原 typed R32_UINT 不合法)。
+- `fillBuffer`:ClearUnorderedAccessViewUint 的 CPU handle 必须来自非 shader-visible 堆,
+  新增 CPU-only UAV 环(`cpuUavRing_`,4×16),视图先建在 CPU 堆再 CopyDescriptors 到
+  shader-visible 环。
+- SSAO 16 层 layer view 共享父纹理的 state tracker(此前每个 wrapper 各自从 COMMON 起步,
+  首帧 15 个 barrier 的 before-state 与 debug layer 不符)。
+- READBACK heap buffer 的 `bufferBarrier` 钳制为 COMMON/COPY_DEST(GPU 不能读 READBACK)。
+- 内部 clear/blit 管线按 RTV 格式缓存(SSAO 关闭路径要清 R8 目标,原硬编码 R8G8B8A8)。
+- swapchain recreate 失败不再崩溃:`Engine` 捕获后置位重试,`DX12RHISwapChain::recreate`
+  可重入(null swapchain 直接重建);`acquireNextImage` 在 swapchain 缺失时返回 OutOfDate。
+- SSAO compute push constant 8B→16B(D3D12 root constants 按 16B register 粒度,
+  8B 块读不到第二个 DWORD)。
+- **描述符环形堆持久/临时分离(黑屏根因)**:binding group 的持久描述符与每帧临时描述符
+  (blit/clear/fill)共用同一个 bump cursor,回绕到 0 后会逐帧覆盖持久描述符,约 8000 帧后
+  GBuffer 的 UBO/SRV 被覆盖 → 延迟渲染突然全黑。修复:`RingHeap.persistentEnd` 水位线,
+  持久分配抬高水位、临时回绕到水位;Debug 下回绕打一行日志便于观察。
+
+**Vulkan 存量 bug(Phase 4 对照时发现并修复)**
+- `VulkanRHIBindingGroup::updateBuffer` 硬编码 `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER`:
+  所有 storage buffer 写入被 validation 拒绝、描述符从未更新 → Vulkan GPU culling/Nanite
+  一直输出 0 可见。改为按 layout entry 查类型后 Vulkan cluster culling 从 0/376 → 363~367/376。
+- `NaniteManager` 删除非法的 `Storage|GPUToCPU` readback 缓冲(D3D12 禁止 READBACK 带 UAV flag;
+  Vulkan 可容忍,该缓冲本无消费者)。
+- Vulkan 内容管线补 `nanite/cluster_debug.vert/frag`(此前不在编译清单,cluster viz 初始化一直失败)。
+
+**验收(Windows)**
+- DX12 Debug:键 5/6/7/8/9 全功能 soak(延迟↔Forward、GPU culling 开关、Nanite 初始化、
+  cluster viz 初始化)0 validation error;`rhi_dx12_smoke` exit 0、readback PASS、validation 0。
+- DX12 Release:Nanite 全链路(聚类 376 cluster、上传、GPU culling、双缓冲 readback、
+  viz on/off)`Visible 368/376`、`Drawn 277/376`(L0:194 L1:16 L2:4);viz on/off 截图
+  19% / 0.02% diff(开关生效且可还原)。
+- Vulkan:全功能 soak 干净;Nanite `Visible 363/376`、`Drawn 275/376`;延迟截图正常。
+- 用户目视确认:DX12 延迟管线正确、水面 SSR 倒影方向正确、水面随时间扰动、长时间无黑屏。
+
+**与计划偏差 / 已知问题**
+- Nanite 真实 cluster 数据的验证层覆盖在 Release 完成(Debug 下 UFO 27k 三角聚类过慢);
+  Debug 侧只覆盖了管线创建、反射断言与 0-cluster 路径。
+- 设备移除(RDP 环境下 resize 偶发 `DXGI_ERROR_DEVICE_REMOVED` 0x887A0005)由重试保护兜底:
+  不崩溃,但需重建 D3D12 device 才能恢复,超出本轮范围。
+- 无 optimized clear value 的 RT clear 仍有性能 WARNING(每条 clear 一条)。
+- SSAO resize 走 cleanup+init,会泄漏旧的持久描述符(有界,水位线方案下不损坏渲染)。
+- 存量未改:`SSRPass` 输出无消费者;Water SSR `ssrMaxSteps=2048` 偏大;延迟路径未启用
+  GPU culling(与 Vulkan 行为一致)。

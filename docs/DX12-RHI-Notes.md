@@ -465,3 +465,60 @@ Root Signature Layout:
 | `scripts/dx12/inject_hlsl.ps1` | push-constant `space = layout 数` |
 | CMake `CompileDX12Shaders` | 每 shader 传入该 shader 对应管线的 layout 数 |
 | smoke demo 断言 | DXIL 的 root 绑定与 C++ root signature 一致 |
+
+## 十二、描述符环形堆(Descriptor Ring)与持久/临时分离
+
+### 为什么需要自管理描述符分配
+
+- D3D12 的 SRV/CBV/UAV 必须住在 descriptor heap 里;一次绘制只能绑定**一个**
+  shader-visible CBV/SRV/UAV heap(和一个 sampler heap)。
+- root signature 的 descriptor table 存的是 heap 内的 GPU handle,table 指向的描述符内容
+  必须在 GPU 执行期间保持有效。
+- Vulkan 有 `VkDescriptorPool` + `vkAllocateDescriptorSets`("每帧分配 set"),D3D12 没有
+  对应抽象,只能自己在 heap 里做子分配。RHI 要在 DX12 上模拟 `RHIBindingGroup` 语义,
+  就需要一个 heap 内的分配器。
+
+### 两类分配
+
+| 类型 | 例子 | 生命周期 |
+|---|---|---|
+| **持久** | 各 pass 的 binding group(GBuffer/Lighting/Water/SSAO 的 UBO+纹理绑定) | 初始化时分配一次;之后只做 in-place 重写(`updateTexture` 换纹理,槽位不变) |
+| **临时** | `blitImage` 的 SRV+sampler+RTV、`clearColorImage` 的 RTV、`fillBuffer` 的 UAV | 每帧录制时申请,用完即弃 |
+
+难点:CPU 在**录制时**写描述符,GPU 在**提交后**才读。2 帧在飞时,下一帧复用同一槽位
+会覆盖 GPU 还在用的描述符。
+
+### 环形堆结构(`DX12RHIDevice::RingHeap`)
+
+- **bump 分配**:cursor 只前进,O(1)、无空闲链表、无碎片。
+- **4 个 segment**(= 2 帧在飞 + 余量):每段记录最后一次用到它的 submit 的 fence 值;
+  复用某段前 `WaitForSingleObject` 等该 fence(`ringWaitForSegment`),
+  由 `finalizeDescriptorBatch()` 在 submit 时盖章。
+- 回绕时 `ringFlushAll` 排空全部段,再复用。
+- 环:resource(CBV/SRV/UAV,shader-visible,4×2048)、sampler(shader-visible,4×128)、
+  RTV/DSV/CPU-UAV(CPU-only,仅临时)。
+
+### 持久/临时分离(2026/09/10 修复)
+
+原实现把 binding group 的持久描述符和每帧临时描述符放在同一个 cursor 上,回绕到 0 后会
+逐帧覆盖持久描述符(延迟渲染每帧 blit 消耗 1 个 SRV,约 8000 帧后覆盖 GBuffer 的
+UBO/SRV → 画面突然全黑)。
+
+修复:`RingHeap.persistentEnd` 水位线。
+
+- `allocateResourceDescriptors/SamplerDescriptors(..., persistent=true)` 由
+  `DX12RHIBindingGroup` 构造使用,分配后抬高 `persistentEnd = max(persistentEnd, end)`;
+- 临时分配回绕时 `cursor = persistentEnd`(而非 0),并检查剩余空间;
+- 临时分配仍按 segment fence 门控,行为不变。
+
+Debug 构建下回绕会打一行 `[DX12RHIDevice] descriptor ring wrap (heap=... persistentEnd=... total=...)`,
+便于确认水位线生效(日志中 `persistentEnd` 应等于持久描述符数量,例如 sampler 环 78)。
+
+### 替代方案(未采用)
+
+- **持久/临时分两个 shader-visible heap**:一次绘制不会同时用两类描述符,技术上可行,
+  但命令层要管理 heap 切换,改动面大。
+- **每个 binding group 独占一小段堆(block allocator)**:避免共享 cursor,但浪费槽位、需要块管理。
+- **每帧新建 heap / CopyDescriptors**:分配或拷贝开销大,无收益。
+- **ImGui 的做法**:自带固定 bump heap(只加不减),因为 ImGui 的描述符全是持久的——
+  说明"持久用 bump、临时用环形"本来就是合理分工,问题只在混用。
