@@ -5,8 +5,6 @@
 
 #include "Engine.h"
 #include "Window.h"
-#include "VulkanDevice.h"
-#include "VulkanSwapChain.h"
 #include "SceneRenderer.h"
 #include "Scene.h"
 #include "Entity.h"
@@ -21,6 +19,11 @@
 #include "RayPicker.h"
 #include "RenderSettings.h"
 #include "nanite/NaniteManager.h"
+
+#include "RHI.h"
+#include "RHIDevice.h"
+#include "RHISwapChain.h"
+#include "RHICommandBuffer.h"
 
 #include "panels/DebugPanel.h"
 #include "panels/SceneHierarchyPanel.h"
@@ -66,13 +69,23 @@ void Engine::initializeSubsystems() {
     m_window = std::make_unique<Window>(wc);
     std::cout << "[Engine] Window created\n";
 
-    // 2. Vulkan Device
-    m_device = std::make_unique<VulkanDevice>(m_window->getNativeHandle());
-    std::cout << "[Engine] Vulkan device created\n";
+    // 2. RHI Device (factory — backend chosen at CMake configure time)
+    //    VENGINE_RHI_DX12 is defined by the build system when the engine is
+    //    configured with -DVENGINE_RHI_BACKEND=dx12 (Windows only).
+#if defined(VENGINE_RHI_DX12)
+    const RHIBackend backend = RHIBackend::DX12;
+#else
+    const RHIBackend backend = RHIBackend::Vulkan;
+#endif
+    m_rhiDevice = RHI::CreateDevice(backend, m_window->getNativeHandle());
+    std::cout << "[Engine] RHI device created (" << (backend == RHIBackend::DX12 ? "DX12" : "Vulkan")
+              << ")\n";
 
-    // 3. SwapChain
-    auto deviceShared = std::shared_ptr<VulkanDevice>(m_device.get(), [](VulkanDevice*){});
-    m_swapChain = std::make_unique<VulkanSwapChain>(deviceShared, m_config.width, m_config.height);
+    // 3. SwapChain (via RHI Device factory)
+    RHISwapChainDesc swapChainDesc;
+    swapChainDesc.width  = m_config.width;
+    swapChainDesc.height = m_config.height;
+    m_rhiSwapChain = m_rhiDevice->createSwapChain(swapChainDesc);
     std::cout << "[Engine] SwapChain created\n";
 
     // 4. Command Buffers
@@ -91,18 +104,18 @@ void Engine::initializeSubsystems() {
     m_scene = std::make_unique<VulkanEngine::Scene>();
     std::cout << "[Engine] Scene created\n";
 
-    // 8. RenderSystem
+    // 8. RenderSystem (with RHI device — MeshManager needs it for buffer creation)
     m_renderSystem = std::make_unique<VulkanEngine::RenderSystem>();
-    m_renderSystem->init(deviceShared);
+    m_renderSystem->init(m_rhiDevice.get());
     std::cout << "[Engine] RenderSystem created\n";
 
     // 9. SceneRenderer (with ForwardPass)
-    m_renderer = std::make_unique<SceneRenderer>(m_device.get(), m_swapChain.get());
+    m_renderer = std::make_unique<SceneRenderer>(m_rhiDevice.get(), m_rhiSwapChain.get());
     m_renderer->initialize();
     m_renderer->setScene(m_scene.get());
     m_renderer->setCamera(m_camera.get());
     m_renderer->setRenderSystem(m_renderSystem.get());
-    std::cout << "[Engine] SceneRenderer created\n";
+    std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
 
     // 10. Default Scene
     createDefaultScene();
@@ -114,13 +127,8 @@ void Engine::initializeSubsystems() {
     if (m_config.enableUI) {
         m_imguiLayer = std::make_unique<ImGuiLayer>(
             m_window->getNativeHandle(),
-            m_device->getInstance(),
-            m_device->getPhysicalDevice(),
-            m_device->getDevice(),
-            m_device->getGraphicsQueueFamily(),
-            m_device->getGraphicsQueue(),
-            m_swapChain->getRenderPass(),
-            static_cast<uint32_t>(m_swapChain->getImageCount())
+            m_rhiDevice.get(),
+            m_rhiSwapChain.get()
         );
 
         m_uiManager = std::make_unique<UIManager>();
@@ -296,32 +304,21 @@ void Engine::createSyncObjects() {
     m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     m_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-    m_imagesInFlight.resize(m_swapChain->getImageCount(), VK_NULL_HANDLE);
-
-    VkSemaphoreCreateInfo si{}; si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    m_imagesInFlight.resize(m_rhiSwapChain->getImageCount(), nullptr);
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateSemaphore(m_device->getDevice(), &si, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(m_device->getDevice(), &si, nullptr, &m_renderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_device->getDevice(), &fi, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create sync objects!");
-        }
+        m_imageAvailableSemaphores[i] = m_rhiDevice->createSemaphore();
+        m_renderFinishedSemaphores[i] = m_rhiDevice->createSemaphore();
+        m_inFlightFences[i] = m_rhiDevice->createFence(true); // signaled
     }
 }
 
 void Engine::createCommandBuffers() {
-    m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-
-    VkCommandBufferAllocateInfo ai{};
-    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool = m_device->getCommandPool();
-    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ai.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
-
-    if (vkAllocateCommandBuffers(m_device->getDevice(), &ai, m_commandBuffers.data()) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate command buffers!");
+    m_commandBuffers = m_rhiDevice->allocateCommandBuffers(MAX_FRAMES_IN_FLIGHT);
+    m_rhiCommandBuffers.clear();
+    for (void* native : m_commandBuffers) {
+        m_rhiCommandBuffers.push_back(m_rhiDevice->wrapCommandBuffer(native));
+    }
 }
 
 // ============================================================
@@ -348,7 +345,7 @@ void Engine::run() {
         mainLoop();
     }
 
-    vkDeviceWaitIdle(m_device->getDevice());
+    m_rhiDevice->waitIdle();
     std::cout << "[Engine] Main loop ended\n";
 }
 
@@ -358,6 +355,9 @@ void Engine::mainLoop() {
     m_deltaTime = now - m_lastFrameTime;
     m_lastFrameTime = now;
     m_totalTime = now;
+
+    // Water (and other time-driven passes) read SceneRenderer::m_totalTime.
+    if (m_renderer) m_renderer->setTotalTime(m_totalTime);
 
     // Poll events
     m_window->pollEvents();
@@ -373,11 +373,8 @@ void Engine::mainLoop() {
 }
 
 void Engine::drawFrame() {
-    // Update total time for water animation in SceneRenderer
-    // (exposed via m_totalTime; SceneRenderer has its own m_totalTime we can set)
-
     // Wait fence
-    vkWaitForFences(m_device->getDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+    m_rhiDevice->waitForFence(m_inFlightFences[m_currentFrame]);
 
     // Nanite readback (safe after fence)
     auto* nm = m_renderer->getNaniteManager();
@@ -385,16 +382,16 @@ void Engine::drawFrame() {
 
     // Acquire image
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(m_device->getDevice(), m_swapChain->getSwapChain(),
-        UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+    RHISwapChainResult acquireResult = m_rhiSwapChain->acquireNextImage(
+        m_imageAvailableSemaphores[m_currentFrame], &imageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapChain(); return; }
-    else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+    if (acquireResult == RHISwapChainResult::OutOfDate) { recreateSwapChain(); return; }
+    else if (acquireResult == RHISwapChainResult::Error)
         throw std::runtime_error("Failed to acquire swap chain image!");
 
     // Check if this image is still in use
-    if (m_imagesInFlight[imageIndex] != VK_NULL_HANDLE)
-        vkWaitForFences(m_device->getDevice(), 1, &m_imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+    if (m_imagesInFlight[imageIndex] != nullptr)
+        m_rhiDevice->waitForFence(m_imagesInFlight[imageIndex]);
     m_imagesInFlight[imageIndex] = m_inFlightFences[m_currentFrame];
 
     // Update uniforms BEFORE resetting fence
@@ -416,13 +413,10 @@ void Engine::drawFrame() {
         m_renderer->prepareGPUCullingData();
 
     // Reset fence and record commands
-    vkResetFences(m_device->getDevice(), 1, &m_inFlightFences[m_currentFrame]);
-    vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0);
+    m_rhiDevice->resetFence(m_inFlightFences[m_currentFrame]);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(m_commandBuffers[m_currentFrame], &beginInfo) != VK_SUCCESS)
-        throw std::runtime_error("Failed to begin command buffer!");
+    RHICommandBuffer* cmd = m_rhiCommandBuffers[m_currentFrame].get();
+    cmd->begin();
 
     // Update debug panel stats
     if (m_uiManager) {
@@ -431,44 +425,27 @@ void Engine::drawFrame() {
     }
 
     // Record all rendering commands (including UI)
-    m_renderer->recordCommands(m_commandBuffers[m_currentFrame], imageIndex, m_currentFrame);
+    m_renderer->recordCommands(cmd, imageIndex, m_currentFrame);
 
-    if (vkEndCommandBuffer(m_commandBuffers[m_currentFrame]) != VK_SUCCESS)
-        throw std::runtime_error("Failed to record command buffer!");
+    cmd->end();
 
-    // Submit
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore waitSems[] = { m_imageAvailableSemaphores[m_currentFrame] };
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = waitSems;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrame];
-    VkSemaphore signalSems[] = { m_renderFinishedSemaphores[m_currentFrame] };
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = signalSems;
+    // Submit via RHI
+    m_rhiDevice->submitGraphicsQueue(
+        { m_imageAvailableSemaphores[m_currentFrame] },
+        { m_commandBuffers[m_currentFrame] },
+        { m_renderFinishedSemaphores[m_currentFrame] },
+        m_inFlightFences[m_currentFrame]
+    );
 
-    if (vkQueueSubmit(m_device->getGraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentFrame]) != VK_SUCCESS)
-        throw std::runtime_error("Failed to submit draw command buffer!");
+    // Present via RHI SwapChain
+    RHISwapChainResult presentResult = m_rhiSwapChain->present(
+        m_renderFinishedSemaphores[m_currentFrame], imageIndex);
 
-    // Present
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = signalSems;
-    VkSwapchainKHR swapChains[] = { m_swapChain->getSwapChain() };
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = swapChains;
-    presentInfo.pImageIndices = &imageIndex;
-
-    result = vkQueuePresentKHR(m_device->getPresentQueue(), &presentInfo);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
+    if (presentResult == RHISwapChainResult::OutOfDate ||
+        presentResult == RHISwapChainResult::Suboptimal || m_framebufferResized) {
         m_framebufferResized = false;
         recreateSwapChain();
-    } else if (result != VK_SUCCESS) {
+    } else if (presentResult == RHISwapChainResult::Error) {
         throw std::runtime_error("Failed to present!");
     }
 
@@ -483,18 +460,26 @@ void Engine::recreateSwapChain() {
         glfwWaitEvents();
     }
 
-    vkDeviceWaitIdle(m_device->getDevice());
+    m_rhiDevice->waitIdle();
 
-    m_swapChain->recreate(w, h);
+    try {
+        m_rhiSwapChain->recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    } catch (const std::exception& e) {
+        // Transient DXGI failures (e.g. DXGI_ERROR_DEVICE_REMOVED/OUT_OF_DATE
+        // during rapid resizes) must not kill the app: retry on the next frame.
+        std::cerr << "[Engine] SwapChain recreate failed: " << e.what()
+                  << " (retrying)\n";
+        m_framebufferResized = true;
+        return;
+    }
 
     m_imagesInFlight.clear();
-    m_imagesInFlight.resize(m_swapChain->getImageCount(), VK_NULL_HANDLE);
+    m_imagesInFlight.resize(m_rhiSwapChain->getImageCount(), nullptr);
 
-    if (m_renderer) m_renderer->onSwapChainRecreated(m_swapChain.get());
+    if (m_renderer) m_renderer->onSwapChainRecreated(m_rhiSwapChain.get());
 
     if (m_imguiLayer) {
-        m_imguiLayer->onResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-                                m_swapChain->getRenderPass());
+        m_imguiLayer->onResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
     }
 
     std::cout << "[Engine] SwapChain recreated: " << w << "x" << h << "\n";
@@ -578,29 +563,33 @@ void Engine::handleMousePicking() {
 void Engine::shutdownSubsystems() {
     std::cout << "[Engine] Shutting down...\n";
 
-    if (m_device) vkDeviceWaitIdle(m_device->getDevice());
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
 
     // UI
     if (m_imguiLayer) { m_imguiLayer->cleanup(); m_imguiLayer.reset(); }
     m_uiManager.reset();
 
-    // Renderer
+    // Renderer (must release before RHI device)
     m_renderer.reset();
-    m_renderSystem.reset();
+    if (m_renderSystem) {
+        m_renderSystem->cleanup();
+        m_renderSystem.reset();
+    }
     m_scene.reset();
     m_camera.reset();
 
     // Sync objects
-    if (m_device) {
+    if (m_rhiDevice) {
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroySemaphore(m_device->getDevice(), m_renderFinishedSemaphores[i], nullptr);
-            vkDestroySemaphore(m_device->getDevice(), m_imageAvailableSemaphores[i], nullptr);
-            vkDestroyFence(m_device->getDevice(), m_inFlightFences[i], nullptr);
+            m_rhiDevice->destroySemaphore(m_renderFinishedSemaphores[i]);
+            m_rhiDevice->destroySemaphore(m_imageAvailableSemaphores[i]);
+            m_rhiDevice->destroyFence(m_inFlightFences[i]);
         }
     }
 
-    m_swapChain.reset();
-    m_device.reset();
+    // SwapChain must release before device
+    m_rhiSwapChain.reset();
+    m_rhiDevice.reset();
     m_window.reset();
 
     std::cout << "[Engine] All subsystems shut down\n";

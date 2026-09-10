@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
@@ -17,11 +16,12 @@
 // Forward declarations
 class Window;
 class SceneRenderer;
-class VulkanDevice;
-class VulkanSwapChain;
 class UIManager;
 class ImGuiLayer;
 class Camera;
+class RHIDevice;
+class RHISwapChain;
+class RHICommandBuffer;
 
 namespace VulkanEngine {
     class Scene;
@@ -52,8 +52,8 @@ public:
     // Subsystem accessors
     Window* getWindow() const { return m_window.get(); }
     SceneRenderer* getRenderer() const { return m_renderer.get(); }
-    VulkanDevice* getDevice() const { return m_device.get(); }
-    VulkanSwapChain* getSwapChain() const { return m_swapChain.get(); }
+    RHIDevice* getRHIDevice() const { return m_rhiDevice.get(); }
+    RHISwapChain* getRHISwapChain() const { return m_rhiSwapChain.get(); }
     VulkanEngine::Scene* getScene() const { return m_scene.get(); }
     Camera* getCamera() const { return m_camera.get(); }
 
@@ -86,8 +86,8 @@ private:
 
     // Subsystems
     std::unique_ptr<Window> m_window;
-    std::unique_ptr<VulkanDevice> m_device;
-    std::unique_ptr<VulkanSwapChain> m_swapChain;
+    std::unique_ptr<RHIDevice> m_rhiDevice;
+    std::shared_ptr<RHISwapChain> m_rhiSwapChain;
     std::unique_ptr<Camera> m_camera;
     std::unique_ptr<VulkanEngine::Scene> m_scene;
     std::unique_ptr<VulkanEngine::RenderSystem> m_renderSystem;
@@ -95,12 +95,15 @@ private:
     std::unique_ptr<ImGuiLayer> m_imguiLayer;
     std::unique_ptr<UIManager> m_uiManager;
 
-    // Sync objects (owned by Engine, not FrameResources)
-    std::vector<VkSemaphore> m_imageAvailableSemaphores;
-    std::vector<VkSemaphore> m_renderFinishedSemaphores;
-    std::vector<VkFence> m_inFlightFences;
-    std::vector<VkFence> m_imagesInFlight;
-    std::vector<VkCommandBuffer> m_commandBuffers;
+    // Sync objects (owned by Engine — stored as void* native handles)
+    std::vector<void*> m_imageAvailableSemaphores;
+    std::vector<void*> m_renderFinishedSemaphores;
+    std::vector<void*> m_inFlightFences;
+    std::vector<void*> m_imagesInFlight;
+    std::vector<void*> m_commandBuffers;
+    // Persistent RHI wrappers over m_commandBuffers (one per frame; begin/end
+    // the record session each frame). Index-aligned with m_commandBuffers.
+    std::vector<std::shared_ptr<RHICommandBuffer>> m_rhiCommandBuffers;
     uint32_t m_currentFrame = 0;
     bool m_framebufferResized = false;
 

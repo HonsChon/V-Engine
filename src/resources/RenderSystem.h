@@ -7,7 +7,9 @@
 #include "RenderPassBase.h"
 #include "ForwardPass.h"
 #include "GBufferPass.h"
-#include <vulkan/vulkan.h>
+#include "RHICommandBuffer.h"
+#include "RHIBuffer.h"
+#include "RHIDevice.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <unordered_map>
@@ -24,9 +26,9 @@ namespace VulkanEngine {
 struct RenderableEntity {
     entt::entity entityHandle = entt::null;
     std::shared_ptr<GPUMesh> gpuMesh;
-    std::shared_ptr<VulkanTexture> albedoTexture;
-    std::shared_ptr<VulkanTexture> normalTexture;
-    std::shared_ptr<VulkanTexture> specularTexture;
+    std::shared_ptr<GPUTexture> albedoTexture;
+    std::shared_ptr<GPUTexture> normalTexture;
+    std::shared_ptr<GPUTexture> specularTexture;
     glm::mat4 modelMatrix = glm::mat4(1.0f);
     bool visible = true;
     bool valid = false;
@@ -51,14 +53,14 @@ public:
     
     /**
      * @brief 初始化渲染系统
-     * @param device Vulkan 设备
+     * @param rhiDevice RHI 设备指针
      */
-    void init(std::shared_ptr<VulkanDevice> device) {
-        m_device = device;
+    void init(RHIDevice* rhiDevice) {
+        m_rhiDevice = rhiDevice;
         
-        // 初始化资源管理器
-        MeshManager::getInstance().init(device);
-        TextureManager::getInstance().init(device);
+        // 初始化资源管理器 (Pure RHI)
+        MeshManager::getInstance().init(rhiDevice);
+        TextureManager::getInstance().init(rhiDevice);
         
         std::cout << "[RenderSystem] Initialized" << std::endl;
     }
@@ -149,6 +151,7 @@ public:
                 metallicPath = "__default_white__";
             }
             
+            
             // 生成材质ID
             renderable.materialId = generateMaterialId(albedoPath, normalPath, metallicPath);
             
@@ -195,7 +198,7 @@ public:
     
 private:
     /**
-     * @brief 与ForwardPass 分配材质描述符
+     * @brief 与ForwardPass 分配材质描述符 (Pure RHI)
      */
     void allocateForwardPassDescriptor(RenderableEntity& renderable, ForwardPass* forwardPass) {
         // 尝试获取已有的材质描述符
@@ -205,15 +208,15 @@ private:
         if (!renderable.materialDescriptor) {
             renderable.materialDescriptor = forwardPass->allocateMaterialDescriptor(renderable.materialId);
             
-            // 更新纹理绑定
+            // 更新纹理绑定 (RHI)
             if (renderable.materialDescriptor) {
                 forwardPass->updateMaterialTextures(
                     renderable.materialDescriptor,
-                    renderable.albedoTexture->getImageView(),
+                    renderable.albedoTexture->getTexture(),
                     renderable.albedoTexture->getSampler(),
-                    renderable.normalTexture->getImageView(),
+                    renderable.normalTexture->getTexture(),
                     renderable.normalTexture->getSampler(),
-                    renderable.specularTexture->getImageView(),
+                    renderable.specularTexture->getTexture(),
                     renderable.specularTexture->getSampler()
                 );
             }
@@ -221,7 +224,7 @@ private:
     }
     
     /**
-     * @brief 与GBufferPass 分配材质描述符
+     * @brief 与GBufferPass 分配材质描述符 (Pure RHI)
      */
     void allocateGBufferPassDescriptor(RenderableEntity& renderable, GBufferPass* gbufferPass) {
         // 尝试获取已有的材质描述符
@@ -231,15 +234,15 @@ private:
         if (!renderable.gbufferMaterialDescriptor) {
             renderable.gbufferMaterialDescriptor = gbufferPass->allocateMaterialDescriptor(renderable.materialId);
             
-            // 更新纹理绑定
+            // 更新纹理绑定 (RHI)
             if (renderable.gbufferMaterialDescriptor) {
                 gbufferPass->updateMaterialTextures(
                     renderable.gbufferMaterialDescriptor,
-                    renderable.albedoTexture->getImageView(),
+                    renderable.albedoTexture->getTexture(),
                     renderable.albedoTexture->getSampler(),
-                    renderable.normalTexture->getImageView(),
+                    renderable.normalTexture->getTexture(),
                     renderable.normalTexture->getSampler(),
-                    renderable.specularTexture->getImageView(),
+                    renderable.specularTexture->getTexture(),
                     renderable.specularTexture->getSampler()
                 );
             }
@@ -249,77 +252,77 @@ private:
 public:
     
     /**
-     * @brief 统一渲染接口（使用RTTI 多态）
+     * @brief 统一渲染接口（使用RTTI 多态）— Pure RHI
      * 根据传入的RenderPass 类型自动调用对应的渲染逻辑
-     * @param commandBuffer 命令缓冲
+     * @param cmd RHI 命令缓冲
      * @param renderPass RenderPassBase 基类指针（支持ForwardPass、GBufferPass 等）
      * @param frameIndex 当前帧索引
      */
-    void render(VkCommandBuffer commandBuffer, RenderPassBase* renderPass, uint32_t frameIndex) {
+    void render(RHICommandBuffer* cmd, RenderPassBase* renderPass, uint32_t frameIndex) {
         if (!renderPass) return;
         
         // 使用 RTTI 判断 Pass 类型并调用对应的渲染逻辑
         if (ForwardPass* forwardPass = dynamic_cast<ForwardPass*>(renderPass)) {
-            renderForwardPass(commandBuffer, forwardPass, frameIndex);
+            renderForwardPass(cmd, forwardPass, frameIndex);
         }
         else if (GBufferPass* gbufferPass = dynamic_cast<GBufferPass*>(renderPass)) {
-            renderGBufferPass(commandBuffer, gbufferPass, frameIndex);
+            renderGBufferPass(cmd, gbufferPass, frameIndex);
         }
         // 可扩展其从Pass 类型...
     }
     
 private:
     /**
-     * @brief ForwardPass 渲染实现
+     * @brief ForwardPass 渲染实现 (Pure RHI)
      */
-    void renderForwardPass(VkCommandBuffer commandBuffer, ForwardPass* forwardPass, uint32_t frameIndex) {
-        // 绑定全局描述符集（Set 0: UBO： 只需绑定一次
-        forwardPass->bindGlobalDescriptorSet(commandBuffer, frameIndex);
+    void renderForwardPass(RHICommandBuffer* cmd, ForwardPass* forwardPass, uint32_t frameIndex) {
+        // 绑定全局描述符集（Set 0: UBO） 只需绑定一次
+        forwardPass->bindGlobalDescriptorSet(cmd, frameIndex);
         
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
             
-            // 绑定材质描述符集（Set 1: 纹理： 每个实体独立的描述符
+            // 绑定材质描述符集（Set 1: 纹理） 每个实体独立的描述符
             if (renderable.materialDescriptor) {
-                forwardPass->bindMaterialDescriptorSet(commandBuffer, frameIndex, renderable.materialDescriptor);
+                forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable.materialDescriptor);
             }
             
-            // 推送模型矩阵（Push Constants：
-            forwardPass->pushModelMatrix(commandBuffer, renderable.modelMatrix);
+            // 推送模型矩阵（Push Constants）
+            forwardPass->pushModelMatrix(cmd, renderable.modelMatrix);
             
             // 绘制网格
             forwardPass->drawMesh(
-                commandBuffer,
-                renderable.gpuMesh->getVertexBufferHandle(),
-                renderable.gpuMesh->getIndexBufferHandle(),
+                cmd,
+                renderable.gpuMesh->getVertexBuffer(),
+                renderable.gpuMesh->getIndexBuffer(),
                 renderable.gpuMesh->getIndexCount()
             );
         }
     }
     
     /**
-     * @brief GBufferPass 渲染实现
+     * @brief GBufferPass 渲染实现 (Pure RHI)
      */
-    void renderGBufferPass(VkCommandBuffer commandBuffer, GBufferPass* gbufferPass, uint32_t frameIndex) {
-        // 绑定全局描述符集（Set 0: UBO： 只需绑定一次
-        gbufferPass->bindGlobalDescriptorSet(commandBuffer, frameIndex);
+    void renderGBufferPass(RHICommandBuffer* cmd, GBufferPass* gbufferPass, uint32_t frameIndex) {
+        // 绑定全局描述符集（Set 0: UBO） 只需绑定一次
+        gbufferPass->bindGlobalDescriptorSet(cmd, frameIndex);
         
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
             
-            // 绑定材质描述符集（Set 1: 纹理： 每个实体独立的描述符
+            // 绑定材质描述符集（Set 1: 纹理） 每个实体独立的描述符
             if (renderable.gbufferMaterialDescriptor) {
-                gbufferPass->bindMaterialDescriptorSet(commandBuffer, frameIndex, renderable.gbufferMaterialDescriptor);
+                gbufferPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable.gbufferMaterialDescriptor);
             }
             
-            // 推送模型矩阵（Push Constants：
-            gbufferPass->pushModelMatrix(commandBuffer, renderable.modelMatrix);
+            // 推送模型矩阵（Push Constants）
+            gbufferPass->pushModelMatrix(cmd, renderable.modelMatrix);
             
             // 绘制网格
             gbufferPass->drawMesh(
-                commandBuffer,
-                renderable.gpuMesh->getVertexBufferHandle(),
-                renderable.gpuMesh->getIndexBufferHandle(),
+                cmd,
+                renderable.gpuMesh->getVertexBuffer(),
+                renderable.gpuMesh->getIndexBuffer(),
                 renderable.gpuMesh->getIndexCount()
             );
         }
@@ -410,7 +413,7 @@ public:
     }
     
 private:
-    std::shared_ptr<VulkanDevice> m_device;
+    RHIDevice* m_rhiDevice = nullptr;
     std::vector<RenderableEntity> m_renderables;
 };
 

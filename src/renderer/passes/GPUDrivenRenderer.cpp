@@ -1,9 +1,11 @@
 #include "GPUDrivenRenderer.h"
-#include "VulkanDevice.h"
+#include "RHIDevice.h"
+#include "RHICommandBuffer.h"
+#include "RHIBuffer.h"
 #include <iostream>
 
-GPUDrivenRenderer::GPUDrivenRenderer(std::shared_ptr<VulkanDevice> device, const Config& config)
-    : device(device), config(config) {
+GPUDrivenRenderer::GPUDrivenRenderer(RHIDevice* rhiDevice, const Config& config)
+    : rhiDevice_(rhiDevice), config(config) {
 }
 
 GPUDrivenRenderer::~GPUDrivenRenderer() {
@@ -11,18 +13,12 @@ GPUDrivenRenderer::~GPUDrivenRenderer() {
 }
 
 void GPUDrivenRenderer::init() {
-    std::cout << "[GPUDrivenRenderer] Initializing GPU-Driven Rendering..." << std::endl;
-    
+    std::cout << "[GPUDrivenRenderer] Initializing (Pure RHI)..." << std::endl;
     if (config.enableFrustumCulling) {
-        frustumCullingPass = std::make_unique<FrustumCullingPass>(device);
+        frustumCullingPass = std::make_unique<FrustumCullingPass>(rhiDevice_);
         frustumCullingPass->init();
         std::cout << "[GPUDrivenRenderer] Frustum Culling Pass initialized" << std::endl;
     }
-    
-    // 后续初始化其从Pass
-    // if (config.enableOcclusionCulling) { ... }
-    // if (config.enableLODSelection) { ... }
-    
     std::cout << "[GPUDrivenRenderer] GPU-Driven Rendering ready!" << std::endl;
 }
 
@@ -31,66 +27,40 @@ void GPUDrivenRenderer::prepare(const std::vector<GPUInstanceData>& instances,
                                  const glm::mat4& projMatrix,
                                  const glm::vec3& cameraPos) {
     stats.totalInstances = static_cast<uint32_t>(instances.size());
-    
-    if (!config.enableFrustumCulling || !frustumCullingPass) {
-        return;
-    }
-    
-    // 更新实例数据
+    if (!config.enableFrustumCulling || !frustumCullingPass) return;
+
     frustumCullingPass->updateInstances(instances);
-    
-    // 更新 Uniform 数据
+
     CullingUniforms uniforms{};
     uniforms.viewMatrix = viewMatrix;
     uniforms.projMatrix = projMatrix;
     uniforms.viewProjMatrix = projMatrix * viewMatrix;
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
     uniforms.instanceCountPacked.x = static_cast<uint32_t>(instances.size());
-    
     frustumCullingPass->updateUniforms(uniforms);
 }
 
-void GPUDrivenRenderer::executeCulling(VkCommandBuffer commandBuffer) {
-    if (!config.enableFrustumCulling || !frustumCullingPass) {
-        return;
-    }
-    
-    // 重置计数器
-    frustumCullingPass->resetCounters(commandBuffer);
-    
-    // 执行剔除
-    frustumCullingPass->record(commandBuffer);
-    
-    // 更新统计
+void GPUDrivenRenderer::executeCulling(RHICommandBuffer* cmd) {
+    if (!config.enableFrustumCulling || !frustumCullingPass) return;
+    frustumCullingPass->resetCounters(cmd);
+    frustumCullingPass->record(cmd);
     stats.visibleInstances = frustumCullingPass->getVisibleCount();
     stats.culledInstances = stats.totalInstances - stats.visibleInstances;
 }
 
-VkBuffer GPUDrivenRenderer::getIndirectDrawBuffer() const {
-    if (frustumCullingPass) {
-        return frustumCullingPass->getIndirectDrawBuffer();
-    }
-    return VK_NULL_HANDLE;
+RHIBuffer* GPUDrivenRenderer::getIndirectDrawBuffer() const {
+    return frustumCullingPass ? frustumCullingPass->getIndirectDrawBuffer() : nullptr;
 }
 
-VkBuffer GPUDrivenRenderer::getVisibleIndicesBuffer() const {
-    if (frustumCullingPass) {
-        return frustumCullingPass->getVisibleIndicesBuffer();
-    }
-    return VK_NULL_HANDLE;
+RHIBuffer* GPUDrivenRenderer::getVisibleIndicesBuffer() const {
+    return frustumCullingPass ? frustumCullingPass->getVisibleIndicesBuffer() : nullptr;
 }
 
 uint32_t GPUDrivenRenderer::getVisibleCount() const {
-    if (frustumCullingPass) {
-        return frustumCullingPass->getVisibleCount();
-    }
-    return 0;
+    return frustumCullingPass ? frustumCullingPass->getVisibleCount() : 0;
 }
 
 const std::vector<uint32_t>& GPUDrivenRenderer::getVisibleIndices() {
     static std::vector<uint32_t> emptyVector;
-    if (frustumCullingPass) {
-        return frustumCullingPass->getVisibleIndices();
-    }
-    return emptyVector;
+    return frustumCullingPass ? frustumCullingPass->getVisibleIndices() : emptyVector;
 }

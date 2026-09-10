@@ -1,81 +1,47 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <memory>
 #include <string>
 #include <vector>
 
-class VulkanDevice;
-class ComputePipeline;
+class RHIDevice;
+class RHIPipeline;
+class RHIBindingLayout;
+class RHIBindingGroup;
+class RHICommandBuffer;
+class RHIBuffer;
 
 /**
- * ComputePassBase - 计算通道基类
+ * ComputePassBase - 计算通道基类 (Pure RHI)
  * 
  * 所有计算通道（如 GPU Culling、粒子更新等）的基类。
  * 提供通用的计算管线管理和资源绑定功能。
+ * 只持有 RHIDevice*，禁止直接依赖 VulkanRHI 具体类型。
  */
 class ComputePassBase {
 public:
-    ComputePassBase(std::shared_ptr<VulkanDevice> device, const std::string& name);
+    ComputePassBase(RHIDevice* rhiDevice, const std::string& name);
     virtual ~ComputePassBase();
 
-    // 禁止拷贝
     ComputePassBase(const ComputePassBase&) = delete;
     ComputePassBase& operator=(const ComputePassBase&) = delete;
 
-    /**
-     * 初始化计算通道
-     * 子类应该在此创建管线、描述符集等资源
-     */
     virtual void init() = 0;
-
-    /**
-     * 记录计算命令
-     * @param commandBuffer 命令缓冲
-     */
-    virtual void record(VkCommandBuffer commandBuffer) = 0;
-
-    /**
-     * 清理资源
-     */
+    virtual void record(RHICommandBuffer* cmd) = 0;
     virtual void cleanup();
 
-    /**
-     * 获取通道名称
-     */
     const std::string& getName() const { return name; }
 
 protected:
     /**
-     * 创建描述符池
+     * 插入缓冲区屏障 (Pure RHI)
      */
-    void createDescriptorPool(const std::vector<VkDescriptorPoolSize>& poolSizes, 
-                              uint32_t maxSets = 1);
+    void insertBufferBarrier(RHICommandBuffer* cmd, RHIBuffer* buffer);
 
-    /**
-     * 插入内存屏障（用于同步）
-     */
-    void insertMemoryBarrier(VkCommandBuffer commandBuffer,
-                             VkPipelineStageFlags srcStage,
-                             VkPipelineStageFlags dstStage,
-                             VkAccessFlags srcAccess,
-                             VkAccessFlags dstAccess);
-
-    /**
-     * 插入缓冲区屏障
-     */
-    void insertBufferBarrier(VkCommandBuffer commandBuffer,
-                             VkBuffer buffer,
-                             VkDeviceSize size,
-                             VkPipelineStageFlags srcStage,
-                             VkPipelineStageFlags dstStage,
-                             VkAccessFlags srcAccess,
-                             VkAccessFlags dstAccess);
-
-    std::shared_ptr<VulkanDevice> device;
+    RHIDevice* rhiDevice_ = nullptr;
     std::string name;
     
-    std::unique_ptr<ComputePipeline> pipeline;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    // RHI resources
+    std::shared_ptr<RHIPipeline>      pipeline_;
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 };

@@ -5,8 +5,6 @@
 
 #include "SceneRenderer.h"
 
-#include "VulkanDevice.h"
-#include "VulkanSwapChain.h"
 #include "Camera.h"
 #include "Scene.h"
 #include "Entity.h"
@@ -27,6 +25,16 @@
 #include "nanite/Nanite.h"
 #include "nanite/NaniteManager.h"
 
+// RHI
+#include "RHIDevice.h"
+#include "RHISwapChain.h"
+#include "RHIRenderPass.h"
+#include "RHIBuffer.h"
+#include "RHITexture.h"
+#include "RHISampler.h"
+#include "RHICommandBuffer.h"
+
+
 // UI
 #include "ImGuiLayer.h"
 #include "UIManager.h"
@@ -40,8 +48,8 @@
 // 构造 & 析构
 // ============================================================
 
-SceneRenderer::SceneRenderer(VulkanDevice* device, VulkanSwapChain* swapChain)
-    : m_device(device), m_swapChain(swapChain)
+SceneRenderer::SceneRenderer(RHIDevice* device, RHISwapChain* swapChain)
+    : m_rhiDevice(device), m_swapChain(swapChain)
 {
 }
 
@@ -56,13 +64,15 @@ SceneRenderer::~SceneRenderer() {
 void SceneRenderer::initialize() {
     if (m_initialized) return;
 
-    auto deviceShared = std::shared_ptr<VulkanDevice>(m_device, [](VulkanDevice*){});
-    uint32_t w = m_swapChain->getExtent().width;
-    uint32_t h = m_swapChain->getExtent().height;
+    auto extent = m_swapChain->getExtent();
+    uint32_t w = extent.width;
+    uint32_t h = extent.height;
 
-    // 创建 ForwardPass（始终可用）
-    m_forwardPass = std::make_unique<ForwardPass>(deviceShared, m_swapChain->getRenderPass(), w, h);
-    std::cout << "[SceneRenderer] ForwardPass created\n";
+    // 创建 ForwardPass（始终可用）— 纯 RHI 接口
+    m_forwardPass = std::make_unique<ForwardPass>(
+        m_rhiDevice,
+        m_swapChain->getRHIRenderPass(), w, h, MAX_FRAMES_IN_FLIGHT);
+    std::cout << "[SceneRenderer] ForwardPass created (RHI)\n";
 
     m_initialized = true;
     std::cout << "[SceneRenderer] Initialized\n";
@@ -71,7 +81,7 @@ void SceneRenderer::initialize() {
 void SceneRenderer::cleanup() {
     if (!m_initialized) return;
     
-    if (m_device) vkDeviceWaitIdle(m_device->getDevice());
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
 
     cleanupNanite();
     cleanupGPUDrivenRendering();
@@ -91,21 +101,21 @@ void SceneRenderer::initDeferredShading() {
 
     std::cout << "[SceneRenderer] Initializing deferred shading...\n";
 
-    auto deviceShared = std::shared_ptr<VulkanDevice>(m_device, [](VulkanDevice*){});
-    uint32_t w = m_swapChain->getExtent().width;
-    uint32_t h = m_swapChain->getExtent().height;
+    auto extent = m_swapChain->getExtent();
+    uint32_t w = extent.width;
+    uint32_t h = extent.height;
 
     try {
-        // 1. GBuffer
-        m_gbuffer = std::make_unique<GBufferPass>(deviceShared, w, h);
-        std::cout << "  GBuffer created\n";
+        // 1. GBuffer (now uses RHI)
+        m_gbuffer = std::make_unique<GBufferPass>(m_rhiDevice, w, h, MAX_FRAMES_IN_FLIGHT);
+        std::cout << "  GBuffer created (RHI)\n";
 
         // 2. SSR
-        m_ssrPass = std::make_unique<SSRPass>(deviceShared, w, h);
+        m_ssrPass = std::make_unique<SSRPass>(m_rhiDevice, w, h);
         std::cout << "  SSR Pass created\n";
 
         // 3. Water
-        m_waterPass = std::make_unique<WaterPass>(deviceShared, w, h, m_swapChain->getRenderPass());
+        m_waterPass = std::make_unique<WaterPass>(m_rhiDevice, w, h, m_swapChain->getRHIRenderPass());
         m_waterPass->setWaterHeight(-1.5f);
         m_waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created\n";
@@ -120,44 +130,43 @@ void SceneRenderer::initDeferredShading() {
             std::cout << "  GBuffer descriptor sets created\n";
         }
 
-        // 6. LightingPass
-        m_lightingPass = std::make_unique<LightingPass>(deviceShared, w, h, m_swapChain->getRenderPass());
+        // 6. LightingPass (Pure RHI)
+        m_lightingPass = std::make_unique<LightingPass>(
+            m_rhiDevice, w, h,
+            m_swapChain->getRHIRenderPass(), MAX_FRAMES_IN_FLIGHT);
         m_lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
-        std::cout << "  LightingPass created\n";
+        std::cout << "  LightingPass created (Pure RHI)\n";
 
         // 7. SSAOPass
-        m_ssaoPass = std::make_unique<SSAOPass>(deviceShared, w, h);
+        m_ssaoPass = std::make_unique<SSAOPass>(m_rhiDevice, w, h);
         m_ssaoPass->init();
         std::cout << "  SSAOPass created (" << w << "x" << h << ")\n";
 
-        // 8. Set LightingPass G-Buffer inputs
+        // 8. Set LightingPass G-Buffer inputs (Pure RHI textures)
         if (m_gbuffer) {
             m_lightingPass->setGBufferInputs(
-                m_gbuffer->getPositionView(),
-                m_gbuffer->getNormalView(),
-                m_gbuffer->getAlbedoView(),
-                m_gbuffer->getSampler()
+                m_gbuffer->getPositionTexture(),
+                m_gbuffer->getNormalTexture(),
+                m_gbuffer->getAlbedoTexture(),
+                m_gbuffer->getRHISampler()
             );
-            std::cout << "  LightingPass G-Buffer inputs set\n";
+            std::cout << "  LightingPass G-Buffer inputs set (Pure RHI)\n";
         }
 
-        // 9. Bind SSAO to LightingPass
-        if (m_ssaoPass && m_lightingPass) {
+        // 9. Bind SSAO output to LightingPass (binding 4)
+        if (m_ssaoPass) {
             m_lightingPass->setSSAOTexture(
-                m_ssaoPass->getOutputAOView(),
+                m_ssaoPass->getOutputAOTexture(),
                 m_ssaoPass->getOutputAOSampler()
             );
-            std::cout << "  LightingPass SSAO texture bound\n";
+            std::cout << "  LightingPass SSAO texture bound (Pure RHI)\n";
         }
 
-        // 10. Update Water descriptors
-        if (m_gbuffer) {
-            m_waterPass->updateDescriptorSets(
-                m_gbuffer.get(),
-                m_sceneColorView,
-                m_sceneColorSampler
-            );
-            std::cout << "  Water Pass descriptors updated\n";
+        // 10. Bind sceneColor RHI texture to WaterPass
+        if (m_waterPass && m_gbuffer && m_sceneColorTexture) {
+            m_waterPass->setGBufferInputs(m_gbuffer.get(),
+                m_sceneColorTexture.get(), m_sceneColorSampler.get());
+            std::cout << "  Water Pass descriptors bound (Pure RHI)\n";
         }
 
         m_deferredInitialized = true;
@@ -171,7 +180,7 @@ void SceneRenderer::initDeferredShading() {
 }
 
 void SceneRenderer::cleanupDeferredShading() {
-    if (m_device) vkDeviceWaitIdle(m_device->getDevice());
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
     
     cleanupSceneColorImage();
     m_waterPass.reset();
@@ -183,86 +192,50 @@ void SceneRenderer::cleanupDeferredShading() {
 }
 
 void SceneRenderer::createSceneColorImage() {
-    uint32_t w = m_swapChain->getExtent().width;
-    uint32_t h = m_swapChain->getExtent().height;
+    auto extent = m_swapChain->getExtent();
+    uint32_t w = extent.width;
+    uint32_t h = extent.height;
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.extent = { w, h, 1 };
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Create scene color texture via RHI
+    RHITextureDesc texDesc{};
+    texDesc.width = w;
+    texDesc.height = h;
+    texDesc.format = RHIFormat::R8G8B8A8_UNORM;
+    texDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+    m_sceneColorTexture = m_rhiDevice->createTexture(texDesc);
 
-    if (vkCreateImage(m_device->getDevice(), &imageInfo, nullptr, &m_sceneColorImage) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create scene color image!");
-
-    VkMemoryRequirements memReq;
-    vkGetImageMemoryRequirements(m_device->getDevice(), m_sceneColorImage, &memReq);
-
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(m_device->getPhysicalDevice(), &memProps);
-
-    uint32_t memIdx = 0;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
-        if ((memReq.memoryTypeBits & (1 << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-            memIdx = i; break;
-        }
-    }
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memReq.size;
-    allocInfo.memoryTypeIndex = memIdx;
-    if (vkAllocateMemory(m_device->getDevice(), &allocInfo, nullptr, &m_sceneColorMemory) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate scene color memory!");
-
-    vkBindImageMemory(m_device->getDevice(), m_sceneColorImage, m_sceneColorMemory, 0);
-
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = m_sceneColorImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    if (vkCreateImageView(m_device->getDevice(), &viewInfo, nullptr, &m_sceneColorView) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create scene color image view!");
-
-    VkSamplerCreateInfo sampInfo{};
-    sampInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampInfo.magFilter = VK_FILTER_LINEAR;
-    sampInfo.minFilter = VK_FILTER_LINEAR;
-    sampInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampInfo.anisotropyEnable = VK_FALSE;
-    sampInfo.maxAnisotropy = 1.0f;
-    sampInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampInfo.unnormalizedCoordinates = VK_FALSE;
-    sampInfo.compareEnable = VK_FALSE;
-    sampInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    if (vkCreateSampler(m_device->getDevice(), &sampInfo, nullptr, &m_sceneColorSampler) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create scene color sampler!");
+    // Create scene color sampler via RHI
+    RHISamplerDesc sampDesc{};
+    sampDesc.magFilter = RHIFilter::Linear;
+    sampDesc.minFilter = RHIFilter::Linear;
+    sampDesc.addressModeU = RHIAddressMode::ClampToEdge;
+    sampDesc.addressModeV = RHIAddressMode::ClampToEdge;
+    sampDesc.addressModeW = RHIAddressMode::ClampToEdge;
+    sampDesc.anisotropyEnable = false;
+    sampDesc.maxAnisotropy = 1.0f;
+    sampDesc.mipMapFilter = RHIFilter::Linear;
+    sampDesc.minLod = 0.0f;
+    sampDesc.maxLod = 1.0f;
+    m_sceneColorSampler = m_rhiDevice->createSampler(sampDesc);
 }
 
 void SceneRenderer::cleanupSceneColorImage() {
-    if (!m_device) return;
-    VkDevice dev = m_device->getDevice();
-    if (m_sceneColorSampler) { vkDestroySampler(dev, m_sceneColorSampler, nullptr); m_sceneColorSampler = VK_NULL_HANDLE; }
-    if (m_sceneColorView)    { vkDestroyImageView(dev, m_sceneColorView, nullptr);  m_sceneColorView = VK_NULL_HANDLE; }
-    if (m_sceneColorImage)   { vkDestroyImage(dev, m_sceneColorImage, nullptr);     m_sceneColorImage = VK_NULL_HANDLE; }
-    if (m_sceneColorMemory)  { vkFreeMemory(dev, m_sceneColorMemory, nullptr);      m_sceneColorMemory = VK_NULL_HANDLE; }
+    m_sceneColorSampler.reset();
+    m_sceneColorTexture.reset();
 }
 
 // ============================================================
 // Uniform 更新
 // ============================================================
+
+glm::mat4 SceneRenderer::applyApiYFlip(const glm::mat4& proj) const {
+    if (m_rhiDevice && m_rhiDevice->getBackend() == RHIBackend::Vulkan) {
+        glm::mat4 flipped = proj;
+        flipped[1][1] *= -1.0f;
+        return flipped;
+    }
+    return proj;
+}
 
 void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     if (!m_camera) return;
@@ -270,17 +243,13 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     // 计算公共矩阵
     glm::mat4 view = m_camera->getViewMatrix();
     float fov = glm::radians(m_camera->getZoom());
-    float aspect = m_swapChain->getExtent().width / (float)m_swapChain->getExtent().height;
-    glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    proj[1][1] *= -1;
+    auto scExtent = m_swapChain->getExtent();
+    float aspect = scExtent.width / (float)scExtent.height;
+    glm::mat4 proj = applyApiYFlip(glm::perspective(fov, aspect, 0.1f, 100.0f));
     glm::vec3 camPos = m_camera->getPosition();
 
-    // 光源（绕 Y 轴旋转）
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(now - startTime).count();
-    float lightAngle = time * 0.5f;
-    glm::vec3 lightPos(5.0f * cos(lightAngle), 3.0f, 5.0f * sin(lightAngle));
+    // 光源（固定位置）
+    glm::vec3 lightPos(5.0f, 3.0f, 5.0f);
 
     // ForwardPass UBO
     if (m_forwardPass) {
@@ -326,7 +295,7 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
 // 命令录制 — 入口
 // ============================================================
 
-void SceneRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
+void SceneRenderer::recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
         recordDeferredCommands(cmd, imageIndex, frameIndex);
     } else {
@@ -338,19 +307,11 @@ void SceneRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uin
 // 命令录制 — 前向渲染
 // ============================================================
 
-void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
+void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     // GPU Culling (Compute, before render pass)
     if (m_settings.enableGPUCulling && m_gpuDrivenRenderer) {
         m_gpuDrivenRenderer->executeCulling(cmd);
-
-        VkMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-            0, 1, &barrier, 0, nullptr, 0, nullptr);
+        // Barrier already handled inside FrustumCullingPass::record()
     }
 
     // Nanite GPU Culling (Compute, before render pass)
@@ -358,31 +319,27 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
         prepareNaniteCulling(cmd, imageIndex);
     }
 
-    // Begin render pass
-    VkRenderPassBeginInfo rpInfo{};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpInfo.renderPass = m_swapChain->getRenderPass();
-    rpInfo.framebuffer = m_swapChain->getFramebuffers()[imageIndex];
-    rpInfo.renderArea.offset = {0, 0};
-    rpInfo.renderArea.extent = m_swapChain->getExtent();
+    // Begin render pass (Pure RHI)
+    {
+        std::vector<RHIClearValue> clears = {
+            RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
+            RHIClearValue::DepthStencil(1.0f, 0)
+        };
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
+    }
 
-    std::array<VkClearValue, 2> clears{};
-    clears[0].color = {{0.1f, 0.2f, 0.4f, 1.0f}};
-    clears[1].depthStencil = {1.0f, 0};
-    rpInfo.clearValueCount = static_cast<uint32_t>(clears.size());
-    rpInfo.pClearValues = clears.data();
-
-    vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    m_device->beginDebugLabel(cmd, "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
 
     if (m_forwardPass && m_scene && m_renderSystem) {
         m_forwardPass->begin(cmd);
         m_forwardPass->bindPipeline(cmd);
 
         if (m_settings.enableGPUCulling && m_gpuDrivenRenderer) {
-            VkBuffer indirectBuffer = m_gpuDrivenRenderer->getIndirectDrawBuffer();
-            if (indirectBuffer != VK_NULL_HANDLE) {
+            RHIBuffer* indirectBuffer = m_gpuDrivenRenderer->getIndirectDrawBuffer();
+            if (indirectBuffer != nullptr) {
                 m_forwardPass->bindGlobalDescriptorSet(cmd, frameIndex);
 
                 const auto& visibleIndices = m_gpuDrivenRenderer->getVisibleIndices();
@@ -415,11 +372,10 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
                     if (!matDesc || !matDesc->valid) continue;
                     m_forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, matDesc);
 
-                    VkBuffer vb[] = { gpuMesh->vertexBuffer->getBuffer() };
-                    VkDeviceSize off[] = { 0 };
-                    vkCmdBindVertexBuffers(cmd, 0, 1, vb, off);
-                    vkCmdBindIndexBuffer(cmd, gpuMesh->indexBuffer->getBuffer(), 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(cmd, gpuMesh->getIndexCount(), 1, 0, 0, 0);
+                    m_forwardPass->drawMesh(cmd,
+                        gpuMesh->getVertexBuffer(),
+                        gpuMesh->getIndexBuffer(),
+                        gpuMesh->getIndexCount());
                 }
             } else {
                 m_renderSystem->render(cmd, m_forwardPass.get(), frameIndex);
@@ -433,35 +389,32 @@ void SceneRenderer::recordForwardCommands(VkCommandBuffer cmd, uint32_t imageInd
         }
     }
 
-    m_device->endDebugLabel(cmd);
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // UI
-    m_device->beginDebugLabel(cmd, "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
     updateUI();
     renderUI(cmd);
-    m_device->endDebugLabel(cmd);
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-    vkCmdEndRenderPass(cmd);
+    cmd->endRenderPass();
 }
 
 // ============================================================
 // 命令录制 — 延迟渲染
 // ============================================================
 
-void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex) {
-    m_device->beginDebugLabel(cmd, "Water Scene Rendering", 0.2f, 0.6f, 0.9f, 1.0f);
+void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Deferred Pipeline", 0.2f, 0.6f, 0.9f, 1.0f);
 
-    uint32_t w = m_swapChain->getExtent().width;
-    uint32_t h = m_swapChain->getExtent().height;
-
-    VkViewport viewport{ 0, 0, (float)w, (float)h, 0, 1 };
-    VkRect2D scissor{ {0,0}, m_swapChain->getExtent() };
+    auto dExtent = m_swapChain->getExtent();
+    uint32_t w = dExtent.width;
+    uint32_t h = dExtent.height;
 
     // === Pass 1: GBuffer ===
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "GBuffer Pass", 0.4f, 0.8f, 0.2f, 1.0f);
     if (m_gbuffer && m_scene) {
         m_gbuffer->beginRenderPass(cmd);
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
         m_gbuffer->bindPipeline(cmd);
 
         if (m_renderSystem) {
@@ -469,123 +422,111 @@ void SceneRenderer::recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIn
         }
         m_gbuffer->endRenderPass(cmd);
     }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-    // === Pass 1.5: Blit Albedo → sceneColorImage ===
-    if (m_gbuffer && m_sceneColorImage != VK_NULL_HANDLE) {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = m_sceneColorImage;
-        barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // === Pass 1.5: Blit Albedo → SceneColor ===
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Blit Albedo -> SceneColor", 0.9f, 0.7f, 0.2f, 1.0f);
+    if (m_gbuffer && m_sceneColorTexture) {
+        // Pre-blit transitions
+        cmd->transitionImageLayout(
+            m_gbuffer->getAlbedoTexture(),
+            RHIImageLayout::ShaderReadOnly, RHIImageLayout::TransferSrc,
+            RHIPipelineStage::ColorAttachmentOutput, RHIPipelineStage::Transfer);
 
-        VkImageBlit blit{};
-        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        blit.srcOffsets[0] = {0,0,0};
-        blit.srcOffsets[1] = {(int32_t)w, (int32_t)h, 1};
-        blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        blit.dstOffsets[0] = {0,0,0};
-        blit.dstOffsets[1] = {(int32_t)w, (int32_t)h, 1};
-        vkCmdBlitImage(cmd,
-            m_gbuffer->getAlbedoImage(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            m_sceneColorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &blit, VK_FILTER_LINEAR);
+        cmd->transitionImageLayout(
+            m_sceneColorTexture.get(),
+            RHIImageLayout::Undefined, RHIImageLayout::TransferDst,
+            RHIPipelineStage::TopOfPipe, RHIPipelineStage::Transfer);
 
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        // Blit
+        cmd->blitImage(
+            m_gbuffer->getAlbedoTexture(), RHIImageLayout::TransferSrc,
+            m_sceneColorTexture.get(), RHIImageLayout::TransferDst,
+            w, h, w, h, RHIFilter::Linear);
+
+        // Post-blit transitions
+        cmd->transitionImageLayout(
+            m_gbuffer->getAlbedoTexture(),
+            RHIImageLayout::TransferSrc, RHIImageLayout::ShaderReadOnly,
+            RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
+
+        cmd->transitionImageLayout(
+            m_sceneColorTexture.get(),
+            RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
+            RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
     }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 1.8: SSAO ===
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "SSAO Pass", 0.6f, 0.3f, 0.8f, 1.0f);
     if (m_ssaoPass && m_gbuffer) {
         if (m_settings.enableSSAO) {
-            m_device->beginDebugLabel(cmd, "SSAO Pass", 0.6f, 0.4f, 0.8f, 1.0f);
             float aspect = (float)w / (float)h;
-            glm::mat4 projection = glm::perspective(
-                glm::radians(m_camera ? m_camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f);
-            projection[1][1] *= -1;
+            glm::mat4 projection = applyApiYFlip(glm::perspective(
+                glm::radians(m_camera ? m_camera->getZoom() : 45.0f), aspect, 0.1f, 100.0f));
             glm::mat4 view = m_camera ? m_camera->getViewMatrix() : glm::mat4(1.0f);
             m_ssaoPass->execute(cmd, m_gbuffer.get(), frameIndex, projection, view);
-            m_device->endDebugLabel(cmd);
         } else {
-            // SSAO off: clear to white
-            VkImageMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = m_ssaoPass->getOutputAOImage();
-            barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            barrier.srcAccessMask = 0;
-            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-            VkClearColorValue white = {{ 1.0f, 1.0f, 1.0f, 1.0f }};
-            VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            vkCmdClearColorImage(cmd, m_ssaoPass->getOutputAOImage(),
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &white, 1, &range);
-
-            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                 0, 0, nullptr, 0, nullptr, 1, &barrier);
+            // SSAO 关闭：清空 AO 纹理为白色（1.0 = 无遮蔽）
+            cmd->transitionImageLayout(
+                m_ssaoPass->getOutputAOTexture(),
+                RHIImageLayout::ShaderReadOnly, RHIImageLayout::TransferDst,
+                RHIPipelineStage::FragmentShader, RHIPipelineStage::Transfer);
+            cmd->clearColorImage(
+                m_ssaoPass->getOutputAOTexture(), 1.0f, 1.0f, 1.0f, 1.0f);
+            cmd->transitionImageLayout(
+                m_ssaoPass->getOutputAOTexture(),
+                RHIImageLayout::TransferDst, RHIImageLayout::ShaderReadOnly,
+                RHIPipelineStage::Transfer, RHIPipelineStage::FragmentShader);
         }
     }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // === Pass 2: SSR ===
-    if (m_ssrPass && m_gbuffer && m_sceneColorView) {
-        m_ssrPass->execute(cmd, m_gbuffer.get(), m_sceneColorView, frameIndex);
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "SSR Pass", 0.2f, 0.8f, 0.8f, 1.0f);
+    if (m_ssrPass && m_gbuffer && m_sceneColorTexture) {
+        m_ssrPass->execute(cmd, m_gbuffer.get(),
+            m_sceneColorTexture.get(), m_sceneColorSampler.get(), frameIndex);
     }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-    // === Pass 3: Final — render to swapchain ===
+    // === Pass 3: Final Composition (Swapchain RenderPass) ===
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Final Composition", 0.9f, 0.4f, 0.1f, 1.0f);
     {
-        VkRenderPassBeginInfo rpInfo{};
-        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpInfo.renderPass = m_swapChain->getRenderPass();
-        rpInfo.framebuffer = m_swapChain->getFramebuffers()[imageIndex];
-        rpInfo.renderArea = { {0,0}, m_swapChain->getExtent() };
+        std::vector<RHIClearValue> clears = {
+            RHIClearValue::Color(0.02f, 0.05f, 0.1f, 1.0f),
+            RHIClearValue::DepthStencil(1.0f, 0)
+        };
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
 
-        std::array<VkClearValue, 2> clears{};
-        clears[0].color = {{0.02f, 0.05f, 0.1f, 1.0f}};
-        clears[1].depthStencil = {1.0f, 0};
-        rpInfo.clearValueCount = static_cast<uint32_t>(clears.size());
-        rpInfo.pClearValues = clears.data();
-
-        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        // Deferred lighting
+        // Deferred Lighting
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Lighting Pass", 1.0f, 0.9f, 0.3f, 1.0f);
         if (m_lightingPass && m_gbuffer) {
             m_lightingPass->render(cmd, frameIndex);
         }
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
         // Water
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
         if (m_waterPass) {
             m_waterPass->render(cmd, frameIndex);
         }
-
-        m_device->endDebugLabel(cmd); // end Water Scene Rendering
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
         // UI
-        m_device->beginDebugLabel(cmd, "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
         updateUI();
         renderUI(cmd);
-        m_device->endDebugLabel(cmd);
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
-        vkCmdEndRenderPass(cmd);
+        cmd->endRenderPass();
     }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle()); // end Final Composition
+
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle()); // end Deferred Pipeline
 }
 
 // ============================================================
@@ -608,11 +549,11 @@ void SceneRenderer::updateUI() {
     }
 }
 
-void SceneRenderer::renderUI(VkCommandBuffer cmd) {
+void SceneRenderer::renderUI(RHICommandBuffer* cmd) {
     if (!m_imguiLayer || !m_uiManager || !m_settings.showUI) return;
     m_imguiLayer->beginFrame();
     m_uiManager->render();
-    m_imguiLayer->endFrame(cmd);
+    m_imguiLayer->endFrame(cmd->getNativeHandle());
 }
 
 // ============================================================
@@ -621,20 +562,22 @@ void SceneRenderer::renderUI(VkCommandBuffer cmd) {
 
 void SceneRenderer::onResize(uint32_t width, uint32_t height) {
     if (m_forwardPass) {
-        m_forwardPass->recreate(m_swapChain->getRenderPass(), width, height);
+        m_forwardPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
     }
     if (m_ssaoPass) {
         m_ssaoPass->resize(width, height);
-        if (m_lightingPass) {
-            m_lightingPass->setSSAOTexture(m_ssaoPass->getOutputAOView(), m_ssaoPass->getOutputAOSampler());
-        }
+        // SSAO re-binding deferred until SSAOPass is fully migrated to RHI
+        // if (m_lightingPass) {
+        //     m_lightingPass->setSSAOTexture(...);
+        // }
     }
 }
 
-void SceneRenderer::onSwapChainRecreated(VulkanSwapChain* newSwapChain) {
+void SceneRenderer::onSwapChainRecreated(RHISwapChain* newSwapChain) {
     m_swapChain = newSwapChain;
-    uint32_t w = newSwapChain->getExtent().width;
-    uint32_t h = newSwapChain->getExtent().height;
+    auto ext = newSwapChain->getExtent();
+    uint32_t w = ext.width;
+    uint32_t h = ext.height;
     onResize(w, h);
 }
 
@@ -645,11 +588,10 @@ void SceneRenderer::onSwapChainRecreated(VulkanSwapChain* newSwapChain) {
 void SceneRenderer::initGPUDrivenRendering() {
     std::cout << "[SceneRenderer] Initializing GPU-Driven Rendering...\n";
     try {
-        auto deviceShared = std::shared_ptr<VulkanDevice>(m_device, [](VulkanDevice*){});
         GPUDrivenRenderer::Config config;
         config.maxInstances = 100000;
         config.enableFrustumCulling = true;
-        m_gpuDrivenRenderer = std::make_unique<GPUDrivenRenderer>(deviceShared, config);
+        m_gpuDrivenRenderer = std::make_unique<GPUDrivenRenderer>(m_rhiDevice, config);
         m_gpuDrivenRenderer->init();
         std::cout << "[SceneRenderer] GPU-Driven Rendering initialized!\n";
     } catch (const std::exception& e) {
@@ -696,9 +638,9 @@ void SceneRenderer::prepareGPUCullingData() {
     if (instances.empty()) return;
 
     float fov = glm::radians(m_camera->getZoom());
-    float aspect = m_swapChain->getExtent().width / (float)m_swapChain->getExtent().height;
-    glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
-    proj[1][1] *= -1;
+    auto gpuExtent = m_swapChain->getExtent();
+    float aspect = gpuExtent.width / (float)gpuExtent.height;
+    glm::mat4 proj = applyApiYFlip(glm::perspective(fov, aspect, 0.1f, 100.0f));
     m_gpuDrivenRenderer->prepare(instances, m_camera->getViewMatrix(), proj, m_camera->getPosition());
 }
 
@@ -711,8 +653,7 @@ void SceneRenderer::initNanite() {
     std::cout << "Initializing Nanite System...\n";
     std::cout << "========================================\n";
     try {
-        auto deviceShared = std::shared_ptr<VulkanDevice>(m_device, [](VulkanDevice*){});
-        m_naniteManager = std::make_unique<Nanite::NaniteManager>(deviceShared);
+        m_naniteManager = std::make_unique<Nanite::NaniteManager>(m_rhiDevice);
         m_naniteManager->initialize();
 
         Nanite::NaniteConfig config;
@@ -743,12 +684,10 @@ void SceneRenderer::initNaniteDebugPass() {
     if (!m_naniteManager) return;
 
     try {
-        auto deviceShared = std::shared_ptr<VulkanDevice>(m_device, [](VulkanDevice*){});
-        auto swapChainShared = std::shared_ptr<VulkanSwapChain>(m_swapChain, [](VulkanSwapChain*){});
         auto naniteShared = std::shared_ptr<Nanite::NaniteManager>(m_naniteManager.get(), [](Nanite::NaniteManager*){});
 
-        m_naniteDebugPass = std::make_unique<NaniteDebugPass>(deviceShared, swapChainShared, naniteShared);
-        m_naniteDebugPass->initialize(m_swapChain->getRenderPass());
+        m_naniteDebugPass = std::make_unique<NaniteDebugPass>(m_rhiDevice, m_swapChain, naniteShared);
+        m_naniteDebugPass->initialize(m_swapChain->getRHIRenderPass());
         m_naniteDebugPass->setClusterCullingPass(m_naniteManager->getCullingPass());
 
         if (!m_lastClusterizedMeshPath.empty()) {
@@ -803,36 +742,32 @@ void SceneRenderer::testNaniteClustering() {
     std::cout << "Clustering done: " << processedMeshes << " meshes, " << totalClusters << " clusters\n";
 }
 
-void SceneRenderer::prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageIndex) {
+void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex) {
     if (!m_naniteManager || !m_naniteDebugPass) return;
 
     m_naniteDebugPass->setRenderAllMeshes();
     m_naniteDebugPass->ensureRenderDataBuilt();
 
-    VkExtent2D extent = m_swapChain->getExtent();
-    float aspect = (float)extent.width / (float)extent.height;
-    glm::mat4 proj = m_camera->getProjectionMatrix(aspect, m_camera->getZoom());
-    proj[1][1] *= -1;
+    auto nExtent = m_swapChain->getExtent();
+    float aspect = (float)nExtent.width / (float)nExtent.height;
+    glm::mat4 proj = applyApiYFlip(m_camera->getProjectionMatrix(aspect, m_camera->getZoom()));
     glm::mat4 view = m_camera->getViewMatrix();
     glm::vec3 camPos = m_camera->getPosition();
 
-    m_naniteManager->setScreenParams(extent.width, extent.height);
+    m_naniteManager->setScreenParams(nExtent.width, nExtent.height);
     m_naniteManager->performCulling(cmd, view, proj, camPos, imageIndex);
 
-    VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    cmd->pipelineBarrier(
+        RHIPipelineStage::ComputeShader | RHIPipelineStage::Transfer,
+        RHIPipelineStage::VertexInput | RHIPipelineStage::VertexShader | RHIPipelineStage::FragmentShader,
+        RHIAccessFlags::ShaderWrite,
+        RHIAccessFlags::ShaderRead);
 
     m_naniteDebugPass->updateUniforms(imageIndex, view, proj, camPos,
         glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 }
 
-void SceneRenderer::recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
+void SceneRenderer::recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex) {
     if (!m_naniteDebugPass || !m_settings.showClusterVisualization) return;
 
     std::unordered_map<std::string, glm::mat4> meshMatrices;

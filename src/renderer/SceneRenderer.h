@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -19,9 +18,15 @@
 
 #include "RenderSettings.h"
 
+// RHI forward declarations
+class RHIDevice;
+class RHISwapChain;
+class RHIRenderPass;
+class RHICommandBuffer;
+class RHITexture;
+class RHISampler;
+
 // Forward declarations
-class VulkanDevice;
-class VulkanSwapChain;
 class Camera;
 
 // Render Pass classes
@@ -74,7 +79,7 @@ struct RenderStats {
  */
 class SceneRenderer {
 public:
-    SceneRenderer(VulkanDevice* device, VulkanSwapChain* swapChain);
+    SceneRenderer(RHIDevice* device, RHISwapChain* swapChain);
     ~SceneRenderer();
 
     // Non-copyable
@@ -103,19 +108,22 @@ public:
     
     /**
      * 在给定 command buffer 上录制完整渲染命令
-     * @param cmd 命令缓冲区
+     * @param cmd 命令缓冲区（已 begin，由 Engine 的帧循环管理会话）
      * @param imageIndex swapchain image index
      * @param frameIndex 帧槽索引（0 or 1）
      */
-    void recordCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
 
     /** 更新所有 Uniform（每帧调用一次） */
     void updateUniforms(uint32_t frameIndex);
 
+    /** 总时间（秒），用于水面等时间驱动的动画 */
+    void setTotalTime(float t) { m_totalTime = t; }
+
     // ========== 窗口 resize ==========
     
     void onResize(uint32_t width, uint32_t height);
-    void onSwapChainRecreated(VulkanSwapChain* newSwapChain);
+    void onSwapChainRecreated(RHISwapChain* newSwapChain);
 
     // ========== GPU Culling ==========
     
@@ -133,7 +141,7 @@ public:
     // ========== UI ==========
     
     void updateUI();
-    void renderUI(VkCommandBuffer cmd);
+    void renderUI(RHICommandBuffer* cmd);
 
     // ========== 设置 & 状态 ==========
 
@@ -152,23 +160,29 @@ public:
     GBufferPass* getGBufferPass() const { return m_gbuffer.get(); }
     LightingPass* getLightingPass() const { return m_lightingPass.get(); }
     Nanite::NaniteManager* getNaniteManager() const { return m_naniteManager.get(); }
+    RHIDevice* getRHIDevice() const { return m_rhiDevice; }
 
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 private:
     // ========== 命令录制子方法 ==========
-    void recordForwardCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
-    void recordDeferredCommands(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t frameIndex);
-    void prepareNaniteCulling(VkCommandBuffer cmd, uint32_t imageIndex);
-    void recordNaniteDebugCommands(VkCommandBuffer cmd, uint32_t imageIndex);
+    void recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordDeferredCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex);
+    void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex);
+
+    // ========== 矩阵工具 ==========
+    /// GLM 的 perspective 面向 Y-up 的 GL/D3D 惯例;Vulkan 的 NDC Y 向下,需要
+    /// 翻转投影的 Y 轴才与画面一致。DX12 直接使用标准矩阵。
+    glm::mat4 applyApiYFlip(const glm::mat4& proj) const;
 
     // ========== 资源创建 ==========
     void createSceneColorImage();
     void cleanupSceneColorImage();
 
     // ========== 引用（不拥有）==========
-    VulkanDevice* m_device = nullptr;
-    VulkanSwapChain* m_swapChain = nullptr;
+    RHIDevice* m_rhiDevice = nullptr;
+    RHISwapChain* m_swapChain = nullptr;
     VulkanEngine::Scene* m_scene = nullptr;
     Camera* m_camera = nullptr;
     VulkanEngine::RenderSystem* m_renderSystem = nullptr;
@@ -187,10 +201,8 @@ private:
     std::unique_ptr<Nanite::NaniteManager> m_naniteManager;
 
     // ========== 场景颜色纹理（SSR 采样）==========
-    VkImage m_sceneColorImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_sceneColorMemory = VK_NULL_HANDLE;
-    VkImageView m_sceneColorView = VK_NULL_HANDLE;
-    VkSampler m_sceneColorSampler = VK_NULL_HANDLE;
+    std::shared_ptr<RHITexture> m_sceneColorTexture;
+    std::shared_ptr<RHISampler> m_sceneColorSampler;
 
     // ========== 状态 ==========
     RenderSettings m_settings;

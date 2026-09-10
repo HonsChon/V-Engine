@@ -1,21 +1,30 @@
 #pragma once
 
 #include "RenderPassBase.h"
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
-#include <array>
 #include <vector>
-#include <string>
 
-class VulkanDevice;
+// Pure RHI forward declarations — no Vulkan headers
+class RHIDevice;
+class RHIBuffer;
+class RHIPipeline;
+class RHIBindingLayout;
+class RHIBindingGroup;
+class RHIRenderPass;
+class RHICommandBuffer;
+class RHITexture;
+class RHISampler;
+
 class GBufferPass;
 
 /**
- * LightingPass - 延迟渲染光照阶段
+ * LightingPass - 延迟渲染光照阶段 (Pure RHI)
  * 
  * 使用 G-Buffer 中的几何信息进行光照计算：
  * 渲染一个全屏四边形，在片段着色器中完成所有光照运算。
+ * 
+ * 所有接口均为纯 RHI，不再暴露任何 Vulkan 原生类型。
  */
 class LightingPass : public RenderPassBase {
 public:
@@ -28,20 +37,21 @@ public:
         alignas(16) glm::vec4 screenSize;   // 屏幕尺寸
     };
 
-    LightingPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height,
-                 VkRenderPass targetRenderPass);
+    LightingPass(RHIDevice* rhiDevice,
+                 uint32_t width, uint32_t height,
+                 RHIRenderPass* externalRenderPass, uint32_t maxFramesInFlight = 2);
     ~LightingPass();
 
     // 禁止拷贝
     LightingPass(const LightingPass&) = delete;
     LightingPass& operator=(const LightingPass&) = delete;
 
-    // 设置 G-Buffer 输入
-    void setGBufferInputs(VkImageView positionView, VkImageView normalView,
-                          VkImageView albedoView, VkSampler sampler);
+    // 设置 G-Buffer 输入 (Pure RHI)
+    void setGBufferInputs(RHITexture* position, RHITexture* normal,
+                          RHITexture* albedo, RHISampler* sampler);
 
-    // 设置 SSAO 纹理
-    void setSSAOTexture(VkImageView ssaoView, VkSampler ssaoSampler);
+    // 设置 SSAO 纹理 (Pure RHI)
+    void setSSAOTexture(RHITexture* ssaoTexture, RHISampler* ssaoSampler);
 
     // 更新光照参数
     void updateUniforms(uint32_t frameIndex, const glm::vec3& viewPos,
@@ -51,62 +61,44 @@ public:
     // 设置环境光
     void setAmbientLight(const glm::vec3& color, float intensity = 0.1f);
 
-    // 录制渲染命令（渲染全屏四边形：
-    void recordCommands(VkCommandBuffer cmd, uint32_t frameIndex) override;
+    // 录制渲染命令 (Pure RHI)
+    void render(RHICommandBuffer* cmd, uint32_t frameIndex);
 
-    // 渲染（简化接口）
-    void render(VkCommandBuffer cmd, uint32_t frameIndex);
-
-    // 获取器
-    VkPipeline getPipeline() const { return pipeline; }
-    VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
+    // Pipeline accessor (for external use e.g. SceneRenderer)
+    RHIPipeline* getPipeline() const { return pipeline_.get(); }
 
 private:
-    void createDescriptorSetLayout();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    void createBindingLayout();
     void createUniformBuffers();
+    void createBindingGroups();
     void createPipeline();
     void createFullscreenQuad();
     void cleanup();
 
-    VkShaderModule createShaderModule(const std::vector<char>& code);
-    std::vector<char> readFile(const std::string& filename);
+    // RHI device references
+    RHIDevice* rhiDevice_ = nullptr;
+    uint32_t width_;
+    uint32_t height_;
+    uint32_t maxFramesInFlight_;
+    RHIRenderPass* externalRenderPass_ = nullptr;  // NOT owned
 
-    VkRenderPass targetRenderPass;
+    // Pipeline (RHI)
+    std::shared_ptr<RHIPipeline> pipeline_;
 
-    // Pipeline
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Binding layout (RHI)
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 
-    // 描述符
-    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets = {};
+    // Uniform Buffers (RHI)
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
 
-    // Uniform Buffers
-    std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniformBuffers = {};
-    std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniformBuffersMemory = {};
-    std::array<void*, MAX_FRAMES_IN_FLIGHT> uniformBuffersMapped = {};
+    // Binding Groups (RHI) — one per frame, fully RHI
+    std::vector<std::shared_ptr<RHIBindingGroup>> bindingGroups_;
 
-    // 全屏四边形
-    VkBuffer quadVertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory quadVertexMemory = VK_NULL_HANDLE;
-    VkBuffer quadIndexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory quadIndexMemory = VK_NULL_HANDLE;
-
-    // 缓存的G-Buffer 视图
-    VkImageView cachedPositionView = VK_NULL_HANDLE;
-    VkImageView cachedNormalView = VK_NULL_HANDLE;
-    VkImageView cachedAlbedoView = VK_NULL_HANDLE;
-    VkSampler cachedSampler = VK_NULL_HANDLE;
-
-    // SSAO 纹理
-    VkImageView cachedSSAOView = VK_NULL_HANDLE;
-    VkSampler cachedSSAOSampler = VK_NULL_HANDLE;
+    // Fullscreen quad (RHI buffers)
+    std::shared_ptr<RHIBuffer> quadVertexBuffer_;
+    std::shared_ptr<RHIBuffer> quadIndexBuffer_;
 
     // 光照参数
-    glm::vec3 ambientColor = glm::vec3(0.03f);
+    glm::vec3 ambientColor = glm::vec3(0.3f);
     float ambientIntensity = 1.0f;
 };

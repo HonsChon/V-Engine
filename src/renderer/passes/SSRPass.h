@@ -1,24 +1,28 @@
 #pragma once
 
 #include "RenderPassBase.h"
-#include "RenderContext.h"
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
 
-class VulkanDevice;
-class VulkanBuffer;
+// Pure RHI forward declarations — no Vulkan headers
 class GBufferPass;
+class RHIDevice;
+class RHITexture;
+class RHISampler;
+class RHIRenderPass;
+class RHIFramebuffer;
+class RHIPipeline;
+class RHIBuffer;
+class RHIBindingLayout;
+class RHIBindingGroup;
+class RHICommandBuffer;
 
 /**
- * SSRPass - 屏幕空间反射渲染通道
- * 
- * 基于 G-Buffer 信息进行光线步进，计算屏幕空间反射
+ * SSRPass - 屏幕空间反射渲染通道 (Pure RHI)
  */
 class SSRPass : public RenderPassBase {
 public:
-    // SSR 参数结构
     struct SSRParams {
         alignas(16) glm::mat4 projection;
         alignas(16) glm::mat4 view;
@@ -35,77 +39,57 @@ public:
         alignas(8)  float padding[2];         // 对齐填充
     };
 
-    SSRPass(std::shared_ptr<VulkanDevice> device, uint32_t width, uint32_t height);
+    SSRPass(RHIDevice* rhiDevice,
+            uint32_t width, uint32_t height);
     ~SSRPass();
 
-    // 禁止拷贝
     SSRPass(const SSRPass&) = delete;
     SSRPass& operator=(const SSRPass&) = delete;
 
-    // 重新调整大小
     void resize(uint32_t width, uint32_t height);
 
-    // 更新 SSR 参数
     void updateParams(const glm::mat4& projection, const glm::mat4& view,
                       const glm::vec3& cameraPos, uint32_t frameIndex);
 
-    // 设置 SSR 参数
     void setMaxDistance(float distance) { params.maxDistance = distance; }
     void setThickness(float thickness) { params.thickness = thickness; }
     void setMaxSteps(float steps) { params.maxSteps = steps; }
 
-    // 执行 SSR Pass（需要GBufferPass 和场景颜色作为输入）
-    void execute(VkCommandBuffer cmd, GBufferPass* gbuffer, 
-                 VkImageView sceneColorView, uint32_t frameIndex);
+    // Execute SSR pass (Pure RHI)
+    void execute(RHICommandBuffer* cmd, GBufferPass* gbuffer,
+                 RHITexture* sceneColorTexture, RHISampler* sceneColorSampler,
+                 uint32_t frameIndex);
 
-    // 获取输出纹理
-    VkImageView getOutputView() const { return outputImageView; }
-    VkImage getOutputImage() const { return outputImage; }
-    
-    VkRenderPass getRenderPass() const { return renderPass; }
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
+    // Output texture (Pure RHI)
+    RHITexture* getOutputTexture() const { return outputTexture_.get(); }
+    RHISampler* getOutputSampler() const { return outputSampler_.get(); }
+    RHIRenderPass* getRHIRenderPass() const { return renderPass_.get(); }
 
 private:
-    void createOutputImage();
-    void createRenderPass();
-    void createFramebuffer();
-    void createDescriptorSetLayout();
-    void createDescriptorPool();
-    void createDescriptorSets();
+    void createOutputTexture();
+    void createOutputSampler();
+    void createRHIRenderPass();
+    void createRHIFramebuffer();
+    void createBindingLayout();
     void createPipeline();
     void createUniformBuffers();
+    void createBindingGroups();
     void cleanup();
-    
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
-    std::shared_ptr<VulkanDevice> device;
-    
-    uint32_t width;
-    uint32_t height;
+    RHIDevice* rhiDevice_ = nullptr;
+    uint32_t width_;
+    uint32_t height_;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-    // SSR 参数
     SSRParams params;
 
-    // 输出图像
-    VkImage outputImage = VK_NULL_HANDLE;
-    VkDeviceMemory outputImageMemory = VK_NULL_HANDLE;
-    VkImageView outputImageView = VK_NULL_HANDLE;
-    VkSampler outputSampler = VK_NULL_HANDLE;
+    std::shared_ptr<RHITexture>       outputTexture_;
+    std::shared_ptr<RHISampler>       outputSampler_;
+    std::shared_ptr<RHIRenderPass>    renderPass_;
+    std::shared_ptr<RHIFramebuffer>   framebuffer_;
+    std::shared_ptr<RHIPipeline>      pipeline_;
+    std::shared_ptr<RHIBindingLayout> bindingLayout_;
 
-    // Vulkan 资源
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    
-    // 描述符
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptorSets;
-    
-    // Uniform Buffers
-    std::vector<std::unique_ptr<VulkanBuffer>> uniformBuffers;
-    std::vector<void*> uniformBuffersMapped;
-    
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    std::vector<std::shared_ptr<RHIBuffer>> uniformBuffers_;
+    std::vector<std::shared_ptr<RHIBindingGroup>> bindingGroups_;
 };

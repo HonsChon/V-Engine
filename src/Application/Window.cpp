@@ -74,20 +74,6 @@ void Window::waitEvents() {
     glfwWaitEvents();
 }
 
-VkSurfaceKHR Window::createSurface(VkInstance instance) {
-    VkSurfaceKHR surface;
-    if (glfwCreateWindowSurface(instance, m_window, nullptr, &surface) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create window surface");
-    }
-    return surface;
-}
-
-std::vector<const char*> Window::getRequiredInstanceExtensions() {
-    uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-    return std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
-}
-
 bool Window::isKeyPressed(int key) const {
     return glfwGetKey(m_window, key) == GLFW_PRESS;
 }

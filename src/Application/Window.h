@@ -5,13 +5,12 @@
  * 职责：
  * 1. 创建和销毁窗口
  * 2. 处理窗口事件（大小改变、关闭等）
- * 3. 提供 Vulkan Surface 创建所需的接口
+ * 3. 暴露 GLFW 原生句柄（供 RHI 后端创建 surface / swapchain）
  */
 
 #pragma once
 
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
 #include <string>
 #include <functional>
 
@@ -73,18 +72,6 @@ public:
     bool isMinimized() const { return m_width == 0 || m_height == 0; }
     bool wasResized() const { return m_framebufferResized; }
     void resetResizedFlag() { m_framebufferResized = false; }
-
-    // ========== Vulkan 相关 ==========
-
-    /**
-     * @brief 创建 Vulkan Surface
-     */
-    VkSurfaceKHR createSurface(VkInstance instance);
-
-    /**
-     * @brief 获取所需的 Vulkan 实例扩展
-     */
-    static std::vector<const char*> getRequiredInstanceExtensions();
 
     // ========== 输入状态查询 ==========
 

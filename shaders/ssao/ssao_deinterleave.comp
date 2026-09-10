@@ -15,9 +15,12 @@ layout(binding = 2, rgba16f) uniform writeonly image2DArray outPosition;
 layout(binding = 3, rgba16f) uniform writeonly image2DArray outNormal;
 
 // Push Constants: 全分辨率尺寸
+// (16B 下限: D3D12 root constants 按 16B cbuffer register 排布)
 layout(push_constant) uniform PushConstants {
     int fullWidth;
     int fullHeight;
+    int pad0;
+    int pad1;
 } pc;
 
 void main() {

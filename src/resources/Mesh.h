@@ -2,8 +2,10 @@
 
 #include <vector>
 #include <string>
+#include <array>
+#include <cstddef>
 #include <glm/glm.hpp>
-#include <vulkan/vulkan.h>
+#include "RHITypes.h"
 
 struct Vertex {
     glm::vec3 pos;
@@ -11,44 +13,27 @@ struct Vertex {
     glm::vec2 texCoord;
     glm::vec3 tangent;
 
-    static VkVertexInputBindingDescription getBindingDescription() {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return bindingDescription;
+    // ========== RHI 顶点输入描述（单一事实来源）==========
+    // 所有消费 Mesh 顶点数据的 pass（Forward/GBuffer/NaniteDebug/Water…）
+    // 都必须通过下面两个 helper 描述 vertex input，禁止再手写偏移量。
+    static constexpr uint32_t getStride() { return sizeof(Vertex); }
+
+    struct RHIAttributeDesc {
+        uint32_t   binding;
+        uint32_t   location;
+        RHIFormat  format;
+        uint32_t   offset;
+    };
+
+    static std::array<RHIAttributeDesc, 4> getRHIAttributes() {
+        return {{
+            { 0, 0, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, pos)      },
+            { 0, 1, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, normal)   },
+            { 0, 2, RHIFormat::R32G32_SFLOAT,    offsetof(Vertex, texCoord) },
+            { 0, 3, RHIFormat::R32G32B32_SFLOAT, offsetof(Vertex, tangent)  },
+        }};
     }
 
-    static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
-        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
-
-        // Position
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        // Normal
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, normal);
-
-        // Texture coordinate
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
-
-        // Tangent
-        attributeDescriptions[3].binding = 0;
-        attributeDescriptions[3].location = 3;
-        attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[3].offset = offsetof(Vertex, tangent);
-
-        return attributeDescriptions;
-    }
-    
     // 用于去重的比较运算符
     bool operator==(const Vertex& other) const {
         return pos == other.pos && normal == other.normal && 
