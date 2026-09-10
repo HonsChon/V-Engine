@@ -57,6 +57,11 @@ vec3 worldToScreen(vec3 worldPos) {
     
     vec3 screenPos;
     screenPos.xy = ndc.xy * 0.5 + 0.5;  // UV [0,1]
+    // D3D 的 NDC Y 向上, 而纹理/屏幕 UV 原点在左上, 需翻转;
+    // Vulkan 的投影已由 applyApiYFlip 翻转 (projection[1][1] < 0), 保持不变。
+    if (ubo.projection[1][1] > 0.0) {
+        screenPos.y = 1.0 - screenPos.y;
+    }
     screenPos.z = ndc.z;  // NDC depth [0,1] for Vulkan
     
     return screenPos;

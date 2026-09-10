@@ -418,9 +418,15 @@ void DX12RHICommandBuffer::fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64
     }
 
     // UAV clear over exactly [offset, offset+size).
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
-    D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
-    if (!device_->allocateResourceDescriptors(1, &cpu, &gpu)) {
+    // ClearUnorderedAccessViewUint takes a GPU handle from the currently bound
+    // shader-visible heap AND a CPU handle that must live on a non-shader-
+    // visible heap (shader-visible heaps are CPU write-only). Create the view
+    // on a CPU-only descriptor, then copy it into the shader-visible ring.
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE srvGpu = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE uavCpu = {};
+    if (!device_->allocateResourceDescriptors(1, &srvCpu, &srvGpu) ||
+        !device_->allocateCpuUAVDescriptors(1, &uavCpu)) {
         throw std::runtime_error("[DX12RHICommandBuffer] descriptor ring exhausted (fillBuffer)");
     }
     setDescriptorHeaps();
@@ -433,14 +439,16 @@ void DX12RHICommandBuffer::fillBuffer(RHIBuffer* buffer, uint64_t offset, uint64
     uav.Buffer.StructureByteStride = 0;
     uav.Buffer.CounterOffsetInBytes = 0;
     uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-    device_->getDevice()->CreateUnorderedAccessView(dxBuf->getD3D12Resource(), nullptr, &uav, cpu);
+    device_->getDevice()->CreateUnorderedAccessView(dxBuf->getD3D12Resource(), nullptr, &uav, uavCpu);
+    device_->getDevice()->CopyDescriptorsSimple(1, srvCpu, uavCpu,
+                                                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     const D3D12_RESOURCE_STATES prior = dxBuf->getCurrentState();
     transitionTo(dxBuf->getD3D12Resource(), prior, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     dxBuf->setCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     const UINT values[4] = { data, data, data, data };
-    cmdList_->ClearUnorderedAccessViewUint(gpu, cpu, dxBuf->getD3D12Resource(),
+    cmdList_->ClearUnorderedAccessViewUint(srvGpu, uavCpu, dxBuf->getD3D12Resource(),
                                            values, 0, nullptr);
 
     transitionTo(dxBuf->getD3D12Resource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, prior);
@@ -493,7 +501,7 @@ void DX12RHICommandBuffer::blitImage(RHITexture* src, RHIImageLayout /*srcLayout
     ensureState(dxSrc, shaderReadStates());
     ensureState(dxDst, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    std::shared_ptr<DX12RHIPipeline> blitPipeline = device_->getOrCreateBlitPipeline();
+    std::shared_ptr<DX12RHIPipeline> blitPipeline = device_->getOrCreateBlitPipeline(dxDst->getFormat());
     bindPipelineInternal(blitPipeline.get(), false);
 
     setDescriptorHeaps();
@@ -529,6 +537,15 @@ void DX12RHICommandBuffer::bufferBarrier(RHIBuffer* buffer, uint64_t /*size*/,
 
     auto stateFor = [&](RHIAccessFlags access) -> D3D12_RESOURCE_STATES {
         const uint32_t a = static_cast<uint32_t>(access);
+        // READBACK-heap buffers can only ever be COMMON / COPY_DEST (the GPU
+        // cannot read them): clamp every other requested state back to COMMON
+        // so engine-side "barrier the readback buffer to shader-read" calls
+        // (no-ops on Vulkan) stay legal on D3D12.
+        if (dxBuf->getMemoryUsage() == RHIMemoryUsage::GPUToCPU) {
+            return (a & static_cast<uint32_t>(RHIAccessFlags::TransferWrite))
+                ? D3D12_RESOURCE_STATE_COPY_DEST
+                : D3D12_RESOURCE_STATE_COMMON;
+        }
         if (a & static_cast<uint32_t>(RHIAccessFlags::ShaderWrite)) {
             return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         }
@@ -582,7 +599,7 @@ void DX12RHICommandBuffer::clearColorImage(RHITexture* texture, float r, float g
     const D3D12_RESOURCE_STATES prior = dxTex->getCurrentState();
     ensureState(dxTex, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    std::shared_ptr<DX12RHIPipeline> clearPipeline = device_->getOrCreateClearPipeline();
+    std::shared_ptr<DX12RHIPipeline> clearPipeline = device_->getOrCreateClearPipeline(dxTex->getFormat());
     bindPipelineInternal(clearPipeline.get(), false);
 
     const float color[4] = { r, g, b, a };

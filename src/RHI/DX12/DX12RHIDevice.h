@@ -17,6 +17,7 @@
 #include <GLFW/glfw3.h>
 
 #include <vector>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -152,14 +153,23 @@ public:
     ID3D12DescriptorHeap* getShaderVisibleResourceHeap() const { return resourceRing_.heap.Get(); }
     ID3D12DescriptorHeap* getShaderVisibleSamplerHeap() const  { return samplerRing_.heap.Get(); }
 
+    /// @param persistent  true for descriptors that live for the app lifetime
+    ///        (binding groups): they raise the ring's persistent watermark so a
+    ///        transient wrap can never overwrite them.
     bool allocateResourceDescriptors(UINT count,
                                      D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
-                                     D3D12_GPU_DESCRIPTOR_HANDLE* gpu);
+                                     D3D12_GPU_DESCRIPTOR_HANDLE* gpu,
+                                     bool persistent = false);
     bool allocateSamplerDescriptors(UINT count,
                                     D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
-                                    D3D12_GPU_DESCRIPTOR_HANDLE* gpu);
+                                    D3D12_GPU_DESCRIPTOR_HANDLE* gpu,
+                                    bool persistent = false);
     bool allocateRTVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu);
     bool allocateDSVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu);
+    /// CPU-only CBV/SRV/UAV descriptors for ClearUnorderedAccessView*: the clear
+    /// CPU handle must live on a non-shader-visible heap (shader-visible heaps
+    /// are write-only for the CPU).
+    bool allocateCpuUAVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu);
 
     UINT getDescriptorIncrement(D3D12_DESCRIPTOR_HEAP_TYPE type) const {
         return device->GetDescriptorHandleIncrementSize(type);
@@ -175,10 +185,12 @@ public:
     void resetCommandBuffer(ID3D12GraphicsCommandList* cmdList);
 
     // ---- Lazily-created scaled-blit pipeline (vkCmdBlit parity) ----
-    std::shared_ptr<DX12RHIPipeline> getOrCreateBlitPipeline();
+    // Keyed by the destination RTV format: the PSO render-target format must
+    // match the transient RTV bound by blitImage (clearColorImage likewise).
+    std::shared_ptr<DX12RHIPipeline> getOrCreateBlitPipeline(RHIFormat rtvFormat);
     /// Fullscreen triangle that writes a constant color (used by clearColorImage,
     /// which avoids the ALLOW_UNORDERED_ACCESS requirement of UAV clears).
-    std::shared_ptr<DX12RHIPipeline> getOrCreateClearPipeline();
+    std::shared_ptr<DX12RHIPipeline> getOrCreateClearPipeline(RHIFormat rtvFormat);
 
     /// Mark the current open descriptor batch as submitted at the next fence value.
     /// Called from submitGraphicsQueue.
@@ -196,6 +208,10 @@ private:
         UINT   cursor = 0;
         UINT   segmentDescriptors = 0;
         bool   shaderVisible = false;
+        // High-water mark of persistent allocations. A transient wrap resets the
+        // cursor to this value instead of 0 so binding-group descriptors are
+        // never overwritten by per-frame transient descriptors.
+        UINT   persistentEnd = 0;
         // Per segment: fence value of the submit that last used it (0 = never).
         std::vector<uint64_t> segmentSignal;
     };
@@ -222,7 +238,7 @@ private:
     // ---- descriptor ring plumbing ----
     void ringWaitForSegment(const RingHeap& ring, UINT segment);
     void ringFlushAll(const RingHeap& ring);
-    bool ringAllocate(RingHeap& ring, UINT count,
+    bool ringAllocate(RingHeap& ring, UINT count, bool persistent,
                       D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
                       D3D12_GPU_DESCRIPTOR_HANDLE* gpu);
 
@@ -252,17 +268,18 @@ private:
     RingHeap samplerRing_;    // SAMPLER,   shader-visible (4 x 128)
     RingHeap rtvRing_;        // RTV,       CPU-only      (4 x 64)
     RingHeap dsvRing_;        // DSV,       CPU-only      (4 x 32)
+    RingHeap cpuUavRing_;     // CBV/SRV/UAV, CPU-only    (4 x 16)
 
     std::vector<CommandListPair> commandLists_;
 
     ComPtr<ID3D12CommandAllocator> singleTimeAllocator_;
     ComPtr<ID3D12GraphicsCommandList> singleTimeList_;
 
-    std::shared_ptr<DX12RHIPipeline> blitPipeline_;
-    std::shared_ptr<DX12RHIPipeline> clearPipeline_;
+    // Internal blit/clear pipelines cached per render-target format.
+    std::map<RHIFormat, std::shared_ptr<DX12RHIPipeline>> blitPipelines_;
+    std::map<RHIFormat, std::shared_ptr<DX12RHIPipeline>> clearPipelines_;
 
-    // WinPixEventRuntime (optional, loaded dynamically).
-    bool pixLoaded_ = false;
+    // WinPixEventRuntime (optional, loaded dynamically).    bool pixLoaded_ = false;
 
 #ifdef NDEBUG
     static constexpr bool enableValidationLayers_ = false;

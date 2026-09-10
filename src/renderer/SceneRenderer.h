@@ -117,6 +117,9 @@ public:
     /** 更新所有 Uniform（每帧调用一次） */
     void updateUniforms(uint32_t frameIndex);
 
+    /** 总时间（秒），用于水面等时间驱动的动画 */
+    void setTotalTime(float t) { m_totalTime = t; }
+
     // ========== 窗口 resize ==========
     
     void onResize(uint32_t width, uint32_t height);

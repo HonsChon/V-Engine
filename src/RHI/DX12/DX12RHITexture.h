@@ -50,8 +50,19 @@ public:
     std::shared_ptr<RHITexture> createLayerView(uint32_t layer) override;
 
     ID3D12Resource*       getD3D12Resource() const { return resource_.Get(); }
-    D3D12_RESOURCE_STATES getCurrentState() const  { return currentState_; }
-    void                  setCurrentState(D3D12_RESOURCE_STATES s) { currentState_ = s; }
+    // Layer views share the parent resource's state tracker: transitions are
+    // recorded against the same ID3D12Resource, so tracking must be common or
+    // the second layer view would start from a stale (creation-time) state.
+    D3D12_RESOURCE_STATES getCurrentState() const {
+        return stateShare_ ? stateShare_->currentState_ : currentState_;
+    }
+    void setCurrentState(D3D12_RESOURCE_STATES s) {
+        if (stateShare_) {
+            stateShare_->currentState_ = s;
+        } else {
+            currentState_ = s;
+        }
+    }
 
     bool     isLayerView() const      { return isView_; }
     uint32_t getViewBaseLayer() const { return baseLayer_; }
@@ -69,6 +80,8 @@ protected:
     DX12RHIDevice*                        device_;
     Microsoft::WRL::ComPtr<ID3D12Resource> resource_;
     D3D12_RESOURCE_STATES                 currentState_ = D3D12_RESOURCE_STATE_COMMON;
+    /// When set (layer views), currentState_ lives on the parent texture.
+    DX12RHITexture*                       stateShare_ = nullptr;
     uint32_t width_       = 1;
     uint32_t height_      = 1;
     uint32_t depth_       = 1;

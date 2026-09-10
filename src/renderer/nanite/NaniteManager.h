@@ -143,8 +143,7 @@ private:
     std::shared_ptr<RHIBuffer> m_uniformBuffer;
     std::shared_ptr<RHIBuffer> m_visibleIndicesBuffer;
     std::shared_ptr<RHIBuffer> m_counterBuffer;
-    std::shared_ptr<RHIBuffer> m_readbackBuffer;
-    
+
     // RHI buffer for cluster data (used by ClusterCullingPass)
     std::shared_ptr<RHIBuffer> m_clusterDataBufferRHI;
     

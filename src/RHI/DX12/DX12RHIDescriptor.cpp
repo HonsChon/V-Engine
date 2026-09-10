@@ -65,12 +65,16 @@ DX12RHIBindingGroup::DX12RHIBindingGroup(DX12RHIDevice* device, RHIBindingLayout
     samplerSize_   = device_->getDescriptorIncrement(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     if (resourceCount_ > 0) {
-        if (!device_->allocateResourceDescriptors(resourceCount_, &resourceCpuBase_, &resourceGpuBase_)) {
+        // Binding groups live for the app lifetime: allocate as persistent so a
+        // transient ring wrap never overwrites their descriptors.
+        if (!device_->allocateResourceDescriptors(resourceCount_, &resourceCpuBase_, &resourceGpuBase_,
+                                                  /*persistent=*/true)) {
             throw std::runtime_error("[DX12RHIBindingGroup] resource descriptor ring exhausted");
         }
     }
     if (samplerCount_ > 0) {
-        if (!device_->allocateSamplerDescriptors(samplerCount_, &samplerCpuBase_, &samplerGpuBase_)) {
+        if (!device_->allocateSamplerDescriptors(samplerCount_, &samplerCpuBase_, &samplerGpuBase_,
+                                                 /*persistent=*/true)) {
             throw std::runtime_error("[DX12RHIBindingGroup] sampler descriptor ring exhausted");
         }
     }
@@ -248,9 +252,11 @@ void DX12RHIBindingGroup::writeBufferView(const RHIBindingEntry& entry,
                 uav.Buffer.NumElements = static_cast<UINT>(size / dxBuf->desc_.structStride);
                 uav.Buffer.StructureByteStride = dxBuf->desc_.structStride;
             } else {
-                // Raw / typed R32_UINT fallback (RWByteAddressBuffer style).
-                uav.Format = (dxBuf->desc_.format == RHIFormat::R32_UINT)
-                           ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R32_UINT;
+                // Raw view. spirv-cross lowers the engine's SSBOs to
+                // RWByteAddressBuffer (raw loads/stores at byte offsets), which
+                // D3D12 only accepts against a RAW UAV (R32_TYPELESS + RAW flag).
+                uav.Format = DXGI_FORMAT_R32_TYPELESS;
+                uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
                 uav.Buffer.FirstElement = static_cast<UINT>(offset / 4);
                 uav.Buffer.NumElements = static_cast<UINT>(std::max<uint64_t>(size / 4, 1));
                 uav.Buffer.StructureByteStride = 0;

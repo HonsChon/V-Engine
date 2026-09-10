@@ -143,13 +143,25 @@ void VulkanRHIBindingGroup::updateBuffer(uint32_t binding, RHIBuffer* buffer,
     bufInfo.offset = offset;
     bufInfo.range = (range == 0) ? VK_WHOLE_SIZE : range;
 
+    // Descriptor type must match the layout: storage buffers (compute SSBOs)
+    // need VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, not UNIFORM_BUFFER.
+    VkDescriptorType vkDescType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    if (layout_) {
+        for (const auto& entry : layout_->getDesc().entries) {
+            if (entry.binding == binding) {
+                vkDescType = toVkDescriptorType(entry.type);
+                break;
+            }
+        }
+    }
+
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = descriptorSet_;
     write.dstBinding = binding;
     write.dstArrayElement = 0;
     write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.descriptorType = vkDescType;
     write.pBufferInfo = &bufInfo;
 
     vkUpdateDescriptorSets(device_->getVkDevice(), 1, &write, 0, nullptr);

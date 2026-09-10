@@ -61,9 +61,14 @@ public:
     };
 
     // Push constants
+    // Note: 16B minimum each - D3D12 root 32-bit constants are laid out in
+    // 16B cbuffer registers (the 8-byte blocks below would otherwise read
+    // uninitialized registers on the DX12 backend).
     struct DeinterleavePushConstants {
         int fullWidth;
         int fullHeight;
+        int pad0 = 0;
+        int pad1 = 0;
     };
 
     struct SSAOPushConstants {
@@ -76,6 +81,8 @@ public:
     struct ReinterleavePushConstants {
         int fullWidth;
         int fullHeight;
+        int pad0 = 0;
+        int pad1 = 0;
     };
 
     SSAOPass(RHIDevice* rhiDevice,

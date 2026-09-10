@@ -12,6 +12,7 @@
 #include "DX12TypeConversions.h"
 
 #include <stdexcept>
+#include <iostream>
 
 using namespace DX12TypeConversions;
 
@@ -62,10 +63,15 @@ void DX12RHISwapChain::createSwapChainInternal() {
     swapChainDesc.AlphaMode   = DXGI_ALPHA_MODE_IGNORE;
 
     ComPtr<IDXGISwapChain1> swapChain1;
-    if (FAILED(device_->getFactory()->CreateSwapChainForHwnd(
+    HRESULT hr = device_->getFactory()->CreateSwapChainForHwnd(
             device_->getCommandQueue(), hwnd, &swapChainDesc,
-            nullptr, nullptr, &swapChain1))) {
-        throw std::runtime_error("[DX12RHISwapChain] failed to create swap chain");
+            nullptr, nullptr, &swapChain1);
+    if (FAILED(hr)) {
+        char buf[128] = {};
+        snprintf(buf, sizeof(buf),
+                 "[DX12RHISwapChain] failed to create swap chain (HRESULT 0x%08lX)",
+                 static_cast<unsigned long>(hr));
+        throw std::runtime_error(buf);
     }
     device_->getFactory()->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
 
@@ -172,8 +178,8 @@ void DX12RHISwapChain::createViewsAndWrappers() {
 
 RHISwapChainResult DX12RHISwapChain::acquireNextImage(void* /*signalSemaphore*/,
                                                       uint32_t* outImageIndex) {
-    if (width_ == 0 || height_ == 0) {
-        return RHISwapChainResult::OutOfDate;   // minimized / not yet sized
+    if (width_ == 0 || height_ == 0 || !swapChain_) {
+        return RHISwapChainResult::OutOfDate;   // minimized / not yet sized / failed recreate
     }
     // DXGI FLIP model: the swapchain hands us the next buffer index directly.
     const UINT index = swapChain_->GetCurrentBackBufferIndex();
@@ -235,15 +241,24 @@ void DX12RHISwapChain::recreate(uint32_t width, uint32_t height) {
     width_ = width;
     height_ = height;
 
-    HRESULT hr = swapChain_->ResizeBuffers(bufferCount_, width_, height_,
-                                           toDXGIFormat(format_),
-                                           0 /* DXGI_SWAP_CHAIN_FLAG_NONE */);
-    if (FAILED(hr)) {
+    HRESULT hr = S_OK;
+    if (swapChain_) {
+        hr = swapChain_->ResizeBuffers(bufferCount_, width_, height_,
+                                       toDXGIFormat(format_),
+                                       0 /* DXGI_SWAP_CHAIN_FLAG_NONE */);
+    } else {
+        // Previous fallback lost the swapchain (e.g. transient device-removed);
+        // recreate re-enters with a null swapchain.
+        hr = E_FAIL;
+    }
+    if (FAILED(hr) || !swapChain_) {
         // Fall back: full teardown + recreation.
+        std::cerr << "[DX12RHISwapChain] ResizeBuffers failed (HRESULT 0x"
+                  << std::hex << static_cast<unsigned long>(hr) << std::dec
+                  << "); falling back to full recreation\n";
         swapChain_.Reset();
         createSwapChainInternal();
     }
-
     createViewsAndWrappers();
 }
 

@@ -649,6 +649,9 @@ if(WIN32)
         set(DX12_SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/bin/shaders_dx12")
         set(DX12_SHADER_CACHE_DIR "${CMAKE_BINARY_DIR}/shaders_dx12_intermediate")
         file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR})
+        file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR}/ssao)
+        file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR}/culling)
+        file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR}/nanite)
         file(MAKE_DIRECTORY ${DX12_SHADER_CACHE_DIR})
 
         # ---- 通用单 shader 编译链 ----
@@ -656,8 +659,12 @@ if(WIN32)
         # (push-constant cbuffer 注入 register(b0, space=N)) -> dxc(.dxil)
         # 产物名与引擎运行时约定一致: pass 硬编码 "shaders/X.spv", DX12RHIShader
         # 加载时转译为 "shaders_dx12/X.dxil"。
-        # 参数: <GLSL 全路径> <vs|ps|cs> <pushConstantSpace=所属管线 layout 数> <dxil 相对名> <输出列表变量名>
-        function(dx12_compile_shader DX12F_GLSL DX12F_STAGE DX12F_PC_SPACE DX12F_DXIL_REL DX12F_OUTVAR)
+        # 参数: <GLSL 全路径> <vs|ps|cs> <pushConstantSpace=所属管线 layout 数>
+        #       <dxil 相对名> <flipY: 0|1> <输出列表变量名>
+        # flipY=1 时给 spirv-cross 加 --flip-vert-y: 全屏 pass 的顶点着色器按
+        # Vulkan NDC 约定生成 (uv.y=0 -> NDC y=-1), 而 D3D 的 NDC y=-1 在屏幕
+        # 底部, 需翻转才能与 Vulkan 采样方向一致 (仅影响 DX12 的 HLSL/DXIL 链)。
+        function(dx12_compile_shader DX12F_GLSL DX12F_STAGE DX12F_PC_SPACE DX12F_DXIL_REL DX12F_FLIP_Y DX12F_OUTVAR)
             # Cache intermediates are named after the ASCII dxil output (paths
             # may contain non-ASCII repo segments, which some tools mishandle).
             string(REPLACE "/" "_" DX12F_STEM ${DX12F_DXIL_REL})
@@ -674,30 +681,36 @@ if(WIN32)
                 set(DX12F_PROFILE "ps_6_0")
             endif()
 
+            set(DX12F_CROSS_ARGS --hlsl --shader-model 60)
+            if(DX12F_FLIP_Y)
+                list(APPEND DX12F_CROSS_ARGS --flip-vert-y)
+            endif()
+
             add_custom_command(
                 OUTPUT ${DX12F_DXIL}
                 COMMAND ${DX12_GLSLC} ${DX12F_GLSL} -o ${DX12F_SPV}
-                COMMAND ${DX12_SPIRV_CROSS} ${DX12F_SPV} --hlsl --shader-model 60 --output ${DX12F_HLSL}
+                COMMAND ${DX12_SPIRV_CROSS} ${DX12F_SPV} ${DX12F_CROSS_ARGS} --output ${DX12F_HLSL}
                 COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
                     "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
                     -InFile ${DX12F_HLSL} -OutFile ${DX12F_HLSL}
                     -PushConstantSpace ${DX12F_PC_SPACE}
                 COMMAND ${DX12_DXC} -T ${DX12F_PROFILE} -E main -Fo ${DX12F_DXIL} ${DX12F_HLSL}
                 DEPENDS ${DX12F_GLSL} "${CMAKE_SOURCE_DIR}/scripts/dx12/inject_hlsl.ps1"
-                COMMENT "DX12 shader: ${DX12F_GLSL} -> shaders_dx12/${DX12F_DXIL_REL} (space=${DX12F_PC_SPACE})"
+                COMMENT "DX12 shader: ${DX12F_GLSL} -> shaders_dx12/${DX12F_DXIL_REL} (space=${DX12F_PC_SPACE}, flipY=${DX12F_FLIP_Y})"
             )
             set(${DX12F_OUTVAR} ${${DX12F_OUTVAR}} ${DX12F_DXIL} PARENT_SCOPE)
         endfunction()
 
         # ---- DX12 smoke shader 集 (demo + 设备内置 blit/clear 管线) ----
-        # <glsl 名>|<stage>|<pushConstantSpace>|<dxil 相对名>
+        # <glsl 名>|<stage>|<pushConstantSpace>|<dxil 相对名>|<flipY: 0|1>
+        # blit 是全屏三角形, 需 flipY 才能在 D3D 下与 Vulkan 采样方向一致。
         set(DX12_SMOKE_SHADERS
-            demo.vert|vs|2|demo_vert.dxil
-            demo.frag|ps|2|demo_frag.dxil
-            blit.vert|vs|0|blit_vert.dxil
-            blit.frag|ps|0|blit_frag.dxil
-            clear.vert|vs|0|clear_vert.dxil
-            clear.frag|ps|0|clear_frag.dxil
+            demo.vert|vs|2|demo_vert.dxil|0
+            demo.frag|ps|2|demo_frag.dxil|0
+            blit.vert|vs|0|blit_vert.dxil|1
+            blit.frag|ps|0|blit_frag.dxil|0
+            clear.vert|vs|0|clear_vert.dxil|0
+            clear.frag|ps|0|clear_frag.dxil|0
         )
         set(DX12_SMOKE_OUTPUTS)
         foreach(SHADER_SPEC ${DX12_SMOKE_SHADERS})
@@ -706,17 +719,39 @@ if(WIN32)
             list(GET SHADER_PARTS 1 SHADER_STAGE)
             list(GET SHADER_PARTS 2 SHADER_PC_SPACE)
             list(GET SHADER_PARTS 3 SHADER_DXIL_NAME)
+            list(GET SHADER_PARTS 4 SHADER_FLIP_Y)
             dx12_compile_shader("${DX12_SMOKE_GLSL_DIR}/${SHADER_SRC}"
-                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} DX12_SMOKE_OUTPUTS)
+                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} ${SHADER_FLIP_Y} DX12_SMOKE_OUTPUTS)
         endforeach()
 
         add_custom_target(CompileDX12Shaders ALL DEPENDS ${DX12_SMOKE_OUTPUTS})
 
-        # ---- 引擎 shader 集 (默认 Forward 渲染路径; 其余 pass 随 Phase 4 逐个加入) ----
+        # ---- 引擎 shader 集 (Phase 4: deferred/SSAO/culling/Nanite 全量) ----
         # pushConstantSpace = 该 shader 所属管线的 binding layout 数 (见 DX12-RHI-Notes §11)
+        # dxil 相对名须与 DX12RHIShader 的运行时转译一致:
+        #   "shaders/<rel>.spv" -> "shaders_dx12/<rel>.dxil"
+        # 末列 flipY=1: 全屏 pass 顶点着色器 (Vulkan NDC 约定, D3D 需翻转 Y)
         set(DX12_ENGINE_SHADERS
-            pbr.vert|vs|2|pbr_vert.dxil
-            pbr.frag|ps|2|pbr_frag.dxil
+            pbr.vert|vs|2|pbr_vert.dxil|0
+            pbr.frag|ps|2|pbr_frag.dxil|0
+            gbuffer.vert|vs|2|gbuffer_vert.dxil|0
+            gbuffer.frag|ps|2|gbuffer_frag.dxil|0
+            deferred_lighting.vert|vs|1|deferred_lighting_vert.dxil|1
+            deferred_lighting.frag|ps|1|deferred_lighting_frag.dxil|0
+            water.vert|vs|1|water_vert.dxil|0
+            water.frag|ps|1|water_frag.dxil|0
+            ssr.vert|vs|1|ssr_vert.dxil|1
+            ssr.frag|ps|1|ssr_frag.dxil|0
+            ssao/ssao.vert|vs|1|ssao/ssao_vert.dxil|1
+            ssao/ssao.frag|ps|1|ssao/ssao_frag.dxil|0
+            ssao/ssao_blur.vert|vs|1|ssao/ssao_blur_vert.dxil|1
+            ssao/ssao_blur.frag|ps|1|ssao/ssao_blur_frag.dxil|0
+            ssao/ssao_deinterleave.comp|cs|1|ssao/ssao_deinterleave_comp.dxil|0
+            ssao/ssao_reinterleave.comp|cs|1|ssao/ssao_reinterleave_comp.dxil|0
+            culling/frustum_culling.comp|cs|1|culling/frustum_culling.comp.dxil|0
+            nanite/cluster_culling.comp|cs|1|nanite/cluster_culling.comp.dxil|0
+            nanite/cluster_debug.vert|vs|1|nanite/cluster_debug_vert.dxil|0
+            nanite/cluster_debug.frag|ps|1|nanite/cluster_debug_frag.dxil|0
         )
         set(DX12_ENGINE_OUTPUTS)
         foreach(SHADER_SPEC ${DX12_ENGINE_SHADERS})
@@ -725,12 +760,16 @@ if(WIN32)
             list(GET SHADER_PARTS 1 SHADER_STAGE)
             list(GET SHADER_PARTS 2 SHADER_PC_SPACE)
             list(GET SHADER_PARTS 3 SHADER_DXIL_NAME)
+            list(GET SHADER_PARTS 4 SHADER_FLIP_Y)
             dx12_compile_shader("${CMAKE_SOURCE_DIR}/shaders/${SHADER_SRC}"
-                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} DX12_ENGINE_OUTPUTS)
+                                ${SHADER_STAGE} ${SHADER_PC_SPACE} ${SHADER_DXIL_NAME} ${SHADER_FLIP_Y} DX12_ENGINE_OUTPUTS)
         endforeach()
 
         add_custom_target(CompileDX12EngineShaders ALL DEPENDS ${DX12_ENGINE_OUTPUTS})
-        add_dependencies(${PROJECT_NAME} CompileDX12EngineShaders)
+        # The engine's internal blit/clear pipelines (blitImage/clearColorImage)
+        # load shaders_dx12/blit_*.dxil / clear_*.dxil, which are compiled from
+        # the smoke shader set — the engine target must build those too.
+        add_dependencies(${PROJECT_NAME} CompileDX12EngineShaders CompileDX12Shaders)
     else()
         message(WARNING "DX12 shader tools (glslc/spirv-cross/dxc) not found; skipping DX12 shader compilation")
     endif()
@@ -932,6 +971,41 @@ if(GLSLC)
             message(STATUS "  Compute Shader: ${SHADER_FILE} -> ${SHADER_FILE}.spv")
         else()
             message(WARNING "Compute shader file not found: ${SHADER_SOURCE}")
+        endif()
+    endforeach()
+
+    # 编译 Nanite 图形着色器 (cluster_debug; 保持 nanite/ 子目录结构, dot->underscore)
+    set(NANITE_SHADER_SOURCES
+        nanite/cluster_debug.vert
+        nanite/cluster_debug.frag
+    )
+    foreach(SHADER_FILE ${NANITE_SHADER_SOURCES})
+        set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/shaders/${SHADER_FILE}")
+
+        get_filename_component(SHADER_SUBDIR ${SHADER_FILE} DIRECTORY)
+        get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
+
+        if(SHADER_SUBDIR)
+            file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}/${SHADER_SUBDIR}")
+        endif()
+
+        string(REPLACE "." "_" SHADER_OUTPUT_NAME ${SHADER_NAME})
+        set(SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER_SUBDIR}/${SHADER_OUTPUT_NAME}.spv")
+
+        if(EXISTS ${SHADER_SOURCE})
+            set(SHADER_SOURCE_DIR_OUTPUT "${CMAKE_SOURCE_DIR}/shaders/${SHADER_SUBDIR}/${SHADER_OUTPUT_NAME}.spv")
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+                COMMAND ${CMAKE_COMMAND} -E copy ${SHADER_OUTPUT} ${SHADER_SOURCE_DIR_OUTPUT}
+                DEPENDS ${SHADER_SOURCE}
+                COMMENT "Compiling Nanite shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv"
+            )
+
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+            message(STATUS "  Nanite Shader: ${SHADER_FILE} -> ${SHADER_OUTPUT_NAME}.spv")
+        else()
+            message(WARNING "Nanite shader file not found: ${SHADER_SOURCE}")
         endif()
     endforeach()
     

@@ -61,7 +61,6 @@ void NaniteManager::cleanup() {
     m_uniformBuffer.reset();
     m_visibleIndicesBuffer.reset();
     m_counterBuffer.reset();
-    m_readbackBuffer.reset();
     
     // 清理缓存
     m_meshCache.clear();
@@ -348,7 +347,6 @@ void NaniteManager::uploadToGPU() {
     
     // 创建或更新Cluster 数据缓冲区 (RHI)
     uint64_t clusterBufferSize = sizeof(GPUClusterData) * m_totalClusterCount;
-    
     if (m_rhiDevice) {
         RHIBufferDesc d{};
         d.size = clusterBufferSize;
@@ -387,14 +385,9 @@ void NaniteManager::uploadToGPU() {
     }
     
     // 创建 readback 缓冲区
-    {
-        RHIBufferDesc desc{};
-        desc.size = sizeof(uint32_t) * (m_totalClusterCount + 1); // +1 for counter
-        desc.usage = RHIBufferUsage::Storage;
-        desc.memoryUsage = RHIMemoryUsage::GPUToCPU;
-        m_readbackBuffer = m_rhiDevice->createBuffer(desc);
-    }
-    
+    // (removed: Storage on a GPUToCPU/READBACK heap is illegal on D3D12, and this
+    //  buffer was never consumed - the culling pass owns its own readback pair)
+
     // 将cluster buffer 绑定到culling pass (RHI)
     if (m_cullingPass && m_clusterDataBufferRHI) {
         m_cullingPass->setClusterBuffer(m_clusterDataBufferRHI.get(), m_totalClusterCount);

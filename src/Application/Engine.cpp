@@ -238,18 +238,6 @@ void Engine::setupInputCallbacks() {
         if (action != GLFW_PRESS) return;
         auto& settings = m_renderer->getSettings();
 
-#if defined(VENGINE_RHI_DX12)
-        // Deferred shading / GPU culling / Nanite run on .dxil shaders that land
-        // in Phase 4 — ignore the toggles on the DX12 backend for now so users
-        // cannot enter a pipeline whose shaders do not exist yet.
-        if (key >= GLFW_KEY_5 && key <= GLFW_KEY_9) {
-            std::cout << "[Engine] Key " << static_cast<char>(key)
-                      << ": deferred/GPU-driven/Nanite features arrive on the DX12 backend "
-                         "in Phase 4 (skipped)\n";
-            return;
-        }
-#endif
-
         switch (key) {
         case GLFW_KEY_ESCAPE:
             requestExit(); break;
@@ -368,6 +356,9 @@ void Engine::mainLoop() {
     m_lastFrameTime = now;
     m_totalTime = now;
 
+    // Water (and other time-driven passes) read SceneRenderer::m_totalTime.
+    if (m_renderer) m_renderer->setTotalTime(m_totalTime);
+
     // Poll events
     m_window->pollEvents();
 
@@ -471,7 +462,16 @@ void Engine::recreateSwapChain() {
 
     m_rhiDevice->waitIdle();
 
-    m_rhiSwapChain->recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    try {
+        m_rhiSwapChain->recreate(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    } catch (const std::exception& e) {
+        // Transient DXGI failures (e.g. DXGI_ERROR_DEVICE_REMOVED/OUT_OF_DATE
+        // during rapid resizes) must not kill the app: retry on the next frame.
+        std::cerr << "[Engine] SwapChain recreate failed: " << e.what()
+                  << " (retrying)\n";
+        m_framebufferResized = true;
+        return;
+    }
 
     m_imagesInFlight.clear();
     m_imagesInFlight.resize(m_rhiSwapChain->getImageCount(), nullptr);

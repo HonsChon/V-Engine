@@ -57,11 +57,13 @@ layout(set = 0, binding = 0) uniform CullingUniforms {
 
 // ============== 缓冲区 ==============
 
-layout(set = 0, binding = 1) readonly buffer ClusterBuffer {
+// (无 readonly: DX12 端 RHI StorageBuffer 一律按 UAV 描述符/root table 绑定;
+//  readonly 会使 spirv-cross 输出 SRV 而 HLSL 侧与 UAV 模型失配)
+layout(set = 0, binding = 1) buffer ClusterBuffer {
     ClusterData clusters[];
 };
 
-layout(set = 0, binding = 2) readonly buffer TransformBuffer {
+layout(set = 0, binding = 2) buffer TransformBuffer {
     mat4 transforms[];
 };
 

@@ -25,6 +25,7 @@ constexpr UINT kResourceRingTotal     = 8192;   // 4 x 2048 CBV/SRV/UAV
 constexpr UINT kSamplerRingTotal      = 512;    // 4 x 128 SAMPLER
 constexpr UINT kRtvRingTotal          = 256;    // 4 x 64  RTV (CPU only)
 constexpr UINT kDsvRingTotal          = 128;    // 4 x 32  DSV (CPU only)
+constexpr UINT kCpuUavRingTotal       = 64;     // 4 x 16  CBV/SRV/UAV, CPU only (UAV clears)
 
 // WinPixEventRuntime markers (loaded on demand; absent -> debug labels are no-ops).
 using PixBeginFn = void(__stdcall*)(ID3D12GraphicsCommandList*, UINT64, const char*);
@@ -188,6 +189,7 @@ void DX12RHIDevice::createDescriptorRings() {
     createHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,      kSamplerRingTotal,  true, samplerRing_);
     createHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV,          kRtvRingTotal,      false, rtvRing_);
     createHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV,          kDsvRingTotal,      false, dsvRing_);
+    createHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kCpuUavRingTotal,    false, cpuUavRing_);
 }
 
 void DX12RHIDevice::createSingleTimeCommandObjects() {
@@ -287,7 +289,7 @@ void DX12RHIDevice::ringFlushAll(const RingHeap& ring) {
     }
 }
 
-bool DX12RHIDevice::ringAllocate(RingHeap& ring, UINT count,
+bool DX12RHIDevice::ringAllocate(RingHeap& ring, UINT count, bool persistent,
                                  D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
                                  D3D12_GPU_DESCRIPTOR_HANDLE* gpu) {
     if (count == 0) {
@@ -300,10 +302,20 @@ bool DX12RHIDevice::ringAllocate(RingHeap& ring, UINT count,
     }
 
     // Descriptor blocks must be contiguous: wrap around by draining the ring
-    // (all outstanding batches have completed by then).
+    // (all outstanding batches have completed by then). The wrap target is the
+    // persistent watermark so descriptors allocated for binding groups (which
+    // live for the app lifetime) are never overwritten by transient ones.
     if (ring.cursor + count > ring.total) {
+#ifdef _DEBUG
+        std::fprintf(stderr,
+                     "[DX12RHIDevice] descriptor ring wrap (heap=%p persistentEnd=%u total=%u)\n",
+                     static_cast<void*>(ring.heap.Get()), ring.persistentEnd, ring.total);
+#endif
         ringFlushAll(ring);
-        ring.cursor = 0;
+        ring.cursor = ring.persistentEnd;
+        if (ring.cursor + count > ring.total) {
+            return false;   // persistent allocations consumed the whole ring
+        }
     }
 
     const UINT begin = ring.cursor;
@@ -326,27 +338,36 @@ bool DX12RHIDevice::ringAllocate(RingHeap& ring, UINT count,
     }
 
     ring.cursor = end;
+    if (persistent) {
+        ring.persistentEnd = std::max(ring.persistentEnd, end);
+    }
     return true;
 }
 
 bool DX12RHIDevice::allocateResourceDescriptors(UINT count,
                                                 D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
-                                                D3D12_GPU_DESCRIPTOR_HANDLE* gpu) {
-    return ringAllocate(resourceRing_, count, cpu, gpu);
+                                                D3D12_GPU_DESCRIPTOR_HANDLE* gpu,
+                                                bool persistent) {
+    return ringAllocate(resourceRing_, count, persistent, cpu, gpu);
 }
 
 bool DX12RHIDevice::allocateSamplerDescriptors(UINT count,
                                                D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
-                                               D3D12_GPU_DESCRIPTOR_HANDLE* gpu) {
-    return ringAllocate(samplerRing_, count, cpu, gpu);
+                                               D3D12_GPU_DESCRIPTOR_HANDLE* gpu,
+                                               bool persistent) {
+    return ringAllocate(samplerRing_, count, persistent, cpu, gpu);
 }
 
 bool DX12RHIDevice::allocateRTVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu) {
-    return ringAllocate(rtvRing_, count, cpu, nullptr);
+    return ringAllocate(rtvRing_, count, false, cpu, nullptr);
 }
 
 bool DX12RHIDevice::allocateDSVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu) {
-    return ringAllocate(dsvRing_, count, cpu, nullptr);
+    return ringAllocate(dsvRing_, count, false, cpu, nullptr);
+}
+
+bool DX12RHIDevice::allocateCpuUAVDescriptors(UINT count, D3D12_CPU_DESCRIPTOR_HANDLE* cpu) {
+    return ringAllocate(cpuUavRing_, count, false, cpu, nullptr);
 }
 
 void DX12RHIDevice::finalizeDescriptorBatch() {
@@ -362,6 +383,7 @@ void DX12RHIDevice::finalizeDescriptorBatch() {
         if (seg < samplerRing_.segmentSignal.size())   samplerRing_.segmentSignal[seg] = value;
         if (seg < rtvRing_.segmentSignal.size())       rtvRing_.segmentSignal[seg] = value;
         if (seg < dsvRing_.segmentSignal.size())       dsvRing_.segmentSignal[seg] = value;
+        if (seg < cpuUavRing_.segmentSignal.size())    cpuUavRing_.segmentSignal[seg] = value;
     }
     batchSegments.clear();
 }
@@ -793,9 +815,10 @@ void DX12RHIDevice::submitGraphicsQueue(const std::vector<void*>& /*waitSemaphor
 // Internal pipelines (scaled blit + constant-color clear)
 // =============================================================================
 
-std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateBlitPipeline() {
-    if (blitPipeline_) {
-        return blitPipeline_;
+std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateBlitPipeline(RHIFormat rtvFormat) {
+    auto it = blitPipelines_.find(rtvFormat);
+    if (it != blitPipelines_.end()) {
+        return it->second;
     }
 
     // Layout: set 0, binding 0 = combined image sampler (fragment).
@@ -816,17 +839,19 @@ std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateBlitPipeline() {
     builder->setColorAttachmentCount(1);
 
     RHIRenderPassDesc rpDesc;
-    rpDesc.addColorAttachment(RHIFormat::R8G8B8A8_UNORM, RHILoadOp::Load, RHIStoreOp::Store);
+    rpDesc.addColorAttachment(rtvFormat, RHILoadOp::Load, RHIStoreOp::Store);
     auto renderPass = createRenderPass(rpDesc);
     builder->setRenderPass(renderPass.get());
 
-    blitPipeline_ = std::dynamic_pointer_cast<DX12RHIPipeline>(builder->build());
-    return blitPipeline_;
+    auto pipeline = std::dynamic_pointer_cast<DX12RHIPipeline>(builder->build());
+    blitPipelines_[rtvFormat] = pipeline;
+    return pipeline;
 }
 
-std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateClearPipeline() {
-    if (clearPipeline_) {
-        return clearPipeline_;
+std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateClearPipeline(RHIFormat rtvFormat) {
+    auto it = clearPipelines_.find(rtvFormat);
+    if (it != clearPipelines_.end()) {
+        return it->second;
     }
 
     auto builder = createGraphicsPipelineBuilder();
@@ -841,10 +866,11 @@ std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateClearPipeline() {
     builder->setColorAttachmentCount(1);
 
     RHIRenderPassDesc rpDesc;
-    rpDesc.addColorAttachment(RHIFormat::R8G8B8A8_UNORM, RHILoadOp::Load, RHIStoreOp::Store);
+    rpDesc.addColorAttachment(rtvFormat, RHILoadOp::Load, RHIStoreOp::Store);
     auto renderPass = createRenderPass(rpDesc);
     builder->setRenderPass(renderPass.get());
 
-    clearPipeline_ = std::dynamic_pointer_cast<DX12RHIPipeline>(builder->build());
-    return clearPipeline_;
+    auto pipeline = std::dynamic_pointer_cast<DX12RHIPipeline>(builder->build());
+    clearPipelines_[rtvFormat] = pipeline;
+    return pipeline;
 }

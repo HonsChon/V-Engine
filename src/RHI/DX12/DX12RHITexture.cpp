@@ -335,4 +335,8 @@ DX12RHITextureLayerView::DX12RHITextureLayerView(DX12RHIDevice* device,
     usage_       = parent->getUsage();
     depthTypeless_ = parent->isDepthResourceTypeless();
     isView_      = true;
+
+    // All layer views + the parent share ONE tracked resource state (they wrap
+    // the same ID3D12Resource and barriers always cover ALL_SUBRESOURCES).
+    stateShare_ = parent;
 }

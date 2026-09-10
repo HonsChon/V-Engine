@@ -13,9 +13,12 @@ layout(binding = 0) uniform sampler2DArray aoArray;
 layout(binding = 1, r8) uniform writeonly image2D outAO;
 
 // Push Constants
+// (16B 下限: D3D12 root constants 按 16B cbuffer register 排布)
 layout(push_constant) uniform PushConstants {
     int fullWidth;
     int fullHeight;
+    int pad0;
+    int pad1;
 } pc;
 
 void main() {
