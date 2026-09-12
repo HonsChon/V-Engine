@@ -5,6 +5,8 @@
 #include "Entity.h"
 #include "Components.h"
 #include "SelectionManager.h"
+#include "MeshManager.h"
+#include "nanite/NaniteManager.h"
 
 using namespace VEngine;
 
@@ -200,6 +202,39 @@ void InspectorPanel::renderMeshRendererComponent() {
         ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##MaterialPath", matBuffer, sizeof(matBuffer))) {
             meshRenderer.materialPath = matBuffer;
+        }
+
+        // ===== 网格统计（原始 mesh + Nanite cluster/LOD）=====
+        auto gpuMesh = VEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
+        if (gpuMesh) {
+            ImGui::Separator();
+            ImGui::Text("Mesh Stats");
+            ImGui::Text("  Vertices: %u", gpuMesh->getVertexCount());
+            ImGui::Text("  Triangles: %u", gpuMesh->getIndexCount() / 3);
+
+            auto clusterized = m_naniteManager ? m_naniteManager->getMesh(meshRenderer.meshPath) : nullptr;
+            if (clusterized) {
+                uint32_t totalTris = 0;
+                for (const auto& c : clusterized->clusters) totalTris += c.triangleCount;
+
+                ImGui::Text("  Nanite: %u LODs, %u clusters, %u tris",
+                            static_cast<uint32_t>(clusterized->lodLevels.size()),
+                            static_cast<uint32_t>(clusterized->clusters.size()),
+                            totalTris);
+
+                for (size_t lod = 0; lod < clusterized->lodLevels.size(); ++lod) {
+                    const auto& level = clusterized->lodLevels[lod];
+                    uint32_t lodTris = 0;
+                    for (uint32_t i = level.clusterStartIndex;
+                         i < level.clusterStartIndex + level.clusterCount &&
+                         i < clusterized->clusters.size(); ++i) {
+                        lodTris += clusterized->clusters[i].triangleCount;
+                    }
+                    ImGui::Text("    L%u: %u clusters, %u tris (err %.2e)",
+                                static_cast<uint32_t>(lod), level.clusterCount, lodTris,
+                                level.maxError);
+                }
+            }
         }
     }
 

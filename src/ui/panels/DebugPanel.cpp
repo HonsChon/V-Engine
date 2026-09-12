@@ -10,6 +10,19 @@ DebugPanel::DebugPanel() {
     }
 }
 
+void DebugPanel::setNaniteStats(uint32_t total, uint32_t visible, uint32_t drawn,
+                                uint32_t triangles, uint32_t vertices,
+                                const uint32_t* lodCounts, int lodCount) {
+    naniteTotal = total;
+    naniteVisible = visible;
+    naniteDrawn = drawn;
+    naniteTriangles = triangles;
+    naniteVertices = vertices;
+    for (int i = 0; i < NANITE_MAX_LOD; ++i) {
+        naniteLodCounts[i] = (lodCounts && i < lodCount) ? lodCounts[i] : 0;
+    }
+}
+
 void DebugPanel::render() {
     // 更新 FPS 历史
     fpsHistory[fpsHistoryIndex] = fps;
@@ -116,6 +129,26 @@ void DebugPanel::render() {
     }
 
     ImGui::Spacing();
+
+    // === Nanite 绘制统计（Cluster Vis 激活时跟随实际绘制）===
+    if (naniteTotal > 0) {
+        if (ImGui::CollapsingHeader("Nanite Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Text("Clusters: %u total / %u visible / %u drawn",
+                        naniteTotal, naniteVisible, naniteDrawn);
+            ImGui::Text("Drawn: %u tris, %u verts", naniteTriangles, naniteVertices);
+
+            char lodText[192] = { 0 };
+            size_t used = 0;
+            for (int lod = 0; lod < NANITE_MAX_LOD; ++lod) {
+                if (naniteLodCounts[lod] == 0) continue;
+                used += snprintf(lodText + used, sizeof(lodText) - used,
+                                 "[L%d:%u] ", lod, naniteLodCounts[lod]);
+                if (used >= sizeof(lodText)) break;
+            }
+            if (lodText[0] != '\0') ImGui::Text("LOD: %s", lodText);
+        }
+        ImGui::Spacing();
+    }
 
     // === 控制说明 ===
     if (ImGui::CollapsingHeader("Controls")) {

@@ -39,6 +39,7 @@
 #include "ImGuiLayer.h"
 #include "UIManager.h"
 #include "panels/DebugPanel.h"
+#include "panels/InspectorPanel.h"
 
 #include <iostream>
 #include <array>
@@ -541,11 +542,28 @@ void SceneRenderer::updateUI() {
         debugPanel->setCameraPosition(m_camera->getPosition());
         debugPanel->setCameraFOV(m_camera->getZoom());
 
-        if (m_renderSystem) {
-            debugPanel->setVertices(m_renderSystem->getTotalVertexCount());
-            debugPanel->setTriangles(m_renderSystem->getTotalTriangleCount());
-            debugPanel->setDrawCalls(m_renderSystem->getDrawCallCount());
+        if (m_settings.showClusterVisualization && m_naniteDebugPass) {
+            // Cluster Vis 激活时：统计跟随实际绘制的 cluster
+            const auto& s = m_naniteDebugPass->getDrawnStats();
+            debugPanel->setVertices(s.drawnVertices);
+            debugPanel->setTriangles(s.drawnTriangles);
+            debugPanel->setDrawCalls(s.drawnClusters);
+            debugPanel->setNaniteStats(s.totalClusters, s.visibleClusters, s.drawnClusters,
+                                       s.drawnTriangles, s.drawnVertices,
+                                       s.lodClusterCounts, 8);
+        } else {
+            if (m_renderSystem) {
+                debugPanel->setVertices(m_renderSystem->getTotalVertexCount());
+                debugPanel->setTriangles(m_renderSystem->getTotalTriangleCount());
+                debugPanel->setDrawCalls(m_renderSystem->getDrawCallCount());
+            }
+            debugPanel->setNaniteStats(0, 0, 0, 0, 0, nullptr, 0);
         }
+    }
+
+    // Inspector 需要 Nanite 数据来显示选中 mesh 的 cluster/LOD 统计
+    if (auto* inspector = m_uiManager->getInspectorPanel()) {
+        inspector->setNaniteManager(m_naniteManager.get());
     }
 }
 

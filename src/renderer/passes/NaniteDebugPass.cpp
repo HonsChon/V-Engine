@@ -147,7 +147,7 @@ void NaniteDebugPass::buildRenderData() {
         MeshRenderInfo mi; mi.meshName = meshName; mi.modelMatrix = glm::mat4(1.0f);
         for (uint32_t ci = 0; ci < cm->clusters.size(); ci++) {
             const auto& cluster = cm->clusters[ci];
-            ClusterRenderData rd{curVOff, curIOff, static_cast<uint32_t>(cluster.localIndices.size()), globalCI, cluster.lodLevel};
+            ClusterRenderData rd{curVOff, curIOff, static_cast<uint32_t>(cluster.localIndices.size()), globalCI, cluster.lodLevel, cluster.vertexCount};
             for (const auto& v : cluster.vertices) {
                 vertexData.insert(vertexData.end(), {v.position.x, v.position.y, v.position.z,
                     v.normal.x, v.normal.y, v.normal.z, v.uv.x, v.uv.y,
@@ -256,6 +256,9 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
     if (!m_renderDataBuilt || m_clusterRenderData.empty()) return;
 
     // GPU 选择结果（含 DAG LOD 选择）：直接绘制回读到的可见 cluster 列表
+    m_drawnStats = DrawnStats{};
+    m_drawnStats.totalClusters = m_totalClusterCount;
+
     std::vector<uint32_t> visibleIndices;
     if (m_clusterCullingPass) {
         const auto& vi = m_clusterCullingPass->getVisibleIndices();
@@ -289,6 +292,7 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
     }
 
     std::unordered_set<uint32_t> visibleSet(visibleIndices.begin(), visibleIndices.end());
+    m_drawnStats.visibleClusters = static_cast<uint32_t>(visibleIndices.size());
 
     auto ext = rhiSwapChain_->getExtent();
     cmd->bindGraphicsPipeline(m_pipeline_.get());
@@ -298,7 +302,6 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
     cmd->bindVertexBuffer(0, m_vertexBuffer_.get());
     cmd->bindIndexBuffer(m_indexBuffer_.get(), 0, RHIIndexType::UInt32);
 
-    uint32_t drawn = 0;
     for (const auto& mi : m_meshRenderInfos) {
         glm::mat4 model = glm::mat4(1.0f);
         auto it = meshMatrices.find(mi.meshName); if (it != meshMatrices.end()) model = it->second;
@@ -312,36 +315,28 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
             pc.lodLevel = cd.lodLevel;
             cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
             cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
-            drawn++;
+            m_drawnStats.drawnClusters++;
+            m_drawnStats.drawnTriangles += cd.indexCount / 3;
+            m_drawnStats.drawnVertices += cd.vertexCount;
+            if (cd.lodLevel < 8) m_drawnStats.lodClusterCounts[cd.lodLevel]++;
         }
     }
 
-    // ======== LOD 追踪和实时输出========
-    std::unordered_map<uint32_t, uint32_t> lodClusterCounts;
-    if (naniteManager) {
-        const auto& allGPU = naniteManager->getAllGPUClusterData();
-        for (uint32_t idx : visibleIndices) {
-            if (idx < allGPU.size()) lodClusterCounts[allGPU[idx].lodLevel]++;
-        }
-    }
-    
+    // ======== 实时输出（每 60 帧）========
     static uint32_t frameCounter = 0;
     if (++frameCounter % 60 == 0) {
-        std::cout << "\r[LOD] Drawn:" << drawn << "/" << m_totalClusterCount 
+        std::cout << "\r[LOD] Drawn:" << m_drawnStats.drawnClusters << "/" << m_totalClusterCount
+                  << " tris=" << m_drawnStats.drawnTriangles
+                  << " verts=" << m_drawnStats.drawnVertices
                   << " | GPU LOD Selection"
-                  << " | Visible:" << visibleSet.size()
-                  << " | ";
-        
-        std::cout << "[";
-        for (uint32_t lod = 0; lod < 10; ++lod) {
-            auto it = lodClusterCounts.find(lod);
-            if (it != lodClusterCounts.end() && it->second > 0) {
-                std::cout << "L" << lod << ":" << it->second << " ";
+                  << " | Visible:" << m_drawnStats.visibleClusters
+                  << " | [";
+        for (uint32_t lod = 0; lod < 8; ++lod) {
+            if (m_drawnStats.lodClusterCounts[lod] > 0) {
+                std::cout << "L" << lod << ":" << m_drawnStats.lodClusterCounts[lod] << " ";
             }
         }
-        std::cout << "]";
-        
-        std::cout << "                " << std::flush;
+        std::cout << "]                " << std::flush;
     }
 }
 
