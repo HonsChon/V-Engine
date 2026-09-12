@@ -6,7 +6,7 @@
 #include "Components.h"
 #include "SelectionManager.h"
 
-using namespace VulkanEngine;
+using namespace VEngine;
 
 InspectorPanel::InspectorPanel() {
 }
@@ -44,7 +44,7 @@ void InspectorPanel::render() {
     ImGui::End();
 }
 
-void InspectorPanel::setScene(VulkanEngine::Scene* scene) {
+void InspectorPanel::setScene(VEngine::Scene* scene) {
     m_scene = scene;
     m_useECSMode = (scene != nullptr);
 }
@@ -58,8 +58,8 @@ void InspectorPanel::setSelectedEntity(entt::entity entity) {
 // ============================================================
 
 void InspectorPanel::renderECSInspector() {
-    // 从 SelectionManager 获取当前选中的实体
-    m_selectedEntity = VulkanEngine::SelectionManager::getInstance().getSelectedEntity();
+    // 锟斤拷 SelectionManager 锟斤拷取锟斤拷前选锟叫碉拷实锟斤拷
+    m_selectedEntity = VEngine::SelectionManager::getInstance().getSelectedEntity();
 
     if (m_selectedEntity == entt::null) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No entity selected");

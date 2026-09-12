@@ -145,7 +145,7 @@ void UIManager::toggleAssetBrowser() { showAssetBrowser = !showAssetBrowser; }
 // ECS 集成
 // ============================================================
 
-void UIManager::setScene(VulkanEngine::Scene* scene) {
+void UIManager::setScene(VEngine::Scene* scene) {
     m_scene = scene;
     
     if (sceneHierarchyPanel) {

@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 SceneManager& SceneManager::getInstance() {
     static SceneManager instance;
@@ -164,4 +164,4 @@ void SceneManager::notifySceneChange() {
     }
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine

@@ -1,6 +1,6 @@
 /**
  * @file SceneRenderer.cpp
- * @brief SceneRenderer 实现 — 从 VulkanRenderer 迁移的完整渲染调度
+ * @brief SceneRenderer 实现 — RHI 无关的渲染调度(Vulkan/DX12 双后端)
  */
 
 #include "SceneRenderer.h"
@@ -316,7 +316,7 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
 
     // Nanite GPU Culling (Compute, before render pass)
     if (m_settings.showClusterVisualization && m_naniteManager && m_naniteDebugPass) {
-        prepareNaniteCulling(cmd, imageIndex);
+        prepareNaniteCulling(cmd, imageIndex, frameIndex);
     }
 
     // Begin render pass (Pure RHI)
@@ -346,7 +346,7 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
                 uint32_t visibleCount = static_cast<uint32_t>(visibleIndices.size());
 
                 auto& registry = m_scene->getRegistry();
-                auto ecsView = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+                auto ecsView = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
                 std::vector<entt::entity> entityList;
                 for (auto e : ecsView) entityList.push_back(e);
 
@@ -355,10 +355,10 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
                     if (idx >= entityList.size()) continue;
 
                     auto entity = entityList[idx];
-                    auto& transform = ecsView.get<VulkanEngine::TransformComponent>(entity);
-                    auto& meshRenderer = ecsView.get<VulkanEngine::MeshRendererComponent>(entity);
+                    auto& transform = ecsView.get<VEngine::TransformComponent>(entity);
+                    auto& meshRenderer = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
-                    auto gpuMesh = VulkanEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
+                    auto gpuMesh = VEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
                     if (!gpuMesh) continue;
 
                     m_forwardPass->pushModelMatrix(cmd, transform.getTransform());
@@ -382,7 +382,7 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
             }
         } else {
             if (m_settings.showClusterVisualization && m_naniteDebugPass) {
-                recordNaniteDebugCommands(cmd, imageIndex);
+                recordNaniteDebugCommands(cmd, frameIndex);
             } else {
                 m_renderSystem->render(cmd, m_forwardPass.get(), frameIndex);
             }
@@ -610,17 +610,17 @@ void SceneRenderer::prepareGPUCullingData() {
 
     std::vector<GPUInstanceData> instances;
     auto& registry = m_scene->getRegistry();
-    auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+    auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
     auto* meshManager = m_renderSystem->getMeshManager();
 
     for (auto entity : view) {
-        auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
-        auto& meshRenderer = view.get<VulkanEngine::MeshRendererComponent>(entity);
+        auto& transform = view.get<VEngine::TransformComponent>(entity);
+        auto& meshRenderer = view.get<VEngine::MeshRendererComponent>(entity);
 
         GPUInstanceData data{};
         data.modelMatrix = transform.getTransform();
 
-        VulkanEngine::AABB meshAABB;
+        VEngine::AABB meshAABB;
         if (meshManager) meshAABB = meshManager->getMeshAABB(meshRenderer.meshPath);
         else { meshAABB.min = glm::vec3(-1.0f); meshAABB.max = glm::vec3(1.0f); }
 
@@ -659,6 +659,7 @@ void SceneRenderer::initNanite() {
         Nanite::NaniteConfig config;
         config.enableClusterCulling = true;
         config.enableConeCulling = true;
+        config.enableLODSelection = true;
         config.screenSpaceErrorThreshold = 1.0f;
         m_naniteManager->setConfig(config);
 
@@ -700,6 +701,15 @@ void SceneRenderer::initNaniteDebugPass() {
     }
 }
 
+void SceneRenderer::cycleNaniteDebugMode() {
+    if (!m_naniteDebugPass) {
+        std::cout << "[Engine] Cluster Vis is OFF (press 9 first)\n";
+        return;
+    }
+    m_naniteDebugPass->cycleDebugMode();
+    std::cout << "[Engine] Nanite debug mode: " << m_naniteDebugPass->getDebugModeName() << "\n";
+}
+
 void SceneRenderer::testNaniteClustering() {
     if (!m_naniteManager || !m_renderSystem) return;
 
@@ -711,11 +721,11 @@ void SceneRenderer::testNaniteClustering() {
 
     if (m_scene) {
         auto& registry = m_scene->getRegistry();
-        auto view = registry.view<VulkanEngine::MeshRendererComponent>();
+        auto view = registry.view<VEngine::MeshRendererComponent>();
         std::set<std::string> processed;
 
         for (auto entity : view) {
-            auto& mr = view.get<VulkanEngine::MeshRendererComponent>(entity);
+            auto& mr = view.get<VEngine::MeshRendererComponent>(entity);
             if (processed.count(mr.meshPath)) continue;
             processed.insert(mr.meshPath);
 
@@ -742,11 +752,44 @@ void SceneRenderer::testNaniteClustering() {
     std::cout << "Clustering done: " << processedMeshes << " meshes, " << totalClusters << " clusters\n";
 }
 
-void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex) {
+void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     if (!m_naniteManager || !m_naniteDebugPass) return;
 
     m_naniteDebugPass->setRenderAllMeshes();
     m_naniteDebugPass->ensureRenderDataBuilt();
+
+    // 应用 UI 侧的 LOD 调参（每帧写入 config，shader uniform 使用）
+    {
+        Nanite::NaniteConfig cfg = m_naniteManager->getConfig();
+        // Force LOD 诊断时关闭 GPU LOD 选择,让所有层级先通过剔除,再由 CPU 过滤
+        cfg.enableLODSelection = m_settings.naniteLODSelection && (m_settings.naniteForceLOD < 0);
+        cfg.enableClusterCulling = m_settings.naniteFrustumCulling;
+        cfg.enableConeCulling = m_settings.naniteConeCulling;
+        cfg.screenSpaceErrorThreshold = m_settings.naniteErrorThreshold;
+        cfg.lodErrorScale = m_settings.naniteErrorScale;
+        m_naniteManager->setConfig(cfg);
+        m_naniteDebugPass->setForceLOD(m_settings.naniteForceLOD);
+    }
+
+    // 每个 mesh 的世界矩阵（顺序必须与 getAllMeshNames() 排序一致，供 GPU 剔除用）
+    {
+        std::unordered_map<std::string, glm::mat4> xforms;
+        if (m_scene) {
+            auto& registry = m_scene->getRegistry();
+            auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
+            for (auto entity : view) {
+                auto& mr = view.get<VEngine::MeshRendererComponent>(entity);
+                auto& tx = view.get<VEngine::TransformComponent>(entity);
+                xforms[mr.meshPath] = tx.getTransform();
+            }
+        }
+        std::vector<glm::mat4> ordered;
+        for (const auto& name : m_naniteManager->getAllMeshNames()) {
+            auto it = xforms.find(name);
+            ordered.push_back(it != xforms.end() ? it->second : glm::mat4(1.0f));
+        }
+        m_naniteManager->setMeshTransforms(ordered);
+    }
 
     auto nExtent = m_swapChain->getExtent();
     float aspect = (float)nExtent.width / (float)nExtent.height;
@@ -755,7 +798,9 @@ void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIn
     glm::vec3 camPos = m_camera->getPosition();
 
     m_naniteManager->setScreenParams(nExtent.width, nExtent.height);
-    m_naniteManager->performCulling(cmd, view, proj, camPos, imageIndex);
+    // 注意:readback slot 必须用 frameIndex(与 Engine 的 readbackCullingResults 一致),
+    // 不能用 imageIndex —— 交换链图像数(3)与帧槽数(2)不同会导致读到未完成的 slot
+    m_naniteManager->performCulling(cmd, view, proj, camPos, frameIndex);
 
     cmd->pipelineBarrier(
         RHIPipelineStage::ComputeShader | RHIPipelineStage::Transfer,
@@ -763,29 +808,29 @@ void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIn
         RHIAccessFlags::ShaderWrite,
         RHIAccessFlags::ShaderRead);
 
-    m_naniteDebugPass->updateUniforms(imageIndex, view, proj, camPos,
+    m_naniteDebugPass->updateUniforms(frameIndex, view, proj, camPos,
         glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 }
 
-void SceneRenderer::recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex) {
+void SceneRenderer::recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t frameIndex) {
     if (!m_naniteDebugPass || !m_settings.showClusterVisualization) return;
 
     std::unordered_map<std::string, glm::mat4> meshMatrices;
     if (m_scene && m_naniteManager) {
         auto& registry = m_scene->getRegistry();
-        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+        auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
         auto names = m_naniteManager->getAllMeshNames();
         std::set<std::string> nameSet(names.begin(), names.end());
 
         for (auto entity : view) {
-            auto& mr = view.get<VulkanEngine::MeshRendererComponent>(entity);
+            auto& mr = view.get<VEngine::MeshRendererComponent>(entity);
             if (nameSet.count(mr.meshPath)) {
-                auto& t = view.get<VulkanEngine::TransformComponent>(entity);
+                auto& t = view.get<VEngine::TransformComponent>(entity);
                 meshMatrices[mr.meshPath] = t.getTransform();
             }
         }
     }
     if (meshMatrices.empty()) return;
 
-    m_naniteDebugPass->recordCommandsWithLOD(cmd, imageIndex, meshMatrices, m_naniteManager.get());
+    m_naniteDebugPass->recordCommandsWithLOD(cmd, frameIndex, meshMatrices, m_naniteManager.get());
 }

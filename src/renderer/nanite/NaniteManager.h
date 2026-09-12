@@ -93,6 +93,12 @@ public:
                        uint32_t frameIndex = 0);
     
     /**
+     * 上传每个 mesh 的世界矩阵（顺序必须与 getAllMeshNames() 的排序一致）
+     * 供 GPU 剔除着色器做世界空间变换
+     */
+    void setMeshTransforms(const std::vector<glm::mat4>& transforms);
+    
+    /**
      * 读取可见 Cluster 列表（GPU -> CPU）
      * @return 可见 Cluster 的索引列表
      */
@@ -123,9 +129,6 @@ public:
 private:
     // GPU 缓冲区
     void createGPUBuffers();
-    void updateUniformBuffer(const glm::mat4& viewMatrix,
-                            const glm::mat4& projMatrix,
-                            const glm::vec3& cameraPosition);
     
     // 从视图投影矩阵提取视锥平面
     static void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
@@ -160,9 +163,9 @@ private:
     float m_screenWidth = 1920.0f;
     float m_screenHeight = 1080.0f;
     
-    // 缓存的矩阵（用于 uniform 更新）
-    glm::mat4 m_lastViewMatrix{1.0f};
-    glm::mat4 m_lastProjMatrix{1.0f};
+    // 每个 mesh 的世界矩阵（按 getAllMeshNames() 排序，供 GPU 剔除用）
+    uint32_t m_meshTransformCount = 0;
+    std::vector<glm::mat4> m_lastMeshTransforms;
     
     bool m_gpuDataDirty = true;
     bool m_initialized = false;
@@ -182,12 +185,6 @@ public:
     void setScreenParams(uint32_t width, uint32_t height) {
         m_screenWidth = static_cast<float>(width);
         m_screenHeight = static_cast<float>(height);
-    }
-    
-    // 更新视图/投影矩阵
-    void setViewProjection(const glm::mat4& view, const glm::mat4& proj) {
-        m_lastViewMatrix = view;
-        m_lastProjMatrix = proj;
     }
     
     // 获取 GPU 可见 Cluster 数量

@@ -18,6 +18,7 @@
 #include <array>
 #include <cstring>
 #include <set>
+#include <unordered_set>
 
 // ============================================
 // 构造与析构
@@ -146,7 +147,7 @@ void NaniteDebugPass::buildRenderData() {
         MeshRenderInfo mi; mi.meshName = meshName; mi.modelMatrix = glm::mat4(1.0f);
         for (uint32_t ci = 0; ci < cm->clusters.size(); ci++) {
             const auto& cluster = cm->clusters[ci];
-            ClusterRenderData rd{curVOff, curIOff, static_cast<uint32_t>(cluster.localIndices.size()), globalCI};
+            ClusterRenderData rd{curVOff, curIOff, static_cast<uint32_t>(cluster.localIndices.size()), globalCI, cluster.lodLevel};
             for (const auto& v : cluster.vertices) {
                 vertexData.insert(vertexData.end(), {v.position.x, v.position.y, v.position.z,
                     v.normal.x, v.normal.y, v.normal.z, v.uv.x, v.uv.y,
@@ -211,6 +212,7 @@ void NaniteDebugPass::recordCommands(RHICommandBuffer* cmd, uint32_t frameIndex,
         pc.model = modelMatrix; pc.normalMatrix = normalMat;
         pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
         pc.debugMode = static_cast<uint32_t>(m_debugMode);
+        pc.lodLevel = cd.lodLevel;
         cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
         cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
     }
@@ -240,6 +242,7 @@ void NaniteDebugPass::recordCommandsMultiMesh(RHICommandBuffer* cmd, uint32_t fr
             pc.model = model; pc.normalMatrix = normalMat;
             pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
             pc.debugMode = static_cast<uint32_t>(m_debugMode);
+            pc.lodLevel = cd.lodLevel;
             cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
             cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
         }
@@ -252,32 +255,40 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
     if (!m_initialized || !enabled) return;
     if (!m_renderDataBuilt || m_clusterRenderData.empty()) return;
 
-    // GPU culling + LOD selection logic (same business logic as before)
-    std::set<uint32_t> visibleSet;
-    std::set<uint32_t> frustumVisible;
+    // GPU 选择结果（含 DAG LOD 选择）：直接绘制回读到的可见 cluster 列表
+    std::vector<uint32_t> visibleIndices;
     if (m_clusterCullingPass) {
         const auto& vi = m_clusterCullingPass->getVisibleIndices();
-        for (uint32_t idx : vi) frustumVisible.insert(idx);
+        visibleIndices.assign(vi.begin(), vi.end());
     }
-    if (frustumVisible.empty())
-        for (uint32_t i = 0; i < m_totalClusterCount; ++i) frustumVisible.insert(i);
 
-    if (m_naniteManager) {
-        const auto& allGPU = m_naniteManager->getAllGPUClusterData();
-        glm::vec3 camPos = m_naniteManager->getLastCameraPosition();
-        for (uint32_t idx : frustumVisible) {
+    // 回读尚未就绪（前几帧 / 剔除未初始化）：降级为只画 LOD0，避免所有 LOD 重叠
+    if (visibleIndices.empty() && naniteManager) {
+        const auto& allGPU = naniteManager->getAllGPUClusterData();
+        for (uint32_t i = 0; i < allGPU.size(); ++i) {
+            if (allGPU[i].lodLevel == 0) visibleIndices.push_back(i);
+        }
+    }
+    if (visibleIndices.empty()) {
+        for (uint32_t i = 0; i < m_totalClusterCount; ++i) visibleIndices.push_back(i);
+    }
+
+    // 诊断模式: 强制显示指定 LOD（层级不存在时用根节点兜底）
+    if (m_forceLOD >= 0 && naniteManager) {
+        const auto& allGPU = naniteManager->getAllGPUClusterData();
+        const uint32_t forced = static_cast<uint32_t>(m_forceLOD);
+        std::vector<uint32_t> filtered;
+        filtered.reserve(visibleIndices.size());
+        for (uint32_t idx : visibleIndices) {
             if (idx >= allGPU.size()) continue;
             const auto& c = allGPU[idx];
-            uint32_t rootIdx = idx; uint32_t safety = 0;
-            while (allGPU[rootIdx].parentGroupIndex != 0xFFFFFFFF && allGPU[rootIdx].parentGroupIndex < allGPU.size() && safety < 10)
-                { rootIdx = allGPU[rootIdx].parentGroupIndex; safety++; }
-            glm::vec3 rc(allGPU[rootIdx].boundingSphere.x, allGPU[rootIdx].boundingSphere.y, allGPU[rootIdx].boundingSphere.z);
-            float dist = glm::length(rc - camPos);
-            uint32_t targetLOD = dist > 200 ? 7 : dist > 120 ? 6 : dist > 70 ? 5 : dist > 45 ? 4 : dist > 30 ? 3 : dist > 18 ? 2 : dist > 10 ? 1 : 0;
-            if (c.lodLevel == targetLOD || (c.parentGroupIndex == 0xFFFFFFFF && targetLOD > c.lodLevel))
-                visibleSet.insert(idx);
+            bool isRoot = (c.parentGroupIndex == 0xFFFFFFFFu);
+            if (c.lodLevel == forced || (isRoot && c.lodLevel <= forced)) filtered.push_back(idx);
         }
-    } else visibleSet = frustumVisible;
+        visibleIndices.swap(filtered);
+    }
+
+    std::unordered_set<uint32_t> visibleSet(visibleIndices.begin(), visibleIndices.end());
 
     auto ext = rhiSwapChain_->getExtent();
     cmd->bindGraphicsPipeline(m_pipeline_.get());
@@ -298,6 +309,7 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
             pc.model = model; pc.normalMatrix = normalMat;
             pc.clusterIndex = cd.clusterIndex; pc.totalClusters = m_totalClusterCount;
             pc.debugMode = static_cast<uint32_t>(m_debugMode);
+            pc.lodLevel = cd.lodLevel;
             cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(pc), &pc);
             cmd->drawIndexed(cd.indexCount, 1, cd.indexOffset, 0, 0);
             drawn++;
@@ -306,33 +318,17 @@ void NaniteDebugPass::recordCommandsWithLOD(RHICommandBuffer* cmd, uint32_t fram
 
     // ======== LOD 追踪和实时输出========
     std::unordered_map<uint32_t, uint32_t> lodClusterCounts;
-    
-    std::unordered_map<uint32_t, uint32_t> clusterToLOD;
     if (naniteManager) {
-        for (const auto& meshInfo : m_meshRenderInfos) {
-            auto clusterizedMesh = naniteManager->getMesh(meshInfo.meshName);
-            if (!clusterizedMesh) continue;
-            
-            for (size_t lod = 0; lod < clusterizedMesh->lodLevels.size(); ++lod) {
-                const auto& level = clusterizedMesh->lodLevels[lod];
-                for (uint32_t i = 0; i < level.clusterCount; ++i) {
-                    clusterToLOD[level.clusterStartIndex + i] = static_cast<uint32_t>(lod);
-                }
-            }
-        }
-    }
-    
-    for (uint32_t idx : visibleSet) {
-        auto it = clusterToLOD.find(idx);
-        if (it != clusterToLOD.end()) {
-            lodClusterCounts[it->second]++;
+        const auto& allGPU = naniteManager->getAllGPUClusterData();
+        for (uint32_t idx : visibleIndices) {
+            if (idx < allGPU.size()) lodClusterCounts[allGPU[idx].lodLevel]++;
         }
     }
     
     static uint32_t frameCounter = 0;
     if (++frameCounter % 60 == 0) {
         std::cout << "\r[LOD] Drawn:" << drawn << "/" << m_totalClusterCount 
-                  << " | GPU Culling Mode"
+                  << " | GPU LOD Selection"
                   << " | Visible:" << visibleSet.size()
                   << " | ";
         

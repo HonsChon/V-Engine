@@ -4,7 +4,7 @@
 #include "Scene.h"
 #include "Components.h"
 
-namespace VulkanEngine {
+namespace VEngine {
 
 /**
  * @brief 实体类 - 对 entt::entity 的封装
@@ -238,4 +238,4 @@ private:
     Scene* m_scene = nullptr;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

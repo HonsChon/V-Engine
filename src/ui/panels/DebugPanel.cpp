@@ -102,6 +102,17 @@ void DebugPanel::render() {
                 renderSettings->ssaoQuality = quality;
             }
         }
+
+        // === Nanite (Cluster Vis) 设置 ===
+        if (ImGui::CollapsingHeader("Nanite (Cluster Vis)")) {
+            ImGui::Checkbox("GPU LOD Selection", &renderSettings->naniteLODSelection);
+            ImGui::Checkbox("Frustum Culling (Z)", &renderSettings->naniteFrustumCulling);
+            ImGui::Checkbox("Cone Culling (X)", &renderSettings->naniteConeCulling);
+            ImGui::SliderInt("Force LOD (B, -1=off)", &renderSettings->naniteForceLOD, -1, 7);
+            ImGui::SliderFloat("Error Threshold (px)", &renderSettings->naniteErrorThreshold, 0.1f, 20.0f, "%.2f");
+            ImGui::SliderFloat("Error Scale", &renderSettings->naniteErrorScale, 1.0f, 1000.0f, "%.0f");
+            ImGui::TextDisabled("Press 9 to toggle cluster vis, 0 to cycle mode");
+        }
     }
 
     ImGui::Spacing();

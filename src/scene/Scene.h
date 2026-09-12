@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 // 前向声明
 class Entity;
@@ -164,4 +164,4 @@ private:
     uint64_t m_nextUUID = 1;  // 简单的 UUID 计数器
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

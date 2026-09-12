@@ -5,7 +5,7 @@
 #include <functional>
 #include <entt/entt.hpp>
 
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
     class Entity;
 }
@@ -42,7 +42,7 @@ public:
     /**
      * 设置 ECS 场景
      */
-    void setScene(VulkanEngine::Scene* scene);
+    void setScene(VEngine::Scene* scene);
 
     /**
      * 获取当前选中的ECS 实体
@@ -101,7 +101,7 @@ private:
     void renderObjectNode(const SceneObject& obj, int depth = 0);
 
     // ECS 数据
-    VulkanEngine::Scene* m_scene = nullptr;
+    VEngine::Scene* m_scene = nullptr;
     entt::entity m_selectedEntity = entt::null;
     std::function<void(entt::entity)> m_onEntitySelected;
 

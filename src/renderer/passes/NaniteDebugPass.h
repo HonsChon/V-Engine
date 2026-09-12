@@ -42,7 +42,7 @@ struct ClusterDebugPushConstants {
     uint32_t clusterIndex;
     uint32_t totalClusters;
     uint32_t debugMode;
-    float padding;
+    uint32_t lodLevel;
 };
 
 /**
@@ -110,6 +110,9 @@ public:
     void cycleDebugMode();
     const char* getDebugModeName() const;
     
+    // 诊断: 强制只绘制指定 LOD（-1 = 关闭, 0..7 = 层级）
+    void setForceLOD(int level) { m_forceLOD = level; }
+    
     void setTargetMesh(const std::string& meshName) { 
         if (m_targetMeshName != meshName) {
             m_targetMeshName = meshName; 
@@ -162,6 +165,7 @@ private:
         uint32_t indexOffset;
         uint32_t indexCount;
         uint32_t clusterIndex;
+        uint32_t lodLevel;
     };
     
     struct MeshRenderInfo {
@@ -183,6 +187,7 @@ private:
     uint32_t m_lod0ClusterCount = 0;
     
     NaniteDebugMode m_debugMode = NaniteDebugMode::ClusterColor;
+    int m_forceLOD = -1;
     
     std::string m_targetMeshName;
     bool m_renderAllMeshes = false;

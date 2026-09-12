@@ -16,7 +16,7 @@ class AssetBrowserPanel;
 class Camera;
 struct RenderSettings;
 
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
 }
 
@@ -117,12 +117,12 @@ public:
     /**
      * 设置 ECS 场景（启用ECS 模式：
      */
-    void setScene(VulkanEngine::Scene* scene);
+    void setScene(VEngine::Scene* scene);
 
     /**
      * 获取当前场景
      */
-    VulkanEngine::Scene* getScene() const { return m_scene; }
+    VEngine::Scene* getScene() const { return m_scene; }
 
     /**
      * 设置选中的实体
@@ -152,5 +152,5 @@ private:
     bool showImGuiDemo = false;
 
     // ECS 数据
-    VulkanEngine::Scene* m_scene = nullptr;
+    VEngine::Scene* m_scene = nullptr;
 };

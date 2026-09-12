@@ -20,7 +20,7 @@
 class Window;
 class Camera;
 
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
 }
 

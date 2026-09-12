@@ -10,7 +10,7 @@
 // Forward declarations
 class RHIDevice;
 
-namespace VulkanEngine {
+namespace VEngine {
 
 /**
  * @brief GPU Texture 数据结构 (Pure RHI)
@@ -127,4 +127,4 @@ private:
     std::shared_ptr<GPUTexture> m_defaultBlackTexture;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

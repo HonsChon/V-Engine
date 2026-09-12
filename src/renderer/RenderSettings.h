@@ -31,7 +31,14 @@ struct RenderSettings {
 
     // Debug options
     bool showClusterVisualization = false;
-    int clusterDebugMode = 0;  // 0: Off, 1: LOD, 2: Cluster ID
+
+    // Nanite cluster LOD tuning (applied to NaniteConfig each frame)
+    bool naniteLODSelection = true;
+    bool naniteFrustumCulling = true;
+    bool naniteConeCulling = true;
+    int naniteForceLOD = -1;             // -1=关闭; 0..7=强制显示该 LOD (诊断)
+    float naniteErrorThreshold = 1.0f;   // 屏幕误差阈值（像素）
+    float naniteErrorScale = 300.0f;     // QEM 误差放大系数（小模型需较大值）
 
     // Quality settings
     int shadowQuality = 2;     // 0: Off, 1: Low, 2: Medium, 3: High

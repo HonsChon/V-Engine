@@ -2,7 +2,7 @@
  * @file SceneRenderer.h
  * @brief Scene Renderer - 调度所有渲染 Pass
  * 
- * 从 VulkanRenderer 迁移过来的渲染调度器。
+ * RHI 无关的渲染调度器(Vulkan/DX12 双后端)。
  * 管理 Forward/Deferred/SSAO/SSR/Water/Nanite 等所有 Pass 的生命周期和执行。
  */
 
@@ -46,7 +46,7 @@ namespace Nanite {
 }
 
 // Scene & ECS
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
     class RenderSystem;
 }
@@ -137,6 +137,7 @@ public:
     void cleanupNanite();
     void testNaniteClustering();
     void initNaniteDebugPass();
+    void cycleNaniteDebugMode();
 
     // ========== UI ==========
     
@@ -149,9 +150,9 @@ public:
     const RenderSettings& getSettings() const { return m_settings; }
     const RenderStats& getStats() const { return m_stats; }
     
-    void setScene(VulkanEngine::Scene* scene) { m_scene = scene; }
+    void setScene(VEngine::Scene* scene) { m_scene = scene; }
     void setCamera(Camera* camera) { m_camera = camera; }
-    void setRenderSystem(VulkanEngine::RenderSystem* rs) { m_renderSystem = rs; }
+    void setRenderSystem(VEngine::RenderSystem* rs) { m_renderSystem = rs; }
     void setImGuiLayer(ImGuiLayer* layer) { m_imguiLayer = layer; }
     void setUIManager(UIManager* mgr) { m_uiManager = mgr; }
 
@@ -168,8 +169,8 @@ private:
     // ========== 命令录制子方法 ==========
     void recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
     void recordDeferredCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
-    void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex);
-    void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t imageIndex);
+    void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t frameIndex);
 
     // ========== 矩阵工具 ==========
     /// GLM 的 perspective 面向 Y-up 的 GL/D3D 惯例;Vulkan 的 NDC Y 向下,需要
@@ -183,9 +184,9 @@ private:
     // ========== 引用（不拥有）==========
     RHIDevice* m_rhiDevice = nullptr;
     RHISwapChain* m_swapChain = nullptr;
-    VulkanEngine::Scene* m_scene = nullptr;
+    VEngine::Scene* m_scene = nullptr;
     Camera* m_camera = nullptr;
-    VulkanEngine::RenderSystem* m_renderSystem = nullptr;
+    VEngine::RenderSystem* m_renderSystem = nullptr;
     ImGuiLayer* m_imguiLayer = nullptr;
     UIManager* m_uiManager = nullptr;
 

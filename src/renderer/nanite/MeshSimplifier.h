@@ -248,7 +248,8 @@ private:
         uint32_t edgeIndex;
         uint32_t v0, v1;          // 端点 (v0 将被保留, v1 将被删除)
         glm::dvec3 optimalPos;    // 折叠后的最优位置
-        double error;             // 折叠误差
+        double error;             // 折叠代价(含边界/锁定惩罚, 用于优先队列排序)
+        double geometricError;    // 纯 QEM 几何误差(不含惩罚, 用于 LOD 误差统计)
         
         // 优先队列比较（误差小的优先）
         bool operator>(const EdgeCollapse& other) const {
