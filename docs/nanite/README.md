@@ -90,19 +90,19 @@ Cluster 是 Nanite 的基本剔除和渲染单元。每个 Cluster：
 // GPU 端 Cluster 数据结构 (96 bytes, 对齐到 std430)
 struct GPUClusterData {
     glm::vec4 boundingSphere;  // xyz: center, w: radius
-    glm::vec4 aabbMin;         // xyz: min, w: lodError
-    glm::vec4 aabbMax;         // xyz: max, w: screenThreshold
+    glm::vec4 aabbMin;         // xyz: min, w: lodError (累积 QEM 误差)
+    glm::vec4 aabbMax;         // xyz: max, w: maxChildError
     glm::vec4 normalCone;      // xyz: axis, w: cos(halfAngle)
     
-    uint32_t vertexOffset;     // 在全局顶点缓冲中的偏移
+    uint32_t meshIndex;        // 所属 mesh 索引 (索引 TransformBuffer)
     uint32_t indexOffset;      // 在全局索引缓冲中的偏移
     uint32_t triangleCount;    // 三角形数量
     uint32_t lodLevel;         // LOD 等级 (0 = 最精细)
     
-    uint32_t parentGroupIndex; // 父 Cluster Group 索引
-    uint32_t flags;            // 状态标志
-    uint32_t materialIndex;    // 材质索引
-    uint32_t meshIndex;        // 所属网格索引
+    uint32_t parentGroupIndex; // 父节点索引 (0xFFFFFFFF = 根)
+    uint32_t flags;            // bit0=enabled, bit1=isLeaf
+    uint32_t childStartIndex;  // 子节点起始索引
+    uint32_t childCount;       // 子节点数量
 };
 
 // 量化后的顶点数据 (16 bytes)
@@ -230,76 +230,90 @@ naniteManager->performCulling(cmdBuffer, camera);
 
 ## GPU Shader
 
-### cluster_culling.comp - Cluster 剔除着色器
+### cluster_culling.comp - Cluster 剔除 + DAG LOD 选择
+
+着色器一次 dispatch 完成三件事：世界变换、Nanite DAG LOD 选择、视锥/法线锥剔除，
+输出全局可见 cluster 索引列表（CPU 回读后逐 cluster 绘制）。
 
 ```glsl
 #version 450
 layout(local_size_x = 64) in;
 
-// 输入缓冲区
 layout(set = 0, binding = 0) uniform CullingUniforms {
     mat4 viewMatrix;
     mat4 projMatrix;
+    mat4 viewProjMatrix;
     vec4 frustumPlanes[6];
-    vec4 cameraPosition;       // xyz: position, w: unused
-    uint totalClusters;
-};
+    vec4 cameraPosition;        // xyz: position
+    uvec4 clusterCountPacked;   // x=count, y=frustumCull, z=coneCull, w=lodSelect
+    vec4 screenParams;          // x=width, y=height, z=lodErrorScale, w=pixelThreshold
+} uniforms;
 
-layout(set = 0, binding = 1) readonly buffer ClusterBuffer {
-    GPUClusterData clusters[];
-};
+layout(set = 0, binding = 1) buffer ClusterBuffer  { ClusterData clusters[]; };
+layout(set = 0, binding = 2) buffer TransformBuffer{ mat4 transforms[]; };  // 每 mesh 世界矩阵
+layout(set = 0, binding = 3) writeonly buffer VisibleBuffer { uint visibleClusterIndices[]; };
+layout(set = 0, binding = 4) buffer CounterBuffer  { uint visibleClusterCount; };
+layout(set = 0, binding = 5) buffer SelectionStateBuffer { uint selectionState[]; };
 
-// 输出缓冲区
-layout(set = 0, binding = 2) buffer VisibleBuffer {
-    uint visibleCount;
-    uint visibleClusters[];
-};
-
-// 视锥剔除
-bool frustumCullSphere(vec3 center, float radius) {
-    for (int i = 0; i < 6; ++i) {
-        if (dot(frustumPlanes[i].xyz, center) + frustumPlanes[i].w < -radius) {
-            return false; // 完全在某平面外侧
-        }
-    }
-    return true;
-}
-
-// 法线锥背面剔除
-bool normalConeCull(vec3 coneAxis, float cosConeAngle, vec3 clusterCenter) {
-    vec3 viewDir = normalize(cameraPosition.xyz - clusterCenter);
-    float cosViewAngle = dot(viewDir, coneAxis);
-    
-    // 如果视线方向与锥轴夹角大于 (90° - halfAngle)，则可见
-    // 即 cosViewAngle < sin(halfAngle) = sqrt(1 - cos²(halfAngle))
-    float sinConeAngle = sqrt(1.0 - cosConeAngle * cosConeAngle);
-    return cosViewAngle >= -sinConeAngle;
+float computeScreenSpaceError(float lodError, float distanceToCamera) {
+    // abs(): Vulkan 投影做了 Y 翻转 (proj[1][1] < 0)
+    float projScaleY = abs(uniforms.projMatrix[1][1]);
+    return (lodError * projScaleY * SCREEN_HEIGHT * 0.5) / distanceToCamera
+         * LOD_ERROR_SCALE;
 }
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= totalClusters) return;
-    
-    GPUClusterData cluster = clusters[idx];
-    
-    // 1. 检查是否启用
-    if ((cluster.flags & 0x1) == 0) return;
-    
-    // 2. 视锥剔除
-    vec3 center = cluster.boundingSphere.xyz;
-    float radius = cluster.boundingSphere.w;
-    if (!frustumCullSphere(center, radius)) return;
-    
+    if (idx >= CLUSTER_COUNT) return;
+
+    ClusterData cluster = clusters[idx];
+    if ((cluster.flags & 1u) == 0u) return;
+
+    // 0. 世界空间变换（每个 mesh 一个矩阵）
+    mat4 world = transforms[cluster.meshIndex];
+    vec3 center = (world * vec4(cluster.boundingSphere.xyz, 1.0)).xyz;
+    float dist = length(center - uniforms.cameraPosition.xyz);
+
+    // 1. Nanite DAG LOD 选择：selfError <= T < parentError
+    if (ENABLE_LOD_SELECTION) {
+        float selfError = computeScreenSpaceError(cluster.aabbMin.w, dist);
+
+        float parentError = 1e30;   // 根节点视为"父误差无穷大"
+        uint parentIndex = cluster.parentGroupIndex;
+        if (parentIndex != 0xFFFFFFFFu && parentIndex < CLUSTER_COUNT) {
+            ClusterData parent = clusters[parentIndex];
+            vec3 pc = (transforms[parent.meshIndex] * vec4(parent.boundingSphere.xyz, 1.0)).xyz;
+            parentError = computeScreenSpaceError(parent.aabbMin.w,
+                                                  length(pc - uniforms.cameraPosition.xyz));
+        }
+        if (!(selfError <= PIXEL_THRESHOLD && parentError > PIXEL_THRESHOLD)) return;
+    }
+
+    // 2. 视锥剔除（包围球）
+    if (ENABLE_FRUSTUM_CULL && !frustumCullSphere(center, cluster.boundingSphere.w)) return;
+
     // 3. 法线锥背面剔除
-    vec3 coneAxis = cluster.normalCone.xyz;
-    float cosConeAngle = cluster.normalCone.w;
-    if (!normalConeCull(coneAxis, cosConeAngle, center)) return;
-    
-    // 通过所有测试，写入可见列表
-    uint outputIdx = atomicAdd(visibleCount, 1);
-    visibleClusters[outputIdx] = idx;
+    if (ENABLE_CONE_CULL && !coneCull(cluster.normalCone.xyz, cluster.normalCone.w,
+                                      center, uniforms.cameraPosition.xyz)) return;
+
+    // 4. 写入可见列表
+    uint outIdx = atomicAdd(visibleClusterCount, 1);
+    visibleClusterIndices[outIdx] = idx;
 }
 ```
+
+**LOD 选择规则**：每条"根→叶"路径上恰好命中一个节点（`self` 可接受且 `parent` 过粗），
+因此不会出现镂空或同区域多 LOD 重叠。LOD0 叶节点 `lodError = 0`，近处必然命中；
+根节点无父节点，远处必然兜底。父误差取父节点自身的累积 `lodError`
+（`qemSelf + maxChildError`），距离用父节点包围球中心计算。
+
+**调参**：`screenSpaceErrorThreshold`（像素阈值）与 `lodErrorScale`（QEM 误差放大系数）
+可在 F1 Debug Panel 的 "Nanite (Cluster Vis)" 区域实时调整。
+
+**lodError 语义**：父节点 `lodError = qemSelf + maxChildError`，必须是**纯几何 QEM 误差**。
+`MeshSimplifier` 内部用含惩罚的折叠代价排序（边界边 +100、锁定顶点 +50），
+但误差统计必须用不含惩罚的 `geometricError`；否则惩罚会污染整级误差（变成 50~100），
+这些区域将永远无法选中 L1+（只能退回 LOD0），表现为"没有简化"。
 
 ---
 
@@ -365,13 +379,17 @@ namespace NaniteConfig {
 | Phase 1 | 顶点量化打包 | ✅ 完成 | 16-bit 量化 |
 | Phase 1 | 法线锥计算 | ✅ 完成 | 用于整 Cluster 背面剔除 |
 | Phase 1 | NaniteManager | ✅ 完成 | GPU 缓冲管理 |
-| Phase 1 | 渲染器集成 | ✅ 完成 | VulkanRenderer 接口 |
-| Phase 2 | LOD 生成 | 🔲 待实现 | 网格简化 + 多级 Cluster |
-| Phase 2 | Cluster Group 层级 | 🔲 待实现 | 父子关系建立 |
-| Phase 3 | Cluster BVH | 🔲 待实现 | 层级剔除加速 |
-| Phase 3 | 屏幕空间 LOD 选择 | 🔲 待实现 | 基于投影误差的 LOD |
+| Phase 1 | 渲染器集成 | ✅ 完成 | RHI 双后端 (Vulkan/DX12) |
+| Phase 2 | LOD 生成 | ✅ 完成 | `MeshSimplifier` QEM 边坍缩 + 边界锁定 |
+| Phase 2 | Cluster Group 层级 | ✅ 完成 | 每 4 个相邻 Cluster 一组,父索引回填 |
+| Phase 3 | GPU 屏幕空间 LOD 选择 | ✅ 完成 | DAG 规则 `selfError <= T < parentError` |
+| Phase 3 | Cluster BVH | 🔲 待实现 | 层级剔除加速 (当前全量 dispatch) |
 | Phase 4 | Software Rasterizer | 🔲 待实现 | 小三角形软光栅 |
 | Phase 4 | Visibility Buffer | 🔲 待实现 | 延迟材质着色 |
+
+> 当前可见列表经双缓冲 readback 回 CPU 后逐 Cluster `drawIndexed`（Nanite 仅用于
+> Cluster 可视化路径）。完全 GPU-Driven 间接绘制（command signature / indirect draw）
+> 仍是 backlog。
 
 ---
 
@@ -381,16 +399,34 @@ namespace NaniteConfig {
 
 | 按键 | 功能 |
 |------|------|
+| `5` | 切换 Forward / Deferred 场景 |
 | `7` | 切换 Nanite 渲染开/关 |
-| `8` | 执行测试网格的 Cluster 划分 |
+| `8` | 执行测试网格的 Cluster 划分 + LOD 生成 + 上传 |
+| `9` | 开/关 Cluster 可视化（同时启用 GPU culling） |
+| `0` | 循环调试模式：ClusterColor → Normal → LOD → HashColor |
+| `B` | 循环 Force LOD：OFF → 0 → 1 → … → 7（诊断用，显示被自动选择跳过的层级） |
+| `X` | 切换法线锥背面剔除 |
+| `Z` | 切换视锥剔除 |
+
+> **Force LOD 原理**：强制某级时自动关闭 GPU LOD 选择（`w=0`），让所有层级先通过
+> 视锥/法线锥剔除，再由 CPU 按 `lodLevel` 过滤；层级不存在的 mesh 用根节点兜底。
 
 ### 输出验证
 
 ```
-[Nanite] Processing mesh with 15000 triangles...
-[Nanite] Created 118 clusters (avg 127.1 tri/cluster)
-[Nanite] Uploaded 118 clusters, 15086 vertices, 45000 indices to GPU
+[Nanite] Processing mesh: ../../assets/UFO/UFO_Empty.obj (27844 triangles)
+[MeshClusterizer] Generated 218 clusters from 27844 triangles
+[MeshClusterizer] LOD 1: 55 clusters
+[MeshClusterizer] LOD 2: 14 clusters
+[MeshClusterizer] LOD 3: 4 clusters
+[Nanite] GPU upload complete
+Clustering done: 3 meshes, 376 clusters
+...
+[LOD] Drawn:71/376 | GPU LOD Selection | Visible:71 | [L0:18 L1:48 L2:5 ]
 ```
+
+`[LOD]` 行的分布随相机距离变化（近处 L0/L1 为主，远处 L2/L3 为主），
+即 GPU 端 DAG LOD 选择生效。
 
 ### RenderDoc 检查
 
