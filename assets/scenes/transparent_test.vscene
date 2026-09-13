@@ -1,0 +1,47 @@
+{
+  "entities": [
+    {
+      "uuid": 1001,
+      "tag": "BackgroundCube",
+      "transform": { "position": [0.0, 0.0, -3.0], "rotation": [0.0, 0.0, 0.0], "scale": [4.0, 4.0, 1.0] },
+      "parent": 0,
+      "meshRenderer": { "meshPath": "cube", "materialPath": "bg_material", "castShadows": true, "receiveShadows": true, "visible": true },
+      "pbrMaterial": { "albedo": [0.9, 0.85, 0.6], "metallic": 0.0, "roughness": 0.8, "ao": 1.0, "emissive": [0.0, 0.0, 0.0], "emissiveStrength": 0.0, "opacity": 1.0, "alphaMode": "Opaque", "alphaCutoff": 0.5, "albedoMap": "", "normalMap": "", "metallicMap": "", "roughnessMap": "", "aoMap": "", "emissiveMap": "" }
+    },
+    {
+      "uuid": 1002,
+      "tag": "OpaqueSphere",
+      "transform": { "position": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+      "parent": 0,
+      "meshRenderer": { "meshPath": "sphere", "materialPath": "opaque_material", "castShadows": true, "receiveShadows": true, "visible": true },
+      "pbrMaterial": { "albedo": [0.95, 0.95, 0.95], "metallic": 0.0, "roughness": 0.5, "ao": 1.0, "emissive": [0.0, 0.0, 0.0], "emissiveStrength": 0.0, "opacity": 1.0, "alphaMode": "Opaque", "alphaCutoff": 0.5, "albedoMap": "", "normalMap": "", "metallicMap": "", "roughnessMap": "", "aoMap": "", "emissiveMap": "" }
+    },
+    {
+      "uuid": 1003,
+      "tag": "GlassRed",
+      "transform": { "position": [-1.3, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+      "parent": 0,
+      "meshRenderer": { "meshPath": "sphere", "materialPath": "glass_red_material", "castShadows": true, "receiveShadows": true, "visible": true },
+      "pbrMaterial": { "albedo": [1.0, 0.15, 0.1], "metallic": 0.0, "roughness": 0.1, "ao": 1.0, "emissive": [0.0, 0.0, 0.0], "emissiveStrength": 0.0, "opacity": 0.3, "alphaMode": "Blend", "alphaCutoff": 0.5, "albedoMap": "", "normalMap": "", "metallicMap": "", "roughnessMap": "", "aoMap": "", "emissiveMap": "" }
+    },
+    {
+      "uuid": 1004,
+      "tag": "GlassGreen",
+      "transform": { "position": [1.3, 0.0, 0.3], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+      "parent": 0,
+      "meshRenderer": { "meshPath": "sphere", "materialPath": "glass_green_material", "castShadows": true, "receiveShadows": true, "visible": true },
+      "pbrMaterial": { "albedo": [0.1, 1.0, 0.3], "metallic": 0.0, "roughness": 0.1, "ao": 1.0, "emissive": [0.0, 0.0, 0.0], "emissiveStrength": 0.0, "opacity": 0.6, "alphaMode": "Blend", "alphaCutoff": 0.5, "albedoMap": "", "normalMap": "", "metallicMap": "", "roughnessMap": "", "aoMap": "", "emissiveMap": "" }
+    },
+    {
+      "uuid": 1005,
+      "tag": "GlassBlue",
+      "transform": { "position": [0.0, 1.4, 0.6], "rotation": [0.0, 0.0, 0.0], "scale": [0.8, 0.8, 0.8] },
+      "parent": 0,
+      "meshRenderer": { "meshPath": "sphere", "materialPath": "glass_blue_material", "castShadows": true, "receiveShadows": true, "visible": true },
+      "pbrMaterial": { "albedo": [0.2, 0.4, 1.0], "metallic": 0.0, "roughness": 0.1, "ao": 1.0, "emissive": [0.0, 0.0, 0.0], "emissiveStrength": 0.0, "opacity": 0.45, "alphaMode": "Blend", "alphaCutoff": 0.5, "albedoMap": "", "normalMap": "", "metallicMap": "", "roughnessMap": "", "aoMap": "", "emissiveMap": "" }
+    }
+  ],
+  "format": "vscene",
+  "version": 1,
+  "scene": { "name": "TransparentTest", "nextUUID": 1006 }
+}
