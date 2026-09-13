@@ -64,8 +64,27 @@ public:
     virtual void drawIndexed(uint32_t indexCount, uint32_t instanceCount = 1,
                               uint32_t firstIndex = 0, int32_t vertexOffset = 0,
                               uint32_t firstInstance = 0) = 0;
+    // ---- Indirect draw commands ----
+    // Command buffer layouts (RHI convention, binary-compatible with both
+    // Vulkan and D3D12):
+    //   drawIndirect / drawIndexedIndirect:
+    //     { u32 count, u32 instanceCount, u32 first, i32/u32 offset, [u32 firstInstance] }
+    //     non-indexed: 16B stride (VkDrawIndirectCommand == D3D12_DRAW_ARGUMENTS)
+    //     indexed:     20B stride (VkDrawIndexedIndirectCommand == D3D12_DRAW_INDEXED_ARGUMENTS)
+    //   dispatchIndirect: { u32 x, u32 y, u32 z } (12B)
+    // All fields are read by the GPU; the buffers must be transitioned to
+    // IndirectCommandRead access before the draw.
+    virtual void drawIndirect(RHIBuffer* buffer, uint64_t offset,
+                               uint32_t drawCount, uint32_t stride) = 0;
     virtual void drawIndexedIndirect(RHIBuffer* buffer, uint64_t offset,
                                       uint32_t drawCount, uint32_t stride) = 0;
+    /// Count-buffer variant: the GPU reads the actual number of commands from
+    /// `countBuffer` (a u32 at countOffset); at most maxDrawCount commands are
+    /// executed. Requires multiDrawIndirect / draw-indirect-count support on
+    /// Vulkan (queried at device creation; throws if unsupported).
+    virtual void drawIndexedIndirectCount(RHIBuffer* buffer, uint64_t offset,
+                                           RHIBuffer* countBuffer, uint64_t countOffset,
+                                           uint32_t maxDrawCount, uint32_t stride) = 0;
 
     // ---- Compute commands ----
     virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;

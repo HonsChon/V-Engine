@@ -826,6 +826,10 @@ void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIn
         RHIAccessFlags::ShaderWrite,
         RHIAccessFlags::ShaderRead);
 
+    // GPU-driven 间接绘制准备:可见 cluster 几何展开 + drawArgs(Vulkan 禁止
+    // render pass 内 dispatch compute,必须在 pass 外完成)
+    m_naniteDebugPass->prepareIndirectDraw(cmd);
+
     m_naniteDebugPass->updateUniforms(frameIndex, view, proj, camPos,
         glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(1.0f, 1.0f, 1.0f));
 }

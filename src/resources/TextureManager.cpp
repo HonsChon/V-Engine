@@ -28,12 +28,14 @@ std::shared_ptr<GPUTexture> TextureManager::createFromPixels(
     gpuTex->width = w;
     gpuTex->height = h;
 
-    // Create RHI texture (Sampled + TransferDst for upload)
+    // Create RHI texture (Sampled + TransferDst for upload; full mip chain —
+    // uploadPixels uploads mip 0 and generates the rest, see RHITexture.h)
     RHITextureDesc desc{};
     desc.width = w;
     desc.height = h;
     desc.format = format;
     desc.usage = RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+    desc.mipLevels = 0;   // 0 = automatic full chain
     gpuTex->texture = m_rhiDevice->createTexture(desc);
 
     // Upload pixel data

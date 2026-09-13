@@ -126,6 +126,12 @@ public:
     RHIBuffer* getClusterDataBuffer() const;
     RHIBuffer* getVisibleIndicesBuffer() const;
 
+    /**
+     * 获取每 mesh 世界矩阵缓冲区(GPU-driven 展开着色器按 meshIndex 查询;
+     * setMeshTransforms 之前为 null,消费方需自行兜底)
+     */
+    RHIBuffer* getTransformBuffer() const { return m_transformBuffer.get(); }
+
 private:
     // GPU 缓冲区
     void createGPUBuffers();

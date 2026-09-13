@@ -233,64 +233,12 @@ void Engine::setupInputCallbacks() {
         }
     });
 
-    // Key (feature toggles)
+    // Key (feature toggles) — GLFW callback; logic lives in handleKey so the
+    // autotest path exercises the identical code.
     m_window->setKeyCallback([this](int key, int scancode, int action, int mods) {
         if (action != GLFW_PRESS) return;
-        auto& settings = m_renderer->getSettings();
-
-        switch (key) {
-        case GLFW_KEY_ESCAPE:
-            requestExit(); break;
-        case GLFW_KEY_F1:
-            settings.showUI = !settings.showUI;
-            std::cout << "[Engine] UI " << (settings.showUI ? "ON" : "OFF") << "\n"; break;
-        case GLFW_KEY_5:
-            if (settings.renderMode == RenderMode::Normal) {
-                settings.renderMode = RenderMode::WaterScene;
-                std::cout << "[Engine] → Water Scene (Deferred)\n";
-                if (!m_renderer->isDeferredInitialized())
-                    m_renderer->initDeferredShading();
-            } else {
-                settings.renderMode = RenderMode::Normal;
-                std::cout << "[Engine] → Normal (Forward)\n";
-            }
-            break;
-        case GLFW_KEY_6:
-            settings.enableGPUCulling = !settings.enableGPUCulling;
-            std::cout << "[Engine] GPU Culling " << (settings.enableGPUCulling ? "ON" : "OFF") << "\n";
-            if (settings.enableGPUCulling) m_renderer->initGPUDrivenRendering();
-            break;
-        case GLFW_KEY_7:
-            settings.enableNanite = !settings.enableNanite;
-            std::cout << "[Engine] Nanite " << (settings.enableNanite ? "ON" : "OFF") << "\n";
-            if (settings.enableNanite) m_renderer->initNanite();
-            break;
-        case GLFW_KEY_8:
-            m_renderer->initNanite();
-            m_renderer->testNaniteClustering();
-            break;
-        case GLFW_KEY_9:
-            settings.showClusterVisualization = !settings.showClusterVisualization;
-            std::cout << "[Engine] Cluster Vis " << (settings.showClusterVisualization ? "ON" : "OFF") << "\n";
-            if (settings.showClusterVisualization) m_renderer->initNaniteDebugPass();
-            break;
-        case GLFW_KEY_0:
-            m_renderer->cycleNaniteDebugMode();
-            break;
-        case GLFW_KEY_Z:
-            settings.naniteFrustumCulling = !settings.naniteFrustumCulling;
-            std::cout << "[Engine] Nanite Frustum Culling " << (settings.naniteFrustumCulling ? "ON" : "OFF") << "\n";
-            break;
-        case GLFW_KEY_X:
-            settings.naniteConeCulling = !settings.naniteConeCulling;
-            std::cout << "[Engine] Nanite Cone Culling " << (settings.naniteConeCulling ? "ON" : "OFF") << "\n";
-            break;
-        case GLFW_KEY_B:
-            settings.naniteForceLOD = (settings.naniteForceLOD >= 7) ? -1 : settings.naniteForceLOD + 1;
-            std::cout << "[Engine] Nanite Force LOD "
-                      << (settings.naniteForceLOD < 0 ? "OFF" : std::to_string(settings.naniteForceLOD)) << "\n";
-            break;
-        }
+        (void)scancode; (void)mods;
+        handleKey(key);
     });
 
     // Drag & drop
@@ -335,6 +283,103 @@ void Engine::createCommandBuffers() {
 }
 
 // ============================================================
+// Key handling (shared by GLFW callback and autotest)
+// ============================================================
+
+void Engine::handleKey(int key) {
+    auto& settings = m_renderer->getSettings();
+
+    switch (key) {
+    case GLFW_KEY_ESCAPE:
+        requestExit(); break;
+    case GLFW_KEY_F1:
+        settings.showUI = !settings.showUI;
+        std::cout << "[Engine] UI " << (settings.showUI ? "ON" : "OFF") << "\n"; break;
+    case GLFW_KEY_5:
+        if (settings.renderMode == RenderMode::Normal) {
+            settings.renderMode = RenderMode::WaterScene;
+            std::cout << "[Engine] → Water Scene (Deferred)\n";
+            if (!m_renderer->isDeferredInitialized())
+                m_renderer->initDeferredShading();
+        } else {
+            settings.renderMode = RenderMode::Normal;
+            std::cout << "[Engine] → Normal (Forward)\n";
+        }
+        break;
+    case GLFW_KEY_6:
+        settings.enableGPUCulling = !settings.enableGPUCulling;
+        std::cout << "[Engine] GPU Culling " << (settings.enableGPUCulling ? "ON" : "OFF") << "\n";
+        if (settings.enableGPUCulling) m_renderer->initGPUDrivenRendering();
+        break;
+    case GLFW_KEY_7:
+        settings.enableNanite = !settings.enableNanite;
+        std::cout << "[Engine] Nanite " << (settings.enableNanite ? "ON" : "OFF") << "\n";
+        if (settings.enableNanite) m_renderer->initNanite();
+        break;
+    case GLFW_KEY_8:
+        m_renderer->initNanite();
+        m_renderer->testNaniteClustering();
+        break;
+    case GLFW_KEY_9:
+        settings.showClusterVisualization = !settings.showClusterVisualization;
+        std::cout << "[Engine] Cluster Vis " << (settings.showClusterVisualization ? "ON" : "OFF") << "\n";
+        if (settings.showClusterVisualization) m_renderer->initNaniteDebugPass();
+        break;
+    case GLFW_KEY_0:
+        m_renderer->cycleNaniteDebugMode();
+        break;
+    case GLFW_KEY_Z:
+        settings.naniteFrustumCulling = !settings.naniteFrustumCulling;
+        std::cout << "[Engine] Nanite Frustum Culling " << (settings.naniteFrustumCulling ? "ON" : "OFF") << "\n";
+        break;
+    case GLFW_KEY_X:
+        settings.naniteConeCulling = !settings.naniteConeCulling;
+        std::cout << "[Engine] Nanite Cone Culling " << (settings.naniteConeCulling ? "ON" : "OFF") << "\n";
+        break;
+    case GLFW_KEY_B:
+        settings.naniteForceLOD = (settings.naniteForceLOD >= 7) ? -1 : settings.naniteForceLOD + 1;
+        std::cout << "[Engine] Nanite Force LOD "
+                  << (settings.naniteForceLOD < 0 ? "OFF" : std::to_string(settings.naniteForceLOD)) << "\n";
+        break;
+    }
+}
+
+// ============================================================
+// Autotest pump (called once per frame from mainLoop)
+//
+// Drives unattended regression soaks for both backends:
+//  1. Key injection: drains the --autotest key sequence on a timer
+//     (one key every --interval seconds) through handleKey() — the
+//     exact same path the real GLFW keyboard callback takes.
+//  2. Timed exit: once the sequence is fully injected AND the
+//     --seconds budget (measured from main-loop start) is reached,
+//     exits through the normal requestExit() teardown path.
+// No-op when no autotest options were given.
+// Example: VulkanPBR --autotest 8900 --interval 4 --seconds 15
+// presses 8 (cluster) -> 9 (viz on) -> 0 -> 0 (cycle debug mode),
+// soaks ~15 s, then exits cleanly.
+// ============================================================
+void Engine::pumpAutotest() {
+    if (m_config.autotestKeys.empty() && m_config.autotestSeconds <= 0.0) return;
+    const double now = glfwGetTime();
+
+    if (m_autotestIndex < m_config.autotestKeys.size()) {
+        if (now >= m_autotestNextAt) {
+            const int key = m_config.autotestKeys[m_autotestIndex++];
+            std::cout << "[autotest] inject key " << key << "\n";
+            handleKey(key);
+            m_autotestNextAt = now + m_config.autotestInterval;
+        }
+        return;   // 序列发完前不退出计时 / exit timer is only evaluated after the sequence drains
+    }
+    if (m_config.autotestSeconds > 0.0 &&
+        now - m_autotestStart >= m_config.autotestSeconds) {
+        std::cout << "[autotest] time budget reached, exiting\n";
+        requestExit();
+    }
+}
+
+// ============================================================
 // Main Loop
 // ============================================================
 
@@ -353,6 +398,8 @@ void Engine::run() {
     std::cout << "  ESC - Exit\n";
 
     m_lastFrameTime = static_cast<float>(glfwGetTime());
+    m_autotestStart = glfwGetTime();
+    m_autotestNextAt = m_autotestStart + m_config.autotestInterval;
 
     while (m_running && !m_window->shouldClose()) {
         mainLoop();
@@ -374,6 +421,7 @@ void Engine::mainLoop() {
 
     // Poll events
     m_window->pollEvents();
+    pumpAutotest();
 
     // Keyboard input
     processKeyboardInput(m_deltaTime);

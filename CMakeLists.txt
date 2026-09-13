@@ -750,6 +750,7 @@ if(WIN32)
             ssao/ssao_reinterleave.comp|cs|1|ssao/ssao_reinterleave_comp.dxil|0
             culling/frustum_culling.comp|cs|1|culling/frustum_culling.comp.dxil|0
             nanite/cluster_culling.comp|cs|1|nanite/cluster_culling.comp.dxil|0
+            nanite/build_visible_geometry.comp|cs|1|nanite/build_visible_geometry.comp.dxil|0
             nanite/cluster_debug.vert|vs|1|nanite/cluster_debug_vert.dxil|0
             nanite/cluster_debug.frag|ps|1|nanite/cluster_debug_frag.dxil|0
         )
@@ -884,6 +885,7 @@ if(GLSLC)
     set(COMPUTE_SHADER_SOURCES
         culling/frustum_culling.comp
         nanite/cluster_culling.comp
+        nanite/build_visible_geometry.comp
     )
     
     # 编译主目录着色器

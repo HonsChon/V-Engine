@@ -1,30 +1,33 @@
 ﻿# V Engine - AI Context Document
 
 > 此文档供 AI 编程助手了解项目当前状态，便于在新对话中快速上手。
-> 最后更新: 2026/03/10  版本: v0.11.2
+> 最后更新: 2026/09/13  版本: v0.12.0 (RHI 双后端 Vulkan/DX12 + GPU-driven 间接绘制;
+> 本文档部分章节为历史快照,最新进展以文末各 Phase 执行记录与
+> docs/DX12-Port-Plan.md 为准)
 
 ---
 
 ## 项目概述
 
-**V Engine** 是一个基于 Vulkan 的现代游戏引擎学习项目，专注于图形渲染技术和 ECS 架构。
+**V Engine** 是一个基于 RHI 抽象层(Vulkan / DX12 双后端)的现代游戏引擎学习项目，
+专注于图形渲染技术、GPU-driven 渲染和 ECS 架构。
 
 ### 技术栈
-- 图形 API: Vulkan 1.3
+- 图形 API: Vulkan 1.0(Windows/macOS) / D3D12(Windows, 经统一 RHI 抽象)
 - 语言: C++17
 - 窗口库: GLFW
 - 数学库: GLM
 - ECS: EnTT
-- UI: ImGui
-- 构建系统: CMake
+- UI: ImGui(Vulkan / DX12 双后端)
+- 构建系统: CMake(DX12 后端: `-DVENGINE_RHI_BACKEND=dx12`,仅 Windows)
 
 
 ### 项目路径
-- 根目录: f:\图形学习\PBR\PBR
+- 根目录: F:\图形学习\PBR\V-Engine
 - 源代码: src/
-- 着色器: shaders/ (GLSL -> SPIR-V)
+- 着色器: shaders/ (GLSL 单一源 → Vulkan .spv / DX12 .dxil 双内容管线)
 - 资源: assets/
-- 构建输出: build/bin/
+- 构建输出: build*/bin/
 
 ---
 
@@ -528,24 +531,31 @@ cd build/bin
 ### 下一步建议
 1. 让 `MeshSimplifier` 完全确定(unordered_map 迭代顺序 → 排序后的确定性遍历)
 2. Cluster BVH / 层级剔除,避免每帧全量 dispatch
-3. 完全 GPU-Driven 间接绘制(command signature + indirect draw),去掉 readback
+3. ~~完全 GPU-Driven 间接绘制(command signature + indirect draw),去掉 readback~~
+   → 已于 2026/09/13 完成(Phase 5):GPU 展开 + 单 `drawIndirect`,
+   绘制零 CPU 回读(readback 仅统计显示);实例级链(键 6)仍为 CPU 回读绘制
 
 ### 当前渲染模式
 ```
-NaniteDebugPass: GPU DAG LOD 选择
-- GPU 一次 dispatch 完成 世界变换 + LOD 选择 + 视锥/法线锥剔除
-- 双缓冲 readback 后 CPU 逐 cluster 绘制(2 帧延迟)
-- 回读未就绪时降级为只画 LOD0
+NaniteDebugPass: GPU-driven 间接绘制 (Phase 5, 2026/09/13)
+- GPU dispatch #1: 世界变换 + LOD 选择 + 视锥/法线锥剔除 (cluster_culling.comp)
+- GPU dispatch #2: 可见 cluster 去索引展开为紧凑 VB + atomicMax 写 drawArgs
+                   (build_visible_geometry.comp, forceLOD 过滤在此完成)
+- 渲染: 一次 drawIndirect(数百 draw → 1 draw);首帧 culling 完成前画 0 个
+- readback 仅用于统计显示(Visible/tris/LOD 分布,滞后 2 帧无妨)
 - 诊断: B=Force LOD 循环, X=Cone 开关, Z=Frustum 开关, 0=调试模式循环
 ```
 
 ### 关键代码位置
 ```cpp
 // shaders/nanite/cluster_culling.comp  - DAG 规则 + 每 mesh 变换 + abs(proj) + cone -sin
+// shaders/nanite/build_visible_geometry.comp - 可见几何 GPU 展开 + drawArgs (Phase 5)
 // NaniteManager::performCulling()      - y/z/w = frustum/cone/LODSelection
 // NaniteManager::setMeshTransforms()   - 每 mesh 世界矩阵上传
+// NaniteManager::getTransformBuffer()  - 供展开/绘制的 VS 查询变换
 // MeshSimplifier.cpp                   - geometricError 与惩罚分离
-// NaniteDebugPass::recordCommandsWithLOD() - GPU 可见列表 + Force LOD 过滤
+// NaniteDebugPass::prepareIndirectDraw() - 展开 dispatch + 屏障(pass 外, Vulkan 约束)
+// NaniteDebugPass::recordCommandsWithLOD() - 单次 drawIndirect + 统计
 // SceneRenderer::prepareNaniteCulling() - frameIndex readback slot + UI 调参
 ```
 

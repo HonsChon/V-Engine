@@ -34,6 +34,17 @@ struct EngineConfig {
     uint32_t height = 720;
     bool enableValidation = true;
     bool enableUI = true;
+
+    // Automation (--autotest): 按键序列(GLFW 键码,每 interval 秒注入一个,
+    // 走与真实键盘回调相同的 handleKey 路径);序列发完后运行 seconds 秒退出。
+    // 0 = 不退出。
+    // Automation (--autotest): key sequence (GLFW key codes) injected one per
+    // `interval` seconds through the same handleKey path as real keyboard
+    // input; after the sequence drains, run for `seconds` more and exit
+    // (0 = never auto-exit). Consumed by Engine::pumpAutotest, parsed in main().
+    std::vector<int> autotestKeys;
+    double autotestInterval = 3.0;
+    double autotestSeconds = 0.0;
 };
 
 class Engine {
@@ -79,6 +90,9 @@ private:
     // Input (direct GLFW callbacks via Window)
     void processKeyboardInput(float dt);
     void handleMousePicking();
+    void handleKey(int key);           // shared by GLFW callback + autotest
+    void pumpAutotest();               // per-frame autotest driver: timed key
+                                       // injection + timed exit (see Engine.cpp)
 
     // Config
     Config m_config;
@@ -120,6 +134,11 @@ private:
     float m_fps = 0.0f;
     float m_fpsUpdateTimer = 0.0f;
     int m_fpsFrameCount = 0;
+
+    // Autotest state (see EngineConfig)
+    size_t m_autotestIndex = 0;
+    double m_autotestStart = 0.0;
+    double m_autotestNextAt = 0.0;
 
     static const int MAX_FRAMES_IN_FLIGHT = 2;
 };

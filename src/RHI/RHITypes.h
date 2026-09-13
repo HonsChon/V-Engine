@@ -145,6 +145,34 @@ enum class RHICompareOp {
 };
 
 // =============================================================================
+// Stencil Operations
+// =============================================================================
+
+enum class RHIStencilOp {
+    Keep,
+    Zero,
+    Replace,       // write reference into stencil
+    IncrClamp,     // saturating increment
+    DecrClamp,     // saturating decrement
+    IncrWrap,      // wrapping increment
+    DecrWrap,      // wrapping decrement
+    Invert,
+};
+
+/// Complete stencil test state for one face orientation.
+/// `reference` is a pipeline-static value (Vulkan: VkStencilOpState.reference;
+/// DX12: applied via OMSetStencilRef when the pipeline is bound).
+struct RHIStencilOpState {
+    RHIStencilOp failOp      = RHIStencilOp::Keep;
+    RHIStencilOp passOp      = RHIStencilOp::Keep;
+    RHIStencilOp depthFailOp = RHIStencilOp::Keep;
+    RHICompareOp compareOp   = RHICompareOp::Always;
+    uint32_t     compareMask = 0xFF;
+    uint32_t     writeMask   = 0xFF;
+    uint32_t     reference   = 0;
+};
+
+// =============================================================================
 // Cull Mode
 // =============================================================================
 
@@ -331,17 +359,18 @@ enum class RHIColorComponent : uint32_t {
 
 enum class RHIPipelineStage : uint32_t {
     TopOfPipe            = 1 << 0,
-    VertexInput          = 1 << 1,
-    VertexShader         = 1 << 2,
-    FragmentShader       = 1 << 3,
-    EarlyFragmentTests   = 1 << 4,
-    LateFragmentTests    = 1 << 5,
-    ColorAttachmentOutput= 1 << 6,
-    ComputeShader        = 1 << 7,
-    Transfer             = 1 << 8,
-    BottomOfPipe         = 1 << 9,
-    AllGraphics          = 1 << 10,
-    AllCommands          = 1 << 11,
+    DrawIndirect         = 1 << 1,   // indirect-command fetch (vkCmdDraw*Indirect args read)
+    VertexInput          = 1 << 2,
+    VertexShader         = 1 << 3,
+    FragmentShader       = 1 << 4,
+    EarlyFragmentTests   = 1 << 5,
+    LateFragmentTests    = 1 << 6,
+    ColorAttachmentOutput= 1 << 7,
+    ComputeShader        = 1 << 8,
+    Transfer             = 1 << 9,
+    BottomOfPipe         = 1 << 10,
+    AllGraphics          = 1 << 11,
+    AllCommands          = 1 << 12,
 };
 
 // =============================================================================

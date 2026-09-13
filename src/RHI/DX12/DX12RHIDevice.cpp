@@ -399,7 +399,9 @@ std::shared_ptr<RHIBuffer> DX12RHIDevice::createBuffer(const RHIBufferDesc& desc
 
 std::shared_ptr<RHITexture> DX12RHIDevice::createTexture(const RHITextureDesc& desc)
 {
-    return std::make_shared<DX12RHITexture>(this, desc);
+    RHITextureDesc resolved = desc;
+    resolveMipLevels(resolved);
+    return std::make_shared<DX12RHITexture>(this, resolved);
 }
 
 std::shared_ptr<RHISampler> DX12RHIDevice::createSampler(const RHISamplerDesc& desc)
@@ -873,4 +875,56 @@ std::shared_ptr<DX12RHIPipeline> DX12RHIDevice::getOrCreateClearPipeline(RHIForm
     auto pipeline = std::dynamic_pointer_cast<DX12RHIPipeline>(builder->build());
     clearPipelines_[rtvFormat] = pipeline;
     return pipeline;
+}
+
+// =============================================================================
+// Indirect command signatures
+// =============================================================================
+
+ID3D12CommandSignature* DX12RHIDevice::getDrawCommandSignature() {
+    if (drawSignature_) {
+        return drawSignature_.Get();
+    }
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride = sizeof(D3D12_DRAW_ARGUMENTS);   // 16B == VkDrawIndirectCommand
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs = &arg;
+    if (FAILED(device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&drawSignature_)))) {
+        throw std::runtime_error("[DX12RHIDevice] CreateCommandSignature(Draw) failed");
+    }
+    return drawSignature_.Get();
+}
+
+ID3D12CommandSignature* DX12RHIDevice::getDrawIndexedCommandSignature() {
+    if (drawIndexedSignature_) {
+        return drawIndexedSignature_.Get();
+    }
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);   // 20B == VkDrawIndexedIndirectCommand
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs = &arg;
+    if (FAILED(device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&drawIndexedSignature_)))) {
+        throw std::runtime_error("[DX12RHIDevice] CreateCommandSignature(DrawIndexed) failed");
+    }
+    return drawIndexedSignature_.Get();
+}
+
+ID3D12CommandSignature* DX12RHIDevice::getDispatchCommandSignature() {
+    if (dispatchSignature_) {
+        return dispatchSignature_.Get();
+    }
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS);   // 12B == VkDispatchIndirectCommand
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs = &arg;
+    if (FAILED(device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&dispatchSignature_)))) {
+        throw std::runtime_error("[DX12RHIDevice] CreateCommandSignature(Dispatch) failed");
+    }
+    return dispatchSignature_.Get();
 }

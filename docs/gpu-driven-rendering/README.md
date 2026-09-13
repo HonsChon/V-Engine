@@ -4,6 +4,14 @@
 
 本模块实现了类似 UE5 Nanite 的 GPU 驱动渲染系统。核心思想是将传统的 CPU 端剔除和绘制决策转移到 GPU 上，通过 Compute Shader 实现高效的场景剔除和间接绘制。
 
+> **现状注记（2026/09/13，Phase 5 后）**：本文描述的"实例级"链
+> （`FrustumCullingPass` / `GPUDrivenRenderer`，键 6）目前仍是 *剔除在 GPU、
+> 绘制在 CPU*——可见列表回读后逐实体 `drawIndexed`（`IndirectDrawBuffer` 已分配
+> 但 shader 从未写入、渲染端从未消费）。**完全 GPU-driven 的间接绘制已落地在
+> Nanite debug 链**（键 9，GPU 展开 + 单 `drawIndirect`），实现与设计决策见
+> `docs/nanite/README.md` 与 `docs/DX12-RHI-Notes.md` §14；实例链如需切换，
+> 需为 `GPUInstanceData` 补充 per-mesh draw args 并把材质/变换改为 SSBO 顶点拉取。
+
 ## 架构图
 
 ```

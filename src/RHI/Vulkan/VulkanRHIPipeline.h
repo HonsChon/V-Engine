@@ -56,7 +56,9 @@ public:
 
     RHIGraphicsPipelineBuilder& setDepthTest(bool enable, bool writeEnable,
                                                RHICompareOp compareOp) override;
-    RHIGraphicsPipelineBuilder& setStencilTest(bool enable) override;
+    RHIGraphicsPipelineBuilder& setStencilTest(bool enable,
+                                                const RHIStencilOpState& front = {},
+                                                const RHIStencilOpState& back = {}) override;
 
     RHIGraphicsPipelineBuilder& setSampleCount(RHISampleCount count) override;
     RHIGraphicsPipelineBuilder& addColorBlendAttachment(const RHIColorBlendAttachment& attachment) override;
@@ -100,6 +102,8 @@ private:
     bool         depthWriteEnable_ = true;
     VkCompareOp  depthCompareOp_   = VK_COMPARE_OP_LESS;
     bool         stencilTestEnable_ = false;
+    RHIStencilOpState stencilFront_{};
+    RHIStencilOpState stencilBack_{};
 
     // Multisampling
     VkSampleCountFlagBits sampleCount_ = VK_SAMPLE_COUNT_1_BIT;

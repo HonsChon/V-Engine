@@ -192,6 +192,15 @@ public:
     /// which avoids the ALLOW_UNORDERED_ACCESS requirement of UAV clears).
     std::shared_ptr<DX12RHIPipeline> getOrCreateClearPipeline(RHIFormat rtvFormat);
 
+    // ---- Indirect command signatures (lazy, cached; no root arguments) ----
+    // Per-command layouts match the Vulkan indirect command structs exactly:
+    //   Draw:         16B { vertexCount, instanceCount, firstVertex, firstInstance }
+    //   DrawIndexed:  20B { indexCount, instanceCount, firstIndex, vertexOffset, firstInstance }
+    //   Dispatch:     12B { groupCountX, groupCountY, groupCountZ }
+    ID3D12CommandSignature* getDrawCommandSignature();
+    ID3D12CommandSignature* getDrawIndexedCommandSignature();
+    ID3D12CommandSignature* getDispatchCommandSignature();
+
     /// Mark the current open descriptor batch as submitted at the next fence value.
     /// Called from submitGraphicsQueue.
     void finalizeDescriptorBatch();
@@ -278,6 +287,11 @@ private:
     // Internal blit/clear pipelines cached per render-target format.
     std::map<RHIFormat, std::shared_ptr<DX12RHIPipeline>> blitPipelines_;
     std::map<RHIFormat, std::shared_ptr<DX12RHIPipeline>> clearPipelines_;
+
+    // Indirect command signatures (created on first use, device-lifetime).
+    ComPtr<ID3D12CommandSignature> drawSignature_;
+    ComPtr<ID3D12CommandSignature> drawIndexedSignature_;
+    ComPtr<ID3D12CommandSignature> dispatchSignature_;
 
     // WinPixEventRuntime (optional, loaded dynamically).    bool pixLoaded_ = false;
 

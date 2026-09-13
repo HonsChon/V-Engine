@@ -1,12 +1,23 @@
-// rhi_dx12_smoke (Phase 1 acceptance demo)
+// rhi_dx12_smoke (Phase 1 acceptance demo; extended in Phase 5)
 //
 // Renders a textured triangle through the *complete* DX12 RHI chain:
 //   device -> swapchain (2x FLIP + internal D32) -> render pass/framebuffer
 //   -> PSO + root signature (descriptor tables + push constants)
 //   -> binding groups (CBV + SRV + sampler) -> 2-frame submission loop.
 //
+// Phase 5 additions (4-frame rotation, same triangle on screen):
+//   - frame%4==1: UInt16 index buffer + drawIndexed
+//   - frame%4==2: drawIndirect (GPU-side args buffer, IndirectCommandRead barrier)
+//   - frame%4==3: drawIndexedIndirectCount (args + count buffers)
+//
+// One-shot offscreen stencil test (after the readback warmup):
+//   - left-half quad writes stencil=1 (Always/Replace, static ref),
+//     full-screen quad only passes where stencil != 1 (NotEqual) ->
+//     pixel-verified left=red / right=green through a native texture readback.
+//
 // Self checks (printed on exit):
 //   - UBO content read back through a GPUToCPU buffer matches what was uploaded
+//   - stencil pixel verification PASS
 //   - D3D12 debug layer error count == 0 (retrieved via ID3D12InfoQueue)
 //   - window resize does not crash (framebuffer-size callback path)
 //
@@ -15,6 +26,8 @@
 #include "RHI.h"
 #include "DX12/DX12RHIDevice.h"
 #include "DX12/DX12RHICommandBuffer.h"
+#include "DX12/DX12RHITexture.h"
+#include "DX12/DX12RHIBuffer.h"
 
 #include <GLFW/glfw3.h>
 
@@ -37,6 +50,7 @@ constexpr int    kWindowWidth  = 960;
 constexpr int    kWindowHeight = 600;
 constexpr UINT   kFramesInFlight = 2;
 constexpr size_t kUboSize        = 64;   // one mat4
+constexpr UINT   kStencilRTSize  = 64;   // offscreen stencil test target
 
 struct Vertex { float px, py, pz; float u, v; };
 
@@ -44,6 +58,24 @@ const Vertex kTriVertices[3] = {
     { -0.85f, -0.75f, 0.0f, 0.0f, 0.0f },
     {  0.85f, -0.75f, 0.0f, 1.0f, 0.0f },
     {  0.0f,   0.80f, 0.0f, 0.5f, 1.0f },
+};
+
+// RHI indirect command layouts (see RHICommandBuffer.h for the convention).
+struct DrawArgsDirect     { uint32_t vertexCount, instanceCount, firstVertex, firstInstance; };
+struct DrawIndexedArgsInd { uint32_t indexCount, instanceCount, firstIndex;
+                            int32_t vertexOffset; uint32_t firstInstance; };
+static_assert(sizeof(DrawArgsDirect) == 16, "VkDrawIndirectCommand layout");
+static_assert(sizeof(DrawIndexedArgsInd) == 20, "VkDrawIndexedIndirectCommand layout");
+
+// Stencil-test geometry: [0..6) left-half quad (writes stencil), [6..12) full-screen quad.
+// All UVs (0,0) -> checker texel (255,60,60) so tint math is exact.
+const Vertex kStencilQuads[12] = {
+    { -1.0f, -1.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, -1.0f, 0.0f, 0.0f, 0.0f },
+    {  0.0f,  1.0f, 0.0f, 0.0f, 0.0f }, { -1.0f, -1.0f, 0.0f, 0.0f, 0.0f },
+    {  0.0f,  1.0f, 0.0f, 0.0f, 0.0f }, { -1.0f,  1.0f, 0.0f, 0.0f, 0.0f },
+    { -1.0f, -1.0f, 0.0f, 0.0f, 0.0f }, { 1.0f, -1.0f, 0.0f, 0.0f, 0.0f },
+    {  1.0f,  1.0f, 0.0f, 0.0f, 0.0f }, { -1.0f, -1.0f, 0.0f, 0.0f, 0.0f },
+    {  1.0f,  1.0f, 0.0f, 0.0f, 0.0f }, { -1.0f,  1.0f, 0.0f, 0.0f, 0.0f },
 };
 
 // Identity matrix uploaded to the UBO (16 floats, column-major mat4).
@@ -119,6 +151,71 @@ int assertToStderrHook(int reportType, char* message, int* returnValue) {
     return TRUE;
 }
 
+/// Native readback of an RGBA8 texture through a GPUToCPU buffer and a
+/// single-time command list. The RHI has no copyTextureToBuffer (engine
+/// never needs it); this smoke-only helper bridges to D3D12 directly while
+/// keeping the texture's tracked state consistent.
+/// @param subresource  mip/layer subresource to read (mipgen reads mip > 0).
+std::vector<uint8_t> readbackTextureRGBA8(DX12RHIDevice* device, RHITexture* texture,
+                                          UINT subresource = 0) {
+    auto* dxTex = static_cast<DX12RHITexture*>(texture);
+    const UINT mip = subresource % dxTex->getMipLevels();
+    UINT width = dxTex->getWidth() >> mip;  if (width == 0) width = 1;
+    UINT height = dxTex->getHeight() >> mip; if (height == 0) height = 1;
+    const UINT rowPitch = (width * 4 + 255u) & ~255u;
+
+    RHIBufferDesc rbDesc;
+    rbDesc.setSize(static_cast<uint64_t>(rowPitch) * height)
+          .setUsage(RHIBufferUsage::TransferDst)
+          .setMemoryUsage(RHIMemoryUsage::GPUToCPU);
+    std::shared_ptr<RHIBuffer> readback = device->createBuffer(rbDesc);
+    auto* dxRB = static_cast<DX12RHIBuffer*>(readback.get());
+
+    const D3D12_RESOURCE_STATES prior = dxTex->getCurrentState();
+    ID3D12GraphicsCommandList* list = static_cast<ID3D12GraphicsCommandList*>(
+        device->beginSingleTimeCommands());
+
+    auto barrier = [&](D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+        D3D12_RESOURCE_BARRIER b = {};
+        b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        b.Transition.pResource = dxTex->getD3D12Resource();
+        b.Transition.StateBefore = before;
+        b.Transition.StateAfter = after;
+        b.Transition.Subresource = subresource;
+        list->ResourceBarrier(1, &b);
+    };
+    barrier(prior, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    dxTex->setCurrentState(D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+    D3D12_TEXTURE_COPY_LOCATION src = {};
+    src.pResource = dxTex->getD3D12Resource();
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = subresource;
+
+    D3D12_TEXTURE_COPY_LOCATION dst = {};
+    dst.pResource = dxRB->getD3D12Resource();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint.Offset = 0;
+    dst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    dst.PlacedFootprint.Footprint.Width = width;
+    dst.PlacedFootprint.Footprint.Height = height;
+    dst.PlacedFootprint.Footprint.Depth = 1;
+    dst.PlacedFootprint.Footprint.RowPitch = rowPitch;
+
+    list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+    barrier(D3D12_RESOURCE_STATE_COPY_SOURCE, prior);
+    dxTex->setCurrentState(prior);
+
+    device->endSingleTimeCommands(list);
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(rowPitch) * height);
+    uint8_t* mapped = static_cast<uint8_t*>(readback->map());
+    std::memcpy(pixels.data(), mapped, pixels.size());
+    readback->unmap();
+    return pixels;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -153,6 +250,8 @@ int main(int argc, char** argv) {
 
     int exitCode = 1;
     bool readbackVerified = false;
+    bool stencilVerified = false;
+    bool mipsVerified = false;
     try {
         std::shared_ptr<RHIDevice> device = std::make_shared<DX12RHIDevice>(window);
         auto* dx12 = static_cast<DX12RHIDevice*>(device.get());
@@ -260,6 +359,123 @@ int main(int argc, char** argv) {
         std::shared_ptr<RHIPipeline> pipeline = builder->build();
         std::puts("[rhi_dx12_smoke] pipeline built (PSO + root signature)");
 
+        // ---- Phase 5: UInt16 IB + indirect args/count buffers ----
+        RHIBufferDesc ibDesc;
+        ibDesc.setSize(sizeof(uint16_t) * 3)
+              .setUsage(RHIBufferUsage::Index)
+              .setMemoryUsage(RHIMemoryUsage::CPUToGPU);
+        std::shared_ptr<RHIBuffer> ibU16 = device->createBuffer(ibDesc);
+        const uint16_t kIndicesU16[3] = { 0, 1, 2 };
+        ibU16->uploadData(kIndicesU16, sizeof(kIndicesU16), 0);
+
+        RHIBufferDesc drawArgsDesc;
+        drawArgsDesc.setSize(sizeof(DrawArgsDirect))
+                   .setUsage(RHIBufferUsage::Indirect)
+                   .setMemoryUsage(RHIMemoryUsage::GPUOnly);
+        std::shared_ptr<RHIBuffer> drawArgs = device->createBuffer(drawArgsDesc);
+        const DrawArgsDirect kDrawArgs = { 3, 1, 0, 0 };
+        drawArgs->uploadData(&kDrawArgs, sizeof(kDrawArgs), 0);
+
+        RHIBufferDesc drawIndexedArgsDesc;
+        drawIndexedArgsDesc.setSize(sizeof(DrawIndexedArgsInd))
+                          .setUsage(RHIBufferUsage::Indirect)
+                          .setMemoryUsage(RHIMemoryUsage::GPUOnly);
+        std::shared_ptr<RHIBuffer> drawIndexedArgs = device->createBuffer(drawIndexedArgsDesc);
+        const DrawIndexedArgsInd kDrawIndexedArgs = { 3, 1, 0, 0, 0 };
+        drawIndexedArgs->uploadData(&kDrawIndexedArgs, sizeof(kDrawIndexedArgs), 0);
+
+        RHIBufferDesc drawCountDesc;
+        drawCountDesc.setSize(4)
+                    .setUsage(RHIBufferUsage::Indirect)
+                    .setMemoryUsage(RHIMemoryUsage::GPUOnly);
+        std::shared_ptr<RHIBuffer> drawCount = device->createBuffer(drawCountDesc);
+        const uint32_t kDrawCount = 1;
+        drawCount->uploadData(&kDrawCount, sizeof(kDrawCount), 0);
+
+        // ---- Phase 5: offscreen stencil test scene ----
+        RHITextureDesc stencilRTDesc;
+        stencilRTDesc.width = kStencilRTSize;
+        stencilRTDesc.height = kStencilRTSize;
+        stencilRTDesc.format = RHIFormat::R8G8B8A8_UNORM;
+        stencilRTDesc.usage  = RHITextureUsage::ColorAttachment;
+        std::shared_ptr<RHITexture> stencilRT = device->createTexture(stencilRTDesc);
+
+        RHITextureDesc stencilDSDesc;
+        stencilDSDesc.width = kStencilRTSize;
+        stencilDSDesc.height = kStencilRTSize;
+        stencilDSDesc.format = RHIFormat::D24_UNORM_S8_UINT;
+        stencilDSDesc.usage  = RHITextureUsage::DepthStencilAttachment;
+        std::shared_ptr<RHITexture> stencilDS = device->createTexture(stencilDSDesc);
+
+        RHIRenderPassDesc stencilRPDesc;
+        stencilRPDesc.addColorAttachment(RHIFormat::R8G8B8A8_UNORM, RHILoadOp::Clear,
+                                         RHIStoreOp::Store, RHIImageLayout::Undefined,
+                                         RHIImageLayout::ColorAttachment);
+        stencilRPDesc.setDepthAttachment(RHIFormat::D24_UNORM_S8_UINT, RHILoadOp::Clear,
+                                         RHIStoreOp::Store, RHIImageLayout::Undefined,
+                                         RHIImageLayout::DepthStencilAttachment);
+        stencilRPDesc.depthAttachment.stencilLoadOp = RHILoadOp::Clear;
+        stencilRPDesc.depthAttachment.stencilStoreOp = RHIStoreOp::Store;
+        std::shared_ptr<RHIRenderPass> stencilPass = device->createRenderPass(stencilRPDesc);
+
+        RHIFramebufferDesc stencilFBDesc;
+        stencilFBDesc.renderPass = stencilPass.get();
+        stencilFBDesc.attachments = { stencilRT.get(), stencilDS.get() };
+        stencilFBDesc.width = kStencilRTSize;
+        stencilFBDesc.height = kStencilRTSize;
+        std::shared_ptr<RHIFramebuffer> stencilFB = device->createFramebuffer(stencilFBDesc);
+
+        RHIBufferDesc stencilVBDesc;
+        stencilVBDesc.setSize(sizeof(kStencilQuads))
+                    .setUsage(RHIBufferUsage::Vertex)
+                    .setMemoryUsage(RHIMemoryUsage::CPUToGPU);
+        std::shared_ptr<RHIBuffer> stencilVB = device->createBuffer(stencilVBDesc);
+        stencilVB->uploadData(kStencilQuads, sizeof(kStencilQuads), 0);
+
+        // Pipeline A: stencil Always + Replace(ref 1) — writes the mask.
+        RHIStencilOpState stWrite;
+        stWrite.compareOp = RHICompareOp::Always;
+        stWrite.passOp    = RHIStencilOp::Replace;
+        stWrite.reference = 1;
+        auto builderA = device->createGraphicsPipelineBuilder();
+        builderA->setVertexShader("shaders_dx12/demo_vert.dxil");
+        builderA->setFragmentShader("shaders_dx12/demo_frag.dxil");
+        builderA->addVertexBinding(0, sizeof(Vertex), RHIVertexInputRate::Vertex);
+        builderA->addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0);
+        builderA->addVertexAttribute(0, 1, RHIFormat::R32G32_SFLOAT, offsetof(Vertex, u));
+        builderA->setTopology(RHIPrimitiveTopology::TriangleList);
+        builderA->setCullMode(RHICullMode::None);
+        builderA->setDepthTest(false, false);
+        builderA->setSampleCount(RHISampleCount::Count1);
+        builderA->addBindingLayout(layout0.get());
+        builderA->addBindingLayout(layout1.get());
+        builderA->addPushConstant(RHIShaderStage::Fragment, 0, 16);
+        builderA->setStencilTest(true, stWrite, stWrite);
+        builderA->setRenderPass(stencilPass.get(), 0);
+        std::shared_ptr<RHIPipeline> stencilWritePipeline = builderA->build();
+
+        // Pipeline B: stencil NotEqual(ref 1) — draws only where stencil != 1.
+        RHIStencilOpState stMask;
+        stMask.compareOp = RHICompareOp::NotEqual;
+        stMask.reference = 1;
+        auto builderB = device->createGraphicsPipelineBuilder();
+        builderB->setVertexShader("shaders_dx12/demo_vert.dxil");
+        builderB->setFragmentShader("shaders_dx12/demo_frag.dxil");
+        builderB->addVertexBinding(0, sizeof(Vertex), RHIVertexInputRate::Vertex);
+        builderB->addVertexAttribute(0, 0, RHIFormat::R32G32B32_SFLOAT, 0);
+        builderB->addVertexAttribute(0, 1, RHIFormat::R32G32_SFLOAT, offsetof(Vertex, u));
+        builderB->setTopology(RHIPrimitiveTopology::TriangleList);
+        builderB->setCullMode(RHICullMode::None);
+        builderB->setDepthTest(false, false);
+        builderB->setSampleCount(RHISampleCount::Count1);
+        builderB->addBindingLayout(layout0.get());
+        builderB->addBindingLayout(layout1.get());
+        builderB->addPushConstant(RHIShaderStage::Fragment, 0, 16);
+        builderB->setStencilTest(true, stMask, stMask);
+        builderB->setRenderPass(stencilPass.get(), 0);
+        std::shared_ptr<RHIPipeline> stencilMaskPipeline = builderB->build();
+        std::puts("[rhi_dx12_smoke] stencil pipelines built");
+
         // ---- Frame loop ----
         double lastPrint = glfwGetTime();
         uint64_t frameCount = 0;
@@ -306,6 +522,27 @@ int main(int argc, char** argv) {
                 device->wrapCommandBuffer(commandBuffers[frame]);
             cmd->begin();   // resets per-frame allocator + list, starts recording
 
+            // Indirect-args barriers (outside the render pass; buffers start in
+            // COMMON and transition to INDIRECT_ARGUMENT).
+            const bool useDrawIndirect = (frameCount % 4 == 2);
+            const bool useDrawIndirectCount = (frameCount % 4 == 3);
+            if (useDrawIndirect) {
+                cmd->bufferBarrier(drawArgs.get(), drawArgs->getSize(),
+                                   RHIPipelineStage::AllCommands, RHIPipelineStage::DrawIndirect,
+                                   RHIAccessFlags::IndirectCommandRead,
+                                   RHIAccessFlags::IndirectCommandRead);
+            }
+            if (useDrawIndirectCount) {
+                cmd->bufferBarrier(drawIndexedArgs.get(), drawIndexedArgs->getSize(),
+                                   RHIPipelineStage::AllCommands, RHIPipelineStage::DrawIndirect,
+                                   RHIAccessFlags::IndirectCommandRead,
+                                   RHIAccessFlags::IndirectCommandRead);
+                cmd->bufferBarrier(drawCount.get(), drawCount->getSize(),
+                                   RHIPipelineStage::AllCommands, RHIPipelineStage::DrawIndirect,
+                                   RHIAccessFlags::IndirectCommandRead,
+                                   RHIAccessFlags::IndirectCommandRead);
+            }
+
             std::vector<RHIClearValue> clears;
             clears.push_back(RHIClearValue::Color(0.10f, 0.16f, 0.30f, 1.0f));
             clears.push_back(RHIClearValue::DepthStencil(1.0f, 0));
@@ -328,7 +565,26 @@ int main(int argc, char** argv) {
                 const float tint[4] = { 1.0f, 0.25f + 0.15f * std::sin(t), 0.6f, 1.0f };
                 cmd->pushConstants(RHIShaderStage::Fragment, 0, sizeof(tint), tint);
 
-                cmd->draw(3, 1, 0, 0);
+                // 4-way rotation: direct / UInt16 indexed / indirect / indirect-count.
+                // All paths render the same triangle.
+                switch (frameCount % 4) {
+                case 0:
+                    cmd->draw(3, 1, 0, 0);
+                    break;
+                case 1:
+                    cmd->bindIndexBuffer(ibU16.get(), 0, RHIIndexType::UInt16);
+                    cmd->drawIndexed(3, 1, 0, 0, 0);
+                    break;
+                case 2:
+                    cmd->drawIndirect(drawArgs.get(), 0, 1, sizeof(DrawArgsDirect));
+                    break;
+                case 3:
+                    cmd->bindIndexBuffer(ibU16.get(), 0, RHIIndexType::UInt16);
+                    cmd->drawIndexedIndirectCount(drawIndexedArgs.get(), 0,
+                                                  drawCount.get(), 0, 1,
+                                                  sizeof(DrawIndexedArgsInd));
+                    break;
+                }
             }
             cmd->endRenderPass();
             cmd->end();     // Close the command list (was: dx12->getCommandList(frame)->Close())
@@ -355,6 +611,102 @@ int main(int argc, char** argv) {
                 readbackVerified = ok;
             }
 
+            // Phase 5 one-shot stencil test (offscreen render + pixel verify).
+            if (readbackVerified && !stencilVerified) {
+                device->waitIdle();
+                void* stencilCmdPtr = device->beginSingleTimeCommands();
+                std::shared_ptr<RHICommandBuffer> scmd =
+                    device->wrapCommandBuffer(stencilCmdPtr);
+
+                std::vector<RHIClearValue> stencilClears;
+                stencilClears.push_back(RHIClearValue::Color(0.0f, 0.0f, 0.0f, 1.0f));
+                stencilClears.push_back(RHIClearValue::DepthStencil(1.0f, 0));
+
+                scmd->beginRenderPass(stencilPass.get(), stencilFB.get(), stencilClears);
+                {
+                    // A: left-half quad writes stencil=1 (Always/Replace, tint red).
+                    scmd->bindGraphicsPipeline(stencilWritePipeline.get());
+                    scmd->setBindingGroup(0, uboGroup.get());
+                    scmd->setBindingGroup(1, texGroup.get());
+                    scmd->setViewport(0, 0, static_cast<float>(kStencilRTSize),
+                                      static_cast<float>(kStencilRTSize));
+                    scmd->setScissor(0, 0, kStencilRTSize, kStencilRTSize);
+                    scmd->bindVertexBuffer(0, stencilVB.get(), 0);
+                    const float red[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
+                    scmd->pushConstants(RHIShaderStage::Fragment, 0, sizeof(red), red);
+                    scmd->draw(6, 1, 0, 0);
+
+                    // B: full-screen quad, only where stencil != 1 (tint green:
+                    // 60/255 checker texel * 255/60 tint == full green).
+                    scmd->bindGraphicsPipeline(stencilMaskPipeline.get());
+                    scmd->setBindingGroup(0, uboGroup.get());
+                    scmd->setBindingGroup(1, texGroup.get());
+                    const float green[4] = { 0.0f, 255.0f / 60.0f, 0.0f, 1.0f };
+                    scmd->pushConstants(RHIShaderStage::Fragment, 0, sizeof(green), green);
+                    scmd->draw(6, 1, 6, 0);
+                }
+                scmd->endRenderPass();
+                scmd.reset();
+                device->endSingleTimeCommands(stencilCmdPtr);
+
+                const std::vector<uint8_t> px =
+                    readbackTextureRGBA8(dx12, stencilRT.get());
+                const UINT pitch = (kStencilRTSize * 4 + 255u) & ~255u;
+                auto pixel = [&](int x, int y) {
+                    const size_t i = static_cast<size_t>(y) * pitch + x * 4;
+                    return std::make_tuple(px[i], px[i + 1], px[i + 2]);
+                };
+                const auto left  = pixel(16, kStencilRTSize / 2);
+                const auto right = pixel(48, kStencilRTSize / 2);
+                const bool leftRed   = std::get<0>(left) > 200 && std::get<1>(left) < 50;
+                const bool rightGreen = std::get<1>(right) > 200 && std::get<0>(right) < 50;
+                stencilVerified = leftRed && rightGreen;
+                std::printf("[rhi_dx12_smoke] stencil verify: left(%u,%u,%u) right(%u,%u,%u): %s\n",
+                            std::get<0>(left), std::get<1>(left), std::get<2>(left),
+                            std::get<0>(right), std::get<1>(right), std::get<2>(right),
+                            stencilVerified ? "PASS" : "FAIL");
+            }
+
+            // Phase 5 one-shot mip-generation test: 64x64 half red / half green
+            // texture with a full auto mip chain (mipLevels = 0). mip 1 must be
+            // the 32x32 box downsample (still half red / half green).
+            if (readbackVerified && stencilVerified && !mipsVerified) {
+                constexpr UINT kMipTexSize = 64;
+                std::vector<uint8_t> mipData(kMipTexSize * kMipTexSize * 4);
+                for (UINT y = 0; y < kMipTexSize; ++y) {
+                    for (UINT x = 0; x < kMipTexSize; ++x) {
+                        uint8_t* p = &mipData[(static_cast<size_t>(y) * kMipTexSize + x) * 4];
+                        if (x < kMipTexSize / 2) { p[0]=255; p[1]=0;   p[2]=0;   p[3]=255; }
+                        else                      { p[0]=0;   p[1]=255; p[2]=0;   p[3]=255; }
+                    }
+                }
+
+                RHITextureDesc mipTexDesc;
+                mipTexDesc.width = kMipTexSize;
+                mipTexDesc.height = kMipTexSize;
+                mipTexDesc.format = RHIFormat::R8G8B8A8_UNORM;
+                mipTexDesc.usage  = RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+                mipTexDesc.mipLevels = 0;   // 0 = automatic full chain (7 levels)
+                std::shared_ptr<RHITexture> mipped = device->createTexture(mipTexDesc);
+                mipped->uploadPixels(mipData.data(), mipData.size());   // uploads mip 0 + generates chain
+
+                const bool levelOk = mipped->getMipLevels() == 7;
+
+                const std::vector<uint8_t> mip1 =
+                    readbackTextureRGBA8(dx12, mipped.get(), /*subresource=*/1);
+                const UINT w1 = kMipTexSize / 2;
+                const UINT pitch1 = (w1 * 4 + 255u) & ~255u;
+                const uint8_t* pl = &mip1[static_cast<size_t>(w1 / 4) * 4];
+                const uint8_t* pr = &mip1[(static_cast<size_t>(w1 / 2) + w1 / 4) * 4];
+                const bool colorOk = pl[0] > 200 && pl[1] < 50 && pr[1] > 200 && pr[0] < 50;
+
+                mipsVerified = levelOk && colorOk;
+                std::printf("[rhi_dx12_smoke] mipgen verify: levels=%u (expect 7), "
+                            "mip1 left(%u,%u) right(%u,%u): %s\n",
+                            mipped->getMipLevels(), pl[0], pl[1], pr[0], pr[1],
+                            mipsVerified ? "PASS" : "FAIL");
+            }
+
             validation.poll("frame");
 
             if (glfwGetTime() - lastPrint > 1.0) {
@@ -375,7 +727,7 @@ int main(int argc, char** argv) {
             device->destroyFence(f);
         }
 
-        exitCode = (validation.numErrors == 0 && readbackVerified) ? 0 : 4;
+        exitCode = (validation.numErrors == 0 && readbackVerified && stencilVerified && mipsVerified) ? 0 : 4;
     } catch (const std::exception& e) {
         std::printf("[rhi_dx12_smoke] EXCEPTION: %s\n", e.what());
         exitCode = 2;

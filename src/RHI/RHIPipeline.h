@@ -75,7 +75,11 @@ public:
     // Depth / stencil
     virtual RHIGraphicsPipelineBuilder& setDepthTest(bool enable, bool writeEnable,
                                                       RHICompareOp compareOp = RHICompareOp::Less) = 0;
-    virtual RHIGraphicsPipelineBuilder& setStencilTest(bool enable) = 0;
+    /// Stencil test state (front/back face ops). The static `reference` in each
+    /// state is applied when the pipeline is bound (D3D12 OMSetStencilRef).
+    virtual RHIGraphicsPipelineBuilder& setStencilTest(bool enable,
+                                                        const RHIStencilOpState& front = {},
+                                                        const RHIStencilOpState& back = {}) = 0;
 
     // Multisampling
     virtual RHIGraphicsPipelineBuilder& setSampleCount(RHISampleCount count) = 0;

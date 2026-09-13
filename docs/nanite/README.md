@@ -233,7 +233,8 @@ naniteManager->performCulling(cmdBuffer, camera);
 ### cluster_culling.comp - Cluster 剔除 + DAG LOD 选择
 
 着色器一次 dispatch 完成三件事：世界变换、Nanite DAG LOD 选择、视锥/法线锥剔除，
-输出全局可见 cluster 索引列表（CPU 回读后逐 cluster 绘制）。
+输出全局可见 cluster 索引列表（紧凑列表 + 计数；绘制由
+`build_visible_geometry.comp` 在 GPU 侧消费，readback 仅用于统计显示）。
 
 ```glsl
 #version 450
@@ -315,6 +316,40 @@ void main() {
 但误差统计必须用不含惩罚的 `geometricError`；否则惩罚会污染整级误差（变成 50~100），
 这些区域将永远无法选中 L1+（只能退回 LOD0），表现为"没有简化"。
 
+### build_visible_geometry.comp - 可见几何 GPU 展开（Phase 5，间接绘制）
+
+读取 culling 输出的可见列表，把每个可见 cluster 的三角形**去索引展开**成紧凑顶点流
+（44B 顶点数据 + 4B `clusterIndex` 属性 = 48B/corner），并用 `atomicMax` 写 draw args 的
+`vertexCount`。渲染端 `NaniteDebugPass` 以**一次 `drawIndirect`** 绘制全部可见 cluster。
+
+为什么展开而不是"每 cluster 一条间接命令"：D3D12 无法让 shader 感知多 draw 批次中
+"当前是第几个 draw"（无 `gl_DrawID` 等价物、`SV_InstanceID` 不含 StartInstanceLocation），
+per-cluster 数据（变换/LOD/分色）无法随多 draw 携带；把数据烤进顶点流后单 draw 即可，
+且数百次 draw 合并为 1 次。设计决策详见 `docs/DX12-RHI-Notes.md` §14。
+
+```glsl
+// bindings(set 0): 0 几何表 / 1 可见列表 / 2 计数 / 3 源索引 / 4 源顶点
+//                  5 展开目标 VB / 6 drawArgs
+// push constant: forceLOD(0xFFFFFFFF = 关闭;GPU 侧诊断过滤)
+
+uint clusterIdx = visibleClusterIndices[slot];
+uvec4 a = geomTable[clusterIdx * 2u];   // (srcIndexOffset, indexCount, dstCornerOffset, meshIndex)
+
+for (uint k = 0; k < a.y; ++k) {        // 去索引展开
+    uint v = srcIndices[a.x + k];
+    uint dst = (a.z + k) * 12u;         // 12 uint/corner
+    for (uint c = 0; c < 11u; ++c) dstVerts[dst + c] = srcVerts[v * 11u + c];
+    dstVerts[dst + 11u] = clusterIdx;   // clusterIndex 属性(flat 插值)
+}
+atomicMax(drawArgs[0], a.z + a.y);      // GPU 写 vertexCount
+```
+
+**静态几何表**：每 cluster 32B（`srcIndexOffset/indexCount/dstCornerOffset/meshIndex` +
+`lodLevel/isRoot/clusterIndex/0`），`buildRenderData` 一次上传。注意
+`GPUClusterData.indexOffset` 从未被赋值（恒 0），与合并 IB 不同源，展开输入用几何表。
+
+**forceLOD 诊断**：过滤在展开 shader 内完成（push constant），与旧 CPU 过滤同语义。
+
 ---
 
 ## 数学原理
@@ -383,13 +418,15 @@ namespace NaniteConfig {
 | Phase 2 | LOD 生成 | ✅ 完成 | `MeshSimplifier` QEM 边坍缩 + 边界锁定 |
 | Phase 2 | Cluster Group 层级 | ✅ 完成 | 每 4 个相邻 Cluster 一组,父索引回填 |
 | Phase 3 | GPU 屏幕空间 LOD 选择 | ✅ 完成 | DAG 规则 `selfError <= T < parentError` |
+| Phase 5 | GPU-driven 间接绘制 | ✅ 完成 | GPU 展开 + 单 `drawIndirect`，绘制零 CPU 回读（双后端） |
 | Phase 3 | Cluster BVH | 🔲 待实现 | 层级剔除加速 (当前全量 dispatch) |
 | Phase 4 | Software Rasterizer | 🔲 待实现 | 小三角形软光栅 |
 | Phase 4 | Visibility Buffer | 🔲 待实现 | 延迟材质着色 |
 
-> 当前可见列表经双缓冲 readback 回 CPU 后逐 Cluster `drawIndexed`（Nanite 仅用于
-> Cluster 可视化路径）。完全 GPU-Driven 间接绘制（command signature / indirect draw）
-> 仍是 backlog。
+> 绘制路径已完全 GPU 驱动（Phase 5, 2026/09/13）：culling → `build_visible_geometry.comp`
+> GPU 展开 → 单次 `drawIndirect`。readback 仅用于统计显示（滞后 2 帧无妨），
+> 不再参与绘制决策；首帧 culling 完成前绘制 0 个 cluster。
+> 实例级链（键 6，`FrustumCullingPass`/`GPUDrivenRenderer`）仍走 CPU 回读 + 逐实体绘制。
 
 ---
 
@@ -409,7 +446,8 @@ namespace NaniteConfig {
 | `Z` | 切换视锥剔除 |
 
 > **Force LOD 原理**：强制某级时自动关闭 GPU LOD 选择（`w=0`），让所有层级先通过
-> 视锥/法线锥剔除，再由 CPU 按 `lodLevel` 过滤；层级不存在的 mesh 用根节点兜底。
+> 视锥/法线锥剔除，再由展开 shader 按 push constant 过滤（`lod == forced` 或
+> 根节点 `lod <= forced` 兜底）；层级不存在的 mesh 用根节点兜底。
 
 ### 输出验证
 
@@ -421,8 +459,9 @@ namespace NaniteConfig {
 [MeshClusterizer] LOD 3: 4 clusters
 [Nanite] GPU upload complete
 Clustering done: 3 meshes, 376 clusters
+[NaniteDebugPass] Render data built: 376 clusters, 284421 indices (GPU-driven)
 ...
-[LOD] Drawn:71/376 | GPU LOD Selection | Visible:71 | [L0:18 L1:48 L2:5 ]
+[LOD] Drawn:71/376 tris=25xxx verts=19xxx | GPU-driven indirect (1 draw) | Visible:71 | [L0:18 L1:48 L2:5 ]
 ```
 
 `[LOD]` 行的分布随相机距离变化（近处 L0/L1 为主，远处 L2/L3 为主），

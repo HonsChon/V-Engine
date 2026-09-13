@@ -1,7 +1,7 @@
 # DX12 后端补齐计划
 
 > 状态: 草案(2026/09/07 制定)
-> Phase 0/1/2/3/4 已完成(2026/09/10,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
+> Phase 0/1/2/3/4 及 Phase 5(GPU-driven 间接绘制/mip/stencil/UInt16)已完成(2026/09/13,见文末"执行记录");本文"现状摘要"一节为 Phase 0 前快照,已过时,请以代码为准。
 > 背景: 基于对 `src/RHI/DX12` 与 `src/RHI/Vulkan` 全量对比分析,以及上层 RHI 消费方式调研。Vulkan 是完整可运行后端;DX12 目前是"可编译的部分脚手架",且从未在真实 MSVC/Windows 上编译过。
 
 ## 目标与约束(已确认的方向)
@@ -169,10 +169,13 @@ DX12 能接上引擎的前提,同时净化 Vulkan 泄漏。
 - 各 pass 的 `.dxil` 全部产出并纳入构建
 - **验收**:与 Vulkan 的 7/8/9 键功能画面一致;DX12 在 Windows 上成为可选后端
 
-## Phase 5 — 长期 backlog(不计入本轮)
+## Phase 5 — 长期 backlog(已于 2026/09/13 部分完成,见文末执行记录)
 
-- `ExecuteIndirect`(待 GPU-driven/间接绘制真正启用时再做,含 command signature 生成)
-- MSAA、动态 state、stencil、line/point 填充、UInt16 index、mip 生成等(Vulkan 端也未完整使用的特性)
+- `ExecuteIndirect` ✅(含 command signature 生成;Nanite 链已切 GPU 展开 + 单 draw)
+- mip 生成 ✅(`mipLevels=0` 自动全链,双后端)
+- stencil 完整化 ✅(`RHIStencilOpState` + 双后端 + smoke 像素验证)
+- UInt16 index ✅(smoke 覆盖)
+- 仍留 backlog:MSAA、动态 state、line/point 填充等(Vulkan 端也未完整使用的特性)
 
 ## 关键风险
 
@@ -365,4 +368,75 @@ LOD 由 CPU 按硬编码距离阈值"整 mesh 切级";`cluster_culling.comp` 里
 **已知残留**
 - `MeshSimplifier` 的 QEM 误差逐次运行不稳定(seam/boundary 惩罚可能把个别 cluster
   误差放大到 ~50),可见列表统计逐次略有差异(图像稳定);不影响选择机制本身。
-- 可见列表仍需 CPU readback 后逐 cluster 绘制;完全 GPU-Driven 间接绘制是 backlog。
+- 可见列表仍需 CPU readback 后逐 cluster 绘制;完全 GPU-Driven 间接绘制是 backlog
+  (→ 已由下一节 Phase 5 于 2026/09/13 完成)。
+
+### Phase 5 — 已完成(2026/09/13)
+
+GPU-driven 间接绘制(Nanite 链)、mip 生成、stencil 完整化、UInt16 冒烟全部落地;
+Nanite debug 链从"CPU 回读循环数百次 drawIndexed"变为"GPU 展开 + 1 次 drawIndirect",
+双后端同源切换。
+
+**RHI 接口与双后端**
+- `RHICommandBuffer` 新增 `drawIndirect`(非索引,16B 命令)与
+  `drawIndexedIndirectCount`(count 变体,面向未来);命令布局约定写入接口注释
+  (与 Vulkan/D3D12 二进制兼容)。`RHIPipelineStage` 补 `DrawIndirect`。
+- DX12:`DX12RHIDevice` 懒创建缓存 Draw/DrawIndexed/Dispatch 三个 command signature
+  (无 root 参数),四个 indirect 入口全部 `ExecuteIndirect` 实现去 stub;
+  `bufferBarrier.stateFor` 补 `IndirectCommandRead → INDIRECT_ARGUMENT`(原落到 COMMON 是错的)。
+- Vulkan:`multiDrawIndirect` feature 查询式启用;`VK_KHR_draw_indirect_count` 查询式启用
+  (不支持则 count 变体 throw,引擎不消费);补 `vkCmdDrawIndirect` 封装。
+- stencil:`RHIStencilOp/RHIStencilOpState` + `setStencilTest(enable, front, back)`
+  (签名变更,原全仓库零调用);Vulkan 填 front/back `VkStencilOpState` 含静态 ref;
+  DX12 `FrontFace/BackFace` 分开(替换硬编码 ALWAYS/KEEP),ref 由 `bindPipelineInternal`
+  时 `OMSetStencilRef` 应用(D3D12 ref 在 PSO 之外)。
+
+**Nanite GPU-driven 链(设计决策见 DX12-RHI-Notes §14)**
+- **D3D12 无法识别多 draw 批次中的"第几个 draw"**(无 `gl_DrawID` 等价物、
+  `SV_InstanceID` 不含 StartInstanceLocation、root-constants-in-signature 无 Vulkan 对应)
+  → 放弃"每 cluster 一条命令"方案,改为 **GPU 展开 + 单 draw**:
+  新 shader `nanite/build_visible_geometry.comp` 读取可见列表,把可见 cluster 去索引展开成
+  紧凑 VB(44B 顶点 + 4B clusterIndex 属性,flat 插值保分色边界),`atomicMax` 写
+  draw args vertexCount(静态前缀和表分配目标区间,写入确定且无竞争);
+  `NaniteDebugPass` 一次 `drawIndirect` 替代 CPU 循环(数百 draw → 1 draw),首帧起零 CPU 依赖。
+- **发现存量缺陷**:`GPUClusterData.indexOffset` 从未被赋值(恒 0),与合并 IB 不同源;
+  改用 `buildRenderData` 上传的静态几何表(每 cluster 32B)驱动展开。
+- `cluster_debug.vert`:location 4 = clusterIndex 属性;model/lod 改为查几何表 + TransformBuffer
+  (VS 读 UAV,SM6.0 合法);push constant 144B→16B(forceLOD 过滤也移入展开 shader)。
+- `prepareIndirectDraw` 在 render pass 之外调用(Vulkan 禁止 pass 内 dispatch);
+  补 args fill→UAV、expVB COMMON→UAV、源缓冲 UAV 化等屏障链。
+- stats(Visible/Drawn/tris/LOD 分布)从 readback 可见列表 + CPU 表计算,绘制零回读;
+  删除未使用的 `recordCommands/recordCommandsMultiMesh` 旧路径。
+- CMake:`DX12_ENGINE_SHADERS` + Vulkan compute 清单各加 `build_visible_geometry.comp`。
+
+**mip 生成**
+- `mipLevels = 0` → 自动全链;`uploadPixels` 上传 mip 0 后自动生成整链(合同:ShaderReadOnly)。
+- Vulkan `vkCmdBlitImage` 逐级链(per-level barrier,自动补 TRANSFER usage);
+  DX12 绘制式(复用内部 blit pipeline,per-mip RTV/SRV + 逐 subresource barrier,
+  自动补 ALLOW_RENDER_TARGET);仅支持 2D 非深度(引擎消费均满足)。
+- 引擎:`TextureManager` 全链接入;gbuffer/SSR/sceneColor 三处 `maxLod=1` 为离屏 RT
+  正确配置,保留。
+
+**工具与自动化**
+- smoke:4 帧轮换绘制路径(direct / UInt16 drawIndexed / drawIndirect /
+  drawIndexedIndirectCount);离屏 stencil 两步像素验证(left(255,0,0) right(0,255,0) PASS);
+  64×64 mipgen 验证(levels=7,mip1 像素精确);全部纳入 exit code。
+- 引擎新增 `--autotest <键序列> --interval N --seconds M`(键注入走与真实回调相同的
+  handleKey 路径),供双后端自动回归。
+
+**验收(Windows)**
+- smoke:readback/stencil/mipgen 全 PASS,validation 0,exit 0。
+- DX12 Debug:键 8→9→0 soak(GPU-driven + mip 同在线)validation 0 error;
+  DX12 Release:同序列 72/376 可见、1 draw、exit 0。
+- Vulkan Debug/Release:同序列 65~76/376 可见(逐次差异为 MeshSimplifier QEM 已知随机性,
+  图像稳定)、1 draw、无 validation 输出、exit 0。
+- macOS Vulkan 回归:改动覆盖 Windows Vulkan 全绿;macOS 侧需用户本地跑一次确认
+  (`--autotest 8900 --seconds 10`)。
+
+**与计划偏差 / 已知问题**
+- count-buffer 变体按用户确认落地,但引擎路径不用(单 draw 模式 drawCount 恒 1);
+  count 变体目前仅 smoke 验证,面向未来静态合批等多 draw 场景。
+- 首 1-2 帧 viz 为空(culling 未完成时画 0 个,原为画全部 LOD0),属预期行为变化。
+- 展开着色器对 srcVB/srcIB/几何表的读取按 UAV(SSBO 非 readonly 约定),VS 阶段读 UAV
+  依赖 SM6.0(管线已要求);`dispatchIndirect` 已实现但无引擎消费者(smoke 未覆盖运行时)。
+- 深度/数组纹理不支持 mipgen(DX12 绘制式路径限制,引擎无此消费)。

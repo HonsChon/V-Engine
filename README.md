@@ -37,7 +37,8 @@
   - 屏幕空间误差计算
   - DAG 层级遍历（父子 Cluster 关系）
   - 互斥渲染（避免 Z-Fighting）
-- **间接绘制** - `vkCmdDrawIndexedIndirect` 减少 CPU-GPU 通信
+- **GPU-driven 间接绘制** - RHI `drawIndirect`（Vulkan/DX12 双后端）：
+  GPU 展开可见 cluster 几何后单次 draw call，绘制路径零 CPU 回读
 
 ### 🏗️ 引擎架构 (v1.0 新架构)
 - **模块化设计** - 参考 Unreal Engine 架构，职责清晰分离
@@ -144,8 +145,9 @@ VEngine/
 │   ├── ssr.vert/frag             # 屏幕空间反射
 │   ├── water.vert/frag           # 水面着色器
 │   └── nanite/                   # Nanite 专用着色器
-│       ├── cluster_culling.comp  # Cluster 剔除计算着色器
-│       └── cluster_debug.*       # 调试可视化着色器
+│       ├── cluster_culling.comp         # Cluster 剔除计算着色器
+│       ├── build_visible_geometry.comp  # 可见几何 GPU 展开 (间接绘制)
+│       └── cluster_debug.*              # 调试可视化着色器
 │
 ├── docs/                         # 项目文档
 │   ├── README.md                 # 文档索引
