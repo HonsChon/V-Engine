@@ -70,7 +70,7 @@ public:
 
     // 场景操作（main.cpp 启动参数 / UI 菜单共用）
     void importModelFile(const std::string& filePath);   // 导入 .obj/.gltf/.glb
-    void openSceneFromFile(const std::string& filePath); // 打开 .vscene
+    bool openSceneFromFile(const std::string& filePath); // 打开 .vscene（成功返回 true）
     void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
 
     float getDeltaTime() const { return m_deltaTime; }

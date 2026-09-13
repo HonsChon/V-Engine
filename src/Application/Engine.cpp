@@ -36,15 +36,41 @@
 
 #include <imgui.h>
 #include <GLFW/glfw3.h>
+#include <nlohmann/json.hpp>
 #include <iostream>
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 
 // ============================================================
 // 构造 & 析构
 // ============================================================
+
+namespace {
+
+// 编辑器状态持久化：CWD 下的小 JSON（与 imgui.ini 同位置约定，不进 git）
+constexpr const char* kEditorSettingsFile = "editor_settings.json";
+
+void saveLastScene(const std::string& scenePath) {
+    nlohmann::json j{{"lastScene", scenePath}};
+    std::ofstream ofs(kEditorSettingsFile, std::ios::binary);
+    if (ofs.is_open()) ofs << j.dump(2) << std::endl;
+}
+
+std::string loadLastScene() {
+    std::ifstream ifs(kEditorSettingsFile, std::ios::binary);
+    if (!ifs.is_open()) return {};
+    try {
+        auto j = nlohmann::json::parse(ifs);
+        return j.value("lastScene", std::string());
+    } catch (const nlohmann::json::parse_error&) {
+        return {};
+    }
+}
+
+} // anonymous namespace
 
 Engine::Engine(const Config& config) : m_config(config) {
     std::cout << "========================================\n";
@@ -121,8 +147,19 @@ void Engine::initializeSubsystems() {
     m_renderer->setRenderSystem(m_renderSystem.get());
     std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
 
-    // 10. Default Scene
-    createDefaultScene();
+    // 10. Scene: 恢复上次打开的场景（editor_settings.json），无记录则用演示场景
+    {
+        std::string lastScene = loadLastScene();
+        if (!lastScene.empty()) {
+            std::cout << "[Engine] Restoring last scene: " << lastScene << "\n";
+            if (!openSceneFromFile(lastScene)) {
+                std::cout << "[Engine] Last scene unavailable, using default scene\n";
+                createDefaultScene();
+            }
+        } else {
+            createDefaultScene();
+        }
+    }
 
     // 11. SelectionManager
     VEngine::SelectionManager::getInstance().setScene(m_scene.get());
@@ -723,6 +760,7 @@ void Engine::newScene() {
         if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(entt::null);
     }
     m_currentScenePath.clear();
+    saveLastScene("");   // 清除记忆 → 下次启动回演示场景
     updateSceneTitle();
     std::cout << "[Engine] New scene\n";
 }
@@ -742,11 +780,12 @@ void Engine::openSceneDialog() {
     }
 }
 
-void Engine::openSceneFromFile(const std::string& filePath) {
-    if (!m_scene) return;
+bool Engine::openSceneFromFile(const std::string& filePath) {
+    if (!m_scene) return false;
     VEngine::SceneSerializer serializer(m_scene.get());
     if (serializer.deserialize(filePath)) {
         m_currentScenePath = filePath;
+        saveLastScene(filePath);   // 记住最近场景（下次启动恢复）
         updateSceneTitle();
         if (m_window) {
             // 窗口标题反映当前场景（失败则忽略——纯显示用途）
@@ -754,7 +793,9 @@ void Engine::openSceneFromFile(const std::string& filePath) {
                 std::filesystem::path(filePath).filename().string();
             m_window->setTitle(title);
         }
+        return true;
     }
+    return false;
 }
 
 void Engine::saveSceneToPath(const std::string& filePath) {
@@ -762,6 +803,7 @@ void Engine::saveSceneToPath(const std::string& filePath) {
     VEngine::SceneSerializer serializer(m_scene.get());
     if (serializer.serialize(filePath)) {
         m_currentScenePath = filePath;
+        saveLastScene(filePath);   // 记住最近场景
         updateSceneTitle();
     }
 }
