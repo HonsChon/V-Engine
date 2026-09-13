@@ -16,6 +16,7 @@
 #include "GBufferPass.h"
 #include "LightingPass.h"
 #include "TransparentPass.h"
+#include "FXAAPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ssao/SSAOPass.h"
@@ -70,11 +71,19 @@ void SceneRenderer::initialize() {
     uint32_t w = extent.width;
     uint32_t h = extent.height;
 
-    // 创建 ForwardPass（始终可用）— 纯 RHI 接口
+    // FXAA 离屏场景目标（先建——场景 Pass 的管线都针对它的 RenderPass 创建）
+    createOffscreenTarget();
+    std::cout << "[SceneRenderer] Offscreen scene target created (FXAA)\n";
+
+    // 创建 ForwardPass（始终可用）— 场景渲染进离屏目标
     m_forwardPass = std::make_unique<ForwardPass>(
         m_rhiDevice,
-        m_swapChain->getRHIRenderPass(), w, h, MAX_FRAMES_IN_FLIGHT);
+        m_offscreenRenderPass.get(), w, h, MAX_FRAMES_IN_FLIGHT);
     std::cout << "[SceneRenderer] ForwardPass created (RHI)\n";
+
+    // FXAA 合成 Pass（输出到 swapchain，在 UI 之前）
+    m_fxaaPass = std::make_unique<FXAAPass>(
+        m_rhiDevice, m_swapChain->getRHIRenderPass(), w, h);
 
     m_initialized = true;
     std::cout << "[SceneRenderer] Initialized\n";
@@ -88,9 +97,11 @@ void SceneRenderer::cleanup() {
     cleanupNanite();
     cleanupGPUDrivenRendering();
     cleanupDeferredShading();
+    m_fxaaPass.reset();
     m_forwardPass.reset();
+    cleanupOffscreenTarget();
     m_initialized = false;
-    
+
     std::cout << "[SceneRenderer] Cleaned up\n";
 }
 
@@ -116,8 +127,8 @@ void SceneRenderer::initDeferredShading() {
         m_ssrPass = std::make_unique<SSRPass>(m_rhiDevice, w, h);
         std::cout << "  SSR Pass created\n";
 
-        // 3. Water
-        m_waterPass = std::make_unique<WaterPass>(m_rhiDevice, w, h, m_swapChain->getRHIRenderPass());
+        // 3. Water（合成阶段 → 离屏目标，FXAA 后进 swapchain）
+        m_waterPass = std::make_unique<WaterPass>(m_rhiDevice, w, h, m_offscreenRenderPass.get());
         m_waterPass->setWaterHeight(-1.5f);
         m_waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created\n";
@@ -125,7 +136,7 @@ void SceneRenderer::initDeferredShading() {
         // 3.5 Transparent（延迟模式半透明前向绘制，复用 ForwardPass 材质布局）
         if (m_forwardPass) {
             m_transparentPass = std::make_unique<TransparentPass>(
-                m_rhiDevice, m_swapChain->getRHIRenderPass(),
+                m_rhiDevice, m_offscreenRenderPass.get(),
                 m_forwardPass->getMaterialLayout(), w, h, MAX_FRAMES_IN_FLIGHT);
             std::cout << "  Transparent Pass created\n";
         }
@@ -140,10 +151,10 @@ void SceneRenderer::initDeferredShading() {
             std::cout << "  GBuffer descriptor sets created\n";
         }
 
-        // 6. LightingPass (Pure RHI)
+        // 6. LightingPass（Pure RHI；合成阶段 → 离屏目标）
         m_lightingPass = std::make_unique<LightingPass>(
             m_rhiDevice, w, h,
-            m_swapChain->getRHIRenderPass(), MAX_FRAMES_IN_FLIGHT);
+            m_offscreenRenderPass.get(), MAX_FRAMES_IN_FLIGHT);
         m_lightingPass->setAmbientLight(glm::vec3(0.03f), 1.0f);
         std::cout << "  LightingPass created (Pure RHI)\n";
 
@@ -200,6 +211,69 @@ void SceneRenderer::cleanupDeferredShading() {
     m_lightingPass.reset();
     m_gbuffer.reset();
     m_deferredInitialized = false;
+}
+
+// ============================================================
+// FXAA 离屏场景目标
+// ============================================================
+
+void SceneRenderer::createOffscreenTarget() {
+    auto extent = m_swapChain->getExtent();
+    uint32_t w = extent.width;
+    uint32_t h = extent.height;
+
+    // 颜色（与 swapchain 同格式；finalLayout=ShaderReadOnly 供 FXAA 采样）
+    RHITextureDesc colorDesc{};
+    colorDesc.width = w;
+    colorDesc.height = h;
+    colorDesc.format = RHIFormat::R8G8B8A8_UNORM;
+    colorDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+    m_offscreenColor = m_rhiDevice->createTexture(colorDesc);
+
+    // 深度（Forward 场景深度；延迟合成阶段不使用但保持 RP 结构统一）
+    RHITextureDesc depthDesc{};
+    depthDesc.width = w;
+    depthDesc.height = h;
+    depthDesc.format = RHIFormat::D32_SFLOAT;
+    depthDesc.usage = RHITextureUsage::DepthStencilAttachment;
+    m_offscreenDepth = m_rhiDevice->createTexture(depthDesc);
+
+    // 后处理采样器（Clamp）
+    RHISamplerDesc sampDesc{};
+    sampDesc.magFilter = RHIFilter::Linear;
+    sampDesc.minFilter = RHIFilter::Linear;
+    sampDesc.addressModeU = RHIAddressMode::ClampToEdge;
+    sampDesc.addressModeV = RHIAddressMode::ClampToEdge;
+    sampDesc.addressModeW = RHIAddressMode::ClampToEdge;
+    m_offscreenSampler = m_rhiDevice->createSampler(sampDesc);
+
+    // RenderPass：color + depth（结构与 swapchain RP 一致，各场景管线可无差别重绑）
+    RHIRenderPassDesc rpDesc;
+    rpDesc.addColorAttachment(
+        RHIFormat::R8G8B8A8_UNORM,
+        RHILoadOp::Clear, RHIStoreOp::Store,
+        RHIImageLayout::Undefined, RHIImageLayout::ShaderReadOnly);
+    rpDesc.setDepthAttachment(
+        RHIFormat::D32_SFLOAT,
+        RHILoadOp::Clear, RHIStoreOp::DontCare,
+        RHIImageLayout::Undefined, RHIImageLayout::DepthStencilAttachment);
+    m_offscreenRenderPass = m_rhiDevice->createRenderPass(rpDesc);
+
+    RHIFramebufferDesc fbDesc;
+    fbDesc.renderPass = m_offscreenRenderPass.get();
+    fbDesc.width = w;
+    fbDesc.height = h;
+    fbDesc.attachments.push_back(m_offscreenColor.get());
+    fbDesc.attachments.push_back(m_offscreenDepth.get());
+    m_offscreenFramebuffer = m_rhiDevice->createFramebuffer(fbDesc);
+}
+
+void SceneRenderer::cleanupOffscreenTarget() {
+    m_offscreenFramebuffer.reset();
+    m_offscreenRenderPass.reset();
+    m_offscreenSampler.reset();
+    m_offscreenDepth.reset();
+    m_offscreenColor.reset();
 }
 
 void SceneRenderer::createSceneColorImage() {
@@ -343,16 +417,13 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
         prepareNaniteCulling(cmd, imageIndex, frameIndex);
     }
 
-    // Begin render pass (Pure RHI)
+    // === Pass 1: 场景 → 离屏目标（FXAA 输入）===
     {
         std::vector<RHIClearValue> clears = {
             RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
             RHIClearValue::DepthStencil(1.0f, 0)
         };
-        cmd->beginRenderPass(
-            m_swapChain->getRHIRenderPass(),
-            m_swapChain->getRHIFramebuffer(imageIndex),
-            clears);
+        cmd->beginRenderPass(m_offscreenRenderPass.get(), m_offscreenFramebuffer.get(), clears);
     }
 
     m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Scene Rendering", 0.2f, 0.8f, 0.2f, 1.0f);
@@ -426,6 +497,27 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
         }
     }
 
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+    cmd->endRenderPass();   // 结束离屏场景 Pass
+
+    // === Pass 2: swapchain — FXAA 合成 + UI ===
+    {
+        std::vector<RHIClearValue> clears = {
+            RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
+            RHIClearValue::DepthStencil(1.0f, 0)
+        };
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
+    }
+
+    // FXAA（关闭时 shader 直通）
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "FXAA Pass", 0.4f, 0.8f, 0.4f, 1.0f);
+    if (m_fxaaPass && m_offscreenColor) {
+        m_fxaaPass->setSourceTexture(m_offscreenColor.get(), m_offscreenSampler.get());
+        m_fxaaPass->render(cmd, frameIndex, m_settings.enableFXAA);
+    }
     m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     // UI
@@ -534,10 +626,7 @@ void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t image
             RHIClearValue::Color(0.02f, 0.05f, 0.1f, 1.0f),
             RHIClearValue::DepthStencil(1.0f, 0)
         };
-        cmd->beginRenderPass(
-            m_swapChain->getRHIRenderPass(),
-            m_swapChain->getRHIFramebuffer(imageIndex),
-            clears);
+        cmd->beginRenderPass(m_offscreenRenderPass.get(), m_offscreenFramebuffer.get(), clears);
 
         // Deferred Lighting
         m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Lighting Pass", 1.0f, 0.9f, 0.3f, 1.0f);
@@ -559,6 +648,21 @@ void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t image
         m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
         if (m_waterPass) {
             m_waterPass->render(cmd, frameIndex);
+        }
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+
+        cmd->endRenderPass();   // 结束离屏合成 Pass
+
+        // === swapchain: FXAA 合成 + UI ===
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
+
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "FXAA Pass", 0.4f, 0.8f, 0.4f, 1.0f);
+        if (m_fxaaPass && m_offscreenColor) {
+            m_fxaaPass->setSourceTexture(m_offscreenColor.get(), m_offscreenSampler.get());
+            m_fxaaPass->render(cmd, frameIndex, m_settings.enableFXAA);
         }
         m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
@@ -624,12 +728,22 @@ void SceneRenderer::renderUI(RHICommandBuffer* cmd) {
 // ============================================================
 
 void SceneRenderer::onResize(uint32_t width, uint32_t height) {
+    // FXAA 离屏目标重建（新 RP 对象 → 各场景管线显式重绑）
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
+    cleanupOffscreenTarget();
+    createOffscreenTarget();
+
     if (m_forwardPass) {
-        m_forwardPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
+        m_forwardPass->recreate(m_offscreenRenderPass.get(), width, height);
     }
     if (m_transparentPass) {
-        m_transparentPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
+        m_transparentPass->recreate(m_offscreenRenderPass.get(), width, height);
     }
+    if (m_fxaaPass) {
+        m_fxaaPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
+    }
+    // Lighting/Water/NaniteDebug: 离屏 RP 与 swapchain RP 结构一致，
+    // Vulkan RP 兼容性下管线仍有效（与既有 resize 行为一致）
     if (m_ssaoPass) {
         m_ssaoPass->resize(width, height);
         // SSAO re-binding deferred until SSAOPass is fully migrated to RHI
@@ -753,7 +867,7 @@ void SceneRenderer::initNaniteDebugPass() {
         auto naniteShared = std::shared_ptr<Nanite::NaniteManager>(m_naniteManager.get(), [](Nanite::NaniteManager*){});
 
         m_naniteDebugPass = std::make_unique<NaniteDebugPass>(m_rhiDevice, m_swapChain, naniteShared);
-        m_naniteDebugPass->initialize(m_swapChain->getRHIRenderPass());
+        m_naniteDebugPass->initialize(m_offscreenRenderPass.get());   // 场景绘制 → 离屏（FXAA）
         m_naniteDebugPass->setClusterCullingPass(m_naniteManager->getCullingPass());
 
         if (!m_lastClusterizedMeshPath.empty()) {

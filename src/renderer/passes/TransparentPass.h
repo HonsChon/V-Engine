@@ -89,7 +89,8 @@ private:
     uint32_t height_;
     uint32_t maxFramesInFlight_;
 
-    std::shared_ptr<RHIPipeline> pipeline_;    // blend on + 手动深度剔除
+    std::shared_ptr<RHIPipeline> backPipeline_;     // 内层（cull Front）+ blend + 手动深度剔除
+    std::shared_ptr<RHIPipeline> frontPipeline_;    // 外层（cull Back）——两遍绘制保证混合顺序
     std::shared_ptr<RHIBindingLayout> globalLayout_;   // UBO + depth sampler
     std::shared_ptr<RHISampler> depthSampler_;
     std::vector<std::shared_ptr<RHIBindingGroup>> globalBindingGroups_;

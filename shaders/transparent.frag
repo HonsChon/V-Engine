@@ -93,6 +93,8 @@ void main() {
     float ao = 1.0;
 
     vec3 N = getNormalFromMap();
+    // 双面渲染：背面法线翻转让内表面正确受光（与 pbr.frag 同步）
+    if (!gl_FrontFacing) N = -N;
     vec3 V = normalize(fragViewPos - fragWorldPos);
 
     vec3 F0 = vec3(0.04);

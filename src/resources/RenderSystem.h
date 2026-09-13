@@ -317,7 +317,13 @@ public:
     }
 
     /**
-     * @brief 透明物体渲染（透明管线 + back-to-front 排序）
+     * @brief 透明物体渲染（两遍绘制：back faces → front faces）
+     *
+     * 单遍绘制（cull None）时，网格内层/外层三角形的绘制先后取决于存储顺序，
+     * 该顺序随像素位置翻转（UV 球按纬度存储 → 球心屏幕高度处翻转），顺序相关
+     * 的 alpha 混合因此产生上下半球色差 + 分界线锯齿。两遍绘制固定内层先于
+     * 外层，凸网格（球体等）混合顺序恒正确。
+     *
      * Forward 模式下由 renderForwardPass 内部调用；
      * GPU culling 间接绘制路径需在 opaque 之后单独调用。
      */
@@ -325,7 +331,23 @@ public:
         auto transparentList = getSortedTransparentList();
         if (transparentList.empty()) return;
 
-        forwardPass->bindTransparentPipeline(cmd);
+        // Phase 1: 内层（cull Front → 只画背面三角形）
+        forwardPass->bindTransparentBackPipeline(cmd);
+        for (const auto* renderable : transparentList) {
+            if (renderable->materialDescriptor) {
+                forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable->materialDescriptor);
+            }
+            forwardPass->pushModelMatrix(cmd, renderable->modelMatrix, renderable->materialParams);
+            forwardPass->drawMesh(
+                cmd,
+                renderable->gpuMesh->getVertexBuffer(),
+                renderable->gpuMesh->getIndexBuffer(),
+                renderable->gpuMesh->getIndexCount()
+            );
+        }
+
+        // Phase 2: 外层（cull Back → 只画正面三角形）
+        forwardPass->bindTransparentFrontPipeline(cmd);
         for (const auto* renderable : transparentList) {
             if (renderable->materialDescriptor) {
                 forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable->materialDescriptor);

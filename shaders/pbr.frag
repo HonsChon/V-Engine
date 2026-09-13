@@ -95,6 +95,9 @@ void main() {
     
     // 从法线贴图获取法线
     vec3 N = getNormalFromMap();
+    // 双面渲染（透明管线 cull None）：背面（内表面）法线翻转让其正确受光，
+    // 否则 NdotL=0 → 内表面只剩环境光 ≈ 纯黑，透出"黑壳"
+    if (!gl_FrontFacing) N = -N;
     vec3 V = normalize(fragViewPos - fragWorldPos);
     
     // Calculate reflectance at normal incidence

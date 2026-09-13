@@ -47,14 +47,16 @@ void TransparentPass::cleanup() {
     if (rhiDevice_) rhiDevice_->waitIdle();
     globalBindingGroups_.clear();
     uniformBuffers_.clear();
-    pipeline_.reset();
+    backPipeline_.reset();
+    frontPipeline_.reset();
     globalLayout_.reset();
     depthSampler_.reset();
 }
 
 void TransparentPass::recreate(RHIRenderPass* newRenderPass, uint32_t newWidth, uint32_t newHeight) {
     if (rhiDevice_) rhiDevice_->waitIdle();
-    pipeline_.reset();
+    backPipeline_.reset();
+    frontPipeline_.reset();
     renderPass_ = newRenderPass;
     width_ = newWidth;
     height_ = newHeight;
@@ -93,28 +95,34 @@ void TransparentPass::createPipeline() {
 
     const auto vertexAttrs = Vertex::getRHIAttributes();
 
-    auto builder = rhiDevice_->createGraphicsPipelineBuilder();
-    builder->setVertexShader("shaders/pbr_vert.spv")            // 与 ForwardPass 共用顶点着色器
-        .setFragmentShader("shaders/transparent_frag.spv")
-        .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
-    for (const auto& a : vertexAttrs) {
-        builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
-    }
-    builder->setTopology(RHIPrimitiveTopology::TriangleList)
-        .setCullMode(RHICullMode::None)                          // 透明面片双面
-        .setFrontFace(RHIFrontFace::CounterClockwise)
-        .setPolygonMode(RHIPolygonMode::Fill)
-        .setDepthTest(false, false, RHICompareOp::Less)          // 深度由 shader 手动剔除
-        .setSampleCount(RHISampleCount::Count1)
-        .addColorBlendAttachment(blend)
-        .addBindingLayout(globalLayout_.get())
-        .addBindingLayout(materialLayout_)                       // 复用 ForwardPass 材质布局
-        .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
-                         0, sizeof(PushConstantData))
-        .setRenderPass(renderPass_);
+    // 两遍绘制：内层（cull Front）+ 外层（cull Back），保证凸网格混合顺序
+    const RHICullMode cullModes[2] = { RHICullMode::Front, RHICullMode::Back };
+    std::shared_ptr<RHIPipeline>* targets[2] = { &backPipeline_, &frontPipeline_ };
 
-    pipeline_ = builder->build();
-    std::cout << "[TransparentPass] Pipeline created (Pure RHI)" << std::endl;
+    for (int i = 0; i < 2; ++i) {
+        auto builder = rhiDevice_->createGraphicsPipelineBuilder();
+        builder->setVertexShader("shaders/pbr_vert.spv")            // 与 ForwardPass 共用顶点着色器
+            .setFragmentShader("shaders/transparent_frag.spv")
+            .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+        for (const auto& a : vertexAttrs) {
+            builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+        }
+        builder->setTopology(RHIPrimitiveTopology::TriangleList)
+            .setCullMode(cullModes[i])
+            .setFrontFace(RHIFrontFace::CounterClockwise)
+            .setPolygonMode(RHIPolygonMode::Fill)
+            .setDepthTest(false, false, RHICompareOp::Less)          // 深度由 shader 手动剔除
+            .setSampleCount(RHISampleCount::Count1)
+            .addColorBlendAttachment(blend)
+            .addBindingLayout(globalLayout_.get())
+            .addBindingLayout(materialLayout_)                       // 复用 ForwardPass 材质布局
+            .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
+                             0, sizeof(PushConstantData))
+            .setRenderPass(renderPass_);
+
+        *targets[i] = builder->build();
+    }
+    std::cout << "[TransparentPass] Pipelines created (back/front, Pure RHI)" << std::endl;
 }
 
 void TransparentPass::createUniformBuffers() {
@@ -153,32 +161,39 @@ void TransparentPass::setDepthTexture(RHITexture* depthTexture, RHISampler* samp
 }
 
 void TransparentPass::render(RHICommandBuffer* cmd, VEngine::RenderSystem* renderSystem, uint32_t frameIndex) {
-    if (!renderSystem || !pipeline_) return;
+    if (!renderSystem || !backPipeline_ || !frontPipeline_) return;
     auto transparentList = renderSystem->getSortedTransparentList();
     if (transparentList.empty()) return;
 
     cmd->setViewport(0, 0, float(width_), float(height_));
     cmd->setScissor(0, 0, width_, height_);
 
-    cmd->bindGraphicsPipeline(pipeline_.get());
     cmd->setBindingGroup(0, globalBindingGroups_[frameIndex].get());
 
-    for (const auto* renderable : transparentList) {
-        // 复用 ForwardPass 的材质描述符（同一 BindingLayout 对象，兼容）
-        if (renderable->materialDescriptor) {
-            auto* group = renderable->materialDescriptor->groups[frameIndex].get();
-            if (group) cmd->setBindingGroup(1, group);
+    // 单遍绘制辅助（back→front 顺序遍历）
+    auto drawPhase = [&](RHIPipeline* pipeline) {
+        cmd->bindGraphicsPipeline(pipeline);
+        for (const auto* renderable : transparentList) {
+            // 复用 ForwardPass 的材质描述符（同一 BindingLayout 对象，兼容）
+            if (renderable->materialDescriptor) {
+                auto* group = renderable->materialDescriptor->groups[frameIndex].get();
+                if (group) cmd->setBindingGroup(1, group);
+            }
+
+            PushConstantData pushData{};
+            pushData.model = renderable->modelMatrix;
+            pushData.normalMatrix = glm::transpose(glm::inverse(renderable->modelMatrix));
+            pushData.materialParams = renderable->materialParams;
+            cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
+                               0, sizeof(PushConstantData), &pushData);
+
+            cmd->bindVertexBuffer(0, renderable->gpuMesh->getVertexBuffer());
+            cmd->bindIndexBuffer(renderable->gpuMesh->getIndexBuffer(), 0, RHIIndexType::UInt32);
+            cmd->drawIndexed(renderable->gpuMesh->getIndexCount(), 1, 0, 0, 0);
         }
+    };
 
-        PushConstantData pushData{};
-        pushData.model = renderable->modelMatrix;
-        pushData.normalMatrix = glm::transpose(glm::inverse(renderable->modelMatrix));
-        pushData.materialParams = renderable->materialParams;
-        cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
-                           0, sizeof(PushConstantData), &pushData);
-
-        cmd->bindVertexBuffer(0, renderable->gpuMesh->getVertexBuffer());
-        cmd->bindIndexBuffer(renderable->gpuMesh->getIndexBuffer(), 0, RHIIndexType::UInt32);
-        cmd->drawIndexed(renderable->gpuMesh->getIndexCount(), 1, 0, 0, 0);
-    }
+    // 两遍绘制：内层（cull Front）→ 外层（cull Back），保证混合顺序
+    drawPhase(backPipeline_.get());
+    drawPhase(frontPipeline_.get());
 }

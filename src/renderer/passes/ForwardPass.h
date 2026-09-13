@@ -68,7 +68,11 @@ public:
     // 渲染命令 (Pure RHI)
     void begin(RHICommandBuffer* cmd);
     void bindPipeline(RHICommandBuffer* cmd);                    // 不透明管线
-    void bindTransparentPipeline(RHICommandBuffer* cmd);         // 透明管线（blend + 深度写关）
+    // 透明两遍绘制（back faces → front faces，保证凸网格正确的混合顺序）：
+    // 同一像素内外两层的绘制先后若随位置翻转（如 UV 球按纬度存储三角形），
+    // 顺序相关的 alpha 混合会产生上下半球色差 + 分界线锯齿
+    void bindTransparentBackPipeline(RHICommandBuffer* cmd);     // cull Front：先画内层
+    void bindTransparentFrontPipeline(RHICommandBuffer* cmd);    // cull Back：再画外层
     void bindGlobalDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex);
     void bindMaterialDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex, MaterialDescriptor* material);
     void pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model,
@@ -80,7 +84,7 @@ public:
 
 private:
     void createBindingLayouts();
-    void createPipeline();          // 创建 opaque + transparent 两条管线
+    void createPipeline();          // 创建 opaque + 透明 back/front 三条管线
     void createUniformBuffers();
     void createGlobalBindingGroups();
     void cleanup();
@@ -92,8 +96,9 @@ private:
     uint32_t height_;
     uint32_t maxFramesInFlight_;
 
-    std::shared_ptr<RHIPipeline> pipeline_;            // 不透明
-    std::shared_ptr<RHIPipeline> transparentPipeline_; // 透明（SrcAlpha blend，深度写关）
+    std::shared_ptr<RHIPipeline> pipeline_;                   // 不透明
+    std::shared_ptr<RHIPipeline> transparentBackPipeline_;    // 透明内层（cull Front）
+    std::shared_ptr<RHIPipeline> transparentFrontPipeline_;   // 透明外层（cull Back）
     std::shared_ptr<RHIBindingLayout> globalLayout_;
     std::shared_ptr<RHIBindingLayout> materialLayout_;
     std::vector<std::shared_ptr<RHIBindingGroup>> globalBindingGroups_;

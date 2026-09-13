@@ -103,7 +103,7 @@ void DebugPanel::render() {
 
     ImGui::Spacing();
 
-    // === SSAO 设置 ===
+    // === SSAO / FXAA 设置 ===
     if (renderSettings) {
         if (ImGui::CollapsingHeader("SSAO", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Checkbox("Enable SSAO", &renderSettings->enableSSAO);
@@ -114,6 +114,9 @@ void DebugPanel::render() {
             if (ImGui::Combo("Quality", &quality, qualityLabels, IM_ARRAYSIZE(qualityLabels))) {
                 renderSettings->ssaoQuality = quality;
             }
+        }
+        if (ImGui::CollapsingHeader("Anti-Aliasing")) {
+            ImGui::Checkbox("Enable FXAA", &renderSettings->enableFXAA);
         }
 
         // === Nanite (Cluster Vis) 设置 ===
