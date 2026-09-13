@@ -1,6 +1,6 @@
 #include "Entity.h"
 
-namespace VulkanEngine {
+namespace VEngine {
 
 Entity::Entity(entt::entity handle, Scene* scene)
     : m_entityHandle(handle), m_scene(scene) {
@@ -156,4 +156,4 @@ bool Entity::hasChildren() const {
     return getComponent<RelationshipComponent>().childrenCount > 0;
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine

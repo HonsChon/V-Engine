@@ -5,8 +5,12 @@
 #include <functional>
 #include <entt/entt.hpp>
 
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
+}
+
+namespace Nanite {
+    class NaniteManager;
 }
 
 /**
@@ -59,12 +63,17 @@ public:
     /**
      * 设置 ECS 场景
      */
-    void setScene(VulkanEngine::Scene* scene);
+    void setScene(VEngine::Scene* scene);
 
     /**
      * 设置选中的ECS 实体
      */
     void setSelectedEntity(entt::entity entity);
+
+    /**
+     * 设置 NaniteManager（用于显示选中 mesh 的 cluster/LOD 统计，可为空）
+     */
+    void setNaniteManager(Nanite::NaniteManager* manager) { m_naniteManager = manager; }
 
     /**
      * 获取当前选中的ECS 实体
@@ -140,9 +149,10 @@ private:
     void renderLightSection();
 
     // ECS 数据
-    VulkanEngine::Scene* m_scene = nullptr;
+    VEngine::Scene* m_scene = nullptr;
     entt::entity m_selectedEntity = entt::null;
     bool m_useECSMode = false;
+    Nanite::NaniteManager* m_naniteManager = nullptr;
 
     // 选中对象信息（旧系统：
     int selectedId = -1;

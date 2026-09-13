@@ -44,6 +44,11 @@ public:
     // 设置渲染选项（用于 SSAO 等控制）
     void setRenderSettings(RenderSettings* settings) { renderSettings = settings; }
 
+    // 设置 Nanite 绘制统计（Cluster Vis 激活时由 NaniteDebugPass 提供）
+    void setNaniteStats(uint32_t total, uint32_t visible, uint32_t drawn,
+                        uint32_t triangles, uint32_t vertices,
+                        const uint32_t* lodCounts, int lodCount);
+
 private:
     // 渲染统计
     float fps = 0.0f;
@@ -70,4 +75,13 @@ private:
 
     // 渲染选项引用（可选）
     RenderSettings* renderSettings = nullptr;
+
+    // Nanite 绘制统计
+    static constexpr int NANITE_MAX_LOD = 8;
+    uint32_t naniteTotal = 0;
+    uint32_t naniteVisible = 0;
+    uint32_t naniteDrawn = 0;
+    uint32_t naniteTriangles = 0;
+    uint32_t naniteVertices = 0;
+    uint32_t naniteLodCounts[NANITE_MAX_LOD] = {};
 };

@@ -2,7 +2,7 @@
  * @file Engine.h
  * @brief Engine 主入口 — 管理所有子系统的生命周期
  *
- * 从 VulkanRenderer 迁移而来的模块化引擎架构。
+ * 模块化引擎架构:场景/ECS 层不依赖具体图形 API,渲染经 RHI 抽象(Vulkan/DX12)。
  */
 
 #pragma once
@@ -23,7 +23,7 @@ class RHIDevice;
 class RHISwapChain;
 class RHICommandBuffer;
 
-namespace VulkanEngine {
+namespace VEngine {
     class Scene;
     class RenderSystem;
 }
@@ -54,7 +54,7 @@ public:
     SceneRenderer* getRenderer() const { return m_renderer.get(); }
     RHIDevice* getRHIDevice() const { return m_rhiDevice.get(); }
     RHISwapChain* getRHISwapChain() const { return m_rhiSwapChain.get(); }
-    VulkanEngine::Scene* getScene() const { return m_scene.get(); }
+    VEngine::Scene* getScene() const { return m_scene.get(); }
     Camera* getCamera() const { return m_camera.get(); }
 
     float getDeltaTime() const { return m_deltaTime; }
@@ -89,8 +89,8 @@ private:
     std::unique_ptr<RHIDevice> m_rhiDevice;
     std::shared_ptr<RHISwapChain> m_rhiSwapChain;
     std::unique_ptr<Camera> m_camera;
-    std::unique_ptr<VulkanEngine::Scene> m_scene;
-    std::unique_ptr<VulkanEngine::RenderSystem> m_renderSystem;
+    std::unique_ptr<VEngine::Scene> m_scene;
+    std::unique_ptr<VEngine::RenderSystem> m_renderSystem;
     std::unique_ptr<SceneRenderer> m_renderer;
     std::unique_ptr<ImGuiLayer> m_imguiLayer;
     std::unique_ptr<UIManager> m_uiManager;

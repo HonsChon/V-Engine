@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cstring>
 
-using namespace VulkanEngine;
+using namespace VEngine;
 
 SceneHierarchyPanel::SceneHierarchyPanel() {
     // 添加一些示例对象用于测试
@@ -54,7 +54,7 @@ void SceneHierarchyPanel::render() {
     ImGui::End();
 }
 
-void SceneHierarchyPanel::setScene(VulkanEngine::Scene* scene) {
+void SceneHierarchyPanel::setScene(VEngine::Scene* scene) {
     m_scene = scene;
     m_useECSMode = (scene != nullptr);
     

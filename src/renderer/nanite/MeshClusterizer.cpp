@@ -873,7 +873,7 @@ void MeshClusterizer::generateClusterData(const InputMesh& mesh, ClusterizedMesh
             cluster.bounds.coneAngleCos
         );
         
-        cluster.gpuData.vertexOffset = cluster.gpuVertexOffset;
+        cluster.gpuData.meshIndex = 0;  // 由 NaniteManager::uploadToGPU 按 mesh 顺序填充
         cluster.gpuData.indexOffset = cluster.gpuIndexOffset;
         cluster.gpuData.triangleCount = cluster.triangleCount;
         cluster.gpuData.lodLevel = cluster.lodLevel;

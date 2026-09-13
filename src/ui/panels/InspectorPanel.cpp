@@ -5,8 +5,10 @@
 #include "Entity.h"
 #include "Components.h"
 #include "SelectionManager.h"
+#include "MeshManager.h"
+#include "nanite/NaniteManager.h"
 
-using namespace VulkanEngine;
+using namespace VEngine;
 
 InspectorPanel::InspectorPanel() {
 }
@@ -44,7 +46,7 @@ void InspectorPanel::render() {
     ImGui::End();
 }
 
-void InspectorPanel::setScene(VulkanEngine::Scene* scene) {
+void InspectorPanel::setScene(VEngine::Scene* scene) {
     m_scene = scene;
     m_useECSMode = (scene != nullptr);
 }
@@ -58,8 +60,8 @@ void InspectorPanel::setSelectedEntity(entt::entity entity) {
 // ============================================================
 
 void InspectorPanel::renderECSInspector() {
-    // ´Ó SelectionManager »ñÈ¡µ±Ç°Ñ¡ÖÐµÄÊµÌå
-    m_selectedEntity = VulkanEngine::SelectionManager::getInstance().getSelectedEntity();
+    // ï¿½ï¿½ SelectionManager ï¿½ï¿½È¡ï¿½ï¿½Ç°Ñ¡ï¿½Ðµï¿½Êµï¿½ï¿½
+    m_selectedEntity = VEngine::SelectionManager::getInstance().getSelectedEntity();
 
     if (m_selectedEntity == entt::null) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No entity selected");
@@ -200,6 +202,39 @@ void InspectorPanel::renderMeshRendererComponent() {
         ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##MaterialPath", matBuffer, sizeof(matBuffer))) {
             meshRenderer.materialPath = matBuffer;
+        }
+
+        // ===== ç½‘æ ¼ç»Ÿè®¡ï¼ˆåŽŸå§‹ mesh + Nanite cluster/LODï¼‰=====
+        auto gpuMesh = VEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
+        if (gpuMesh) {
+            ImGui::Separator();
+            ImGui::Text("Mesh Stats");
+            ImGui::Text("  Vertices: %u", gpuMesh->getVertexCount());
+            ImGui::Text("  Triangles: %u", gpuMesh->getIndexCount() / 3);
+
+            auto clusterized = m_naniteManager ? m_naniteManager->getMesh(meshRenderer.meshPath) : nullptr;
+            if (clusterized) {
+                uint32_t totalTris = 0;
+                for (const auto& c : clusterized->clusters) totalTris += c.triangleCount;
+
+                ImGui::Text("  Nanite: %u LODs, %u clusters, %u tris",
+                            static_cast<uint32_t>(clusterized->lodLevels.size()),
+                            static_cast<uint32_t>(clusterized->clusters.size()),
+                            totalTris);
+
+                for (size_t lod = 0; lod < clusterized->lodLevels.size(); ++lod) {
+                    const auto& level = clusterized->lodLevels[lod];
+                    uint32_t lodTris = 0;
+                    for (uint32_t i = level.clusterStartIndex;
+                         i < level.clusterStartIndex + level.clusterCount &&
+                         i < clusterized->clusters.size(); ++i) {
+                        lodTris += clusterized->clusters[i].triangleCount;
+                    }
+                    ImGui::Text("    L%u: %u clusters, %u tris (err %.2e)",
+                                static_cast<uint32_t>(lod), level.clusterCount, lodTris,
+                                level.maxError);
+                }
+            }
         }
     }
 

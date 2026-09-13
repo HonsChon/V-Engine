@@ -1,6 +1,6 @@
 /**
  * @file Engine.cpp
- * @brief 原有架构引擎主入口，用于从 VulkanRenderer 迁移
+ * @brief 引擎主入口 — 通过 RHI 抽象驱动渲染后端(Vulkan/DX12)
  */
 
 #include "Engine.h"
@@ -101,11 +101,11 @@ void Engine::initializeSubsystems() {
     std::cout << "[Engine] Camera created\n";
 
     // 7. Scene
-    m_scene = std::make_unique<VulkanEngine::Scene>();
+    m_scene = std::make_unique<VEngine::Scene>();
     std::cout << "[Engine] Scene created\n";
 
     // 8. RenderSystem (with RHI device — MeshManager needs it for buffer creation)
-    m_renderSystem = std::make_unique<VulkanEngine::RenderSystem>();
+    m_renderSystem = std::make_unique<VEngine::RenderSystem>();
     m_renderSystem->init(m_rhiDevice.get());
     std::cout << "[Engine] RenderSystem created\n";
 
@@ -121,7 +121,7 @@ void Engine::initializeSubsystems() {
     createDefaultScene();
 
     // 11. SelectionManager
-    VulkanEngine::SelectionManager::getInstance().setScene(m_scene.get());
+    VEngine::SelectionManager::getInstance().setScene(m_scene.get());
 
     // 12. UI (ImGui)
     if (m_config.enableUI) {
@@ -158,30 +158,30 @@ void Engine::initializeSubsystems() {
 void Engine::createDefaultScene() {
     // Sphere (Earth texture)
     auto sphereEntity = m_scene->createEntity("Sphere");
-    sphereEntity.addComponent<VulkanEngine::MeshRendererComponent>("sphere", "earth_material");
-    auto& sphereMat = sphereEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    sphereEntity.addComponent<VEngine::MeshRendererComponent>("sphere", "earth_material");
+    auto& sphereMat = sphereEntity.addComponent<VEngine::PBRMaterialComponent>();
     sphereMat.albedoMap = "../../assets/Earth/Maps/Color Map.jpg";
     sphereMat.normalMap = "../../assets/Earth/Maps/Bump.jpg";
     sphereMat.metallicMap = "../../assets/Earth/Maps/Spec Mask.png";
 
     // UFO
     auto ufoEntity = m_scene->createEntity("UFO");
-    ufoEntity.addComponent<VulkanEngine::MeshRendererComponent>(
+    ufoEntity.addComponent<VEngine::MeshRendererComponent>(
         "../../assets/UFO/UFO_Empty.obj", "ufo_material");
-    auto& ufoTx = ufoEntity.getComponent<VulkanEngine::TransformComponent>();
+    auto& ufoTx = ufoEntity.getComponent<VEngine::TransformComponent>();
     ufoTx.position = glm::vec3(3.0f, 0.0f, 0.0f);
     ufoTx.scale = glm::vec3(1.0f);
-    auto& ufoMat = ufoEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    auto& ufoMat = ufoEntity.addComponent<VEngine::PBRMaterialComponent>();
     ufoMat.albedoMap = "../../assets/UFO/textures/UFO_color.jpg";
     ufoMat.normalMap = "../../assets/UFO/textures/UFO_nmap.jpg";
     ufoMat.metallicMap = "../../assets/UFO/textures/UFO_metalness.jpg";
 
     // Plane
     auto planeEntity = m_scene->createEntity("Plane");
-    planeEntity.addComponent<VulkanEngine::MeshRendererComponent>("plane", "plane_material");
-    auto& planeTx = planeEntity.getComponent<VulkanEngine::TransformComponent>();
+    planeEntity.addComponent<VEngine::MeshRendererComponent>("plane", "plane_material");
+    auto& planeTx = planeEntity.getComponent<VEngine::TransformComponent>();
     planeTx.position = glm::vec3(0.0f, -1.5f, 0.0f);
-    planeEntity.addComponent<VulkanEngine::PBRMaterialComponent>();
+    planeEntity.addComponent<VEngine::PBRMaterialComponent>();
 
     std::cout << "[Engine] Default scene created (3 entities)\n";
 }
@@ -275,7 +275,20 @@ void Engine::setupInputCallbacks() {
             if (settings.showClusterVisualization) m_renderer->initNaniteDebugPass();
             break;
         case GLFW_KEY_0:
-            // cycle debug mode handled by NaniteDebugPass directly
+            m_renderer->cycleNaniteDebugMode();
+            break;
+        case GLFW_KEY_Z:
+            settings.naniteFrustumCulling = !settings.naniteFrustumCulling;
+            std::cout << "[Engine] Nanite Frustum Culling " << (settings.naniteFrustumCulling ? "ON" : "OFF") << "\n";
+            break;
+        case GLFW_KEY_X:
+            settings.naniteConeCulling = !settings.naniteConeCulling;
+            std::cout << "[Engine] Nanite Cone Culling " << (settings.naniteConeCulling ? "ON" : "OFF") << "\n";
+            break;
+        case GLFW_KEY_B:
+            settings.naniteForceLOD = (settings.naniteForceLOD >= 7) ? -1 : settings.naniteForceLOD + 1;
+            std::cout << "[Engine] Nanite Force LOD "
+                      << (settings.naniteForceLOD < 0 ? "OFF" : std::to_string(settings.naniteForceLOD)) << "\n";
             break;
         }
     });
@@ -288,7 +301,7 @@ void Engine::setupInputCallbacks() {
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         if (ext == ".obj") {
             auto e = m_scene->createEntity("Dropped Model");
-            e.addComponent<VulkanEngine::MeshRendererComponent>(filePath, "default_material");
+            e.addComponent<VEngine::MeshRendererComponent>(filePath, "default_material");
             std::cout << "[Engine] Loaded: " << filePath << "\n";
         }
     });
@@ -513,33 +526,33 @@ void Engine::handleMousePicking() {
     float aspect = (float)w / (float)h;
     glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 100.0f);
 
-    VulkanEngine::Ray ray = VulkanEngine::RayPicker::screenToWorldRay(
+    VEngine::Ray ray = VEngine::RayPicker::screenToWorldRay(
         (float)mx, (float)my, (float)w, (float)h, view, proj);
 
     entt::entity hitEntity = entt::null;
     float closestT = std::numeric_limits<float>::max();
 
     auto& registry = m_scene->getRegistry();
-    auto ecsView = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+    auto ecsView = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
     auto* meshMgr = m_renderSystem->getMeshManager();
 
     for (auto entity : ecsView) {
-        auto& tx = ecsView.get<VulkanEngine::TransformComponent>(entity);
-        auto& mr = ecsView.get<VulkanEngine::MeshRendererComponent>(entity);
+        auto& tx = ecsView.get<VEngine::TransformComponent>(entity);
+        auto& mr = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
-        VulkanEngine::AABB aabb;
+        VEngine::AABB aabb;
         if (meshMgr) aabb = meshMgr->getMeshAABB(mr.meshPath);
         else { aabb.min = glm::vec3(-1); aabb.max = glm::vec3(1); }
 
-        VulkanEngine::AABB world = aabb.transform(tx.getTransform());
+        VEngine::AABB world = aabb.transform(tx.getTransform());
         float tMin, tMax;
-        if (VulkanEngine::RayPicker::rayIntersectsAABB(ray, world, tMin, tMax)) {
+        if (VEngine::RayPicker::rayIntersectsAABB(ray, world, tMin, tMax)) {
             if (tMin >= 0 && tMin < closestT) { closestT = tMin; hitEntity = entity; }
         }
     }
 
     if (hitEntity != entt::null) {
-        VulkanEngine::SelectionManager::getInstance().select(hitEntity);
+        VEngine::SelectionManager::getInstance().select(hitEntity);
         if (m_uiManager) {
             if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(hitEntity);
             if (auto* i = m_uiManager->getInspectorPanel()) {
@@ -548,7 +561,7 @@ void Engine::handleMousePicking() {
             }
         }
     } else {
-        VulkanEngine::SelectionManager::getInstance().clearSelection();
+        VEngine::SelectionManager::getInstance().clearSelection();
         if (m_uiManager) {
             if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(entt::null);
             if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(entt::null);

@@ -35,7 +35,10 @@ void ClusterCullingPass::cleanup() {
     m_uniformBuffer_.reset(); m_dummyStorageBuffer_.reset();
     m_visibleIndicesBuffer_.reset(); m_counterBuffer_.reset();
     m_selectionStateBuffer_.reset(); m_bindingGroup_.reset();
-    for (uint32_t i = 0; i < READBACK_BUFFER_COUNT; ++i) m_readbackBuffers_[i].reset();
+    for (uint32_t i = 0; i < READBACK_BUFFER_COUNT; ++i) {
+        m_readbackBuffers_[i].reset();
+        m_readbackValid[i] = false;
+    }
     ComputePassBase::cleanup();
     m_initialized = false;
 }
@@ -186,6 +189,7 @@ void ClusterCullingPass::record(RHICommandBuffer* cmd, uint32_t frameIndex) {
                     sizeof(uint32_t) * m_clusterCount_, 0, sizeof(uint32_t));
 
     insertBufferBarrier(cmd, m_readbackBuffers_[writeIndex].get());
+    m_readbackValid[writeIndex] = true;
     m_dataCopyPending = true;
 }
 
@@ -216,6 +220,8 @@ const std::vector<uint32_t>& ClusterCullingPass::getVisibleIndices() { return m_
 
 void ClusterCullingPass::readbackData(uint32_t frameIndex) {
     uint32_t readIndex = frameIndex % READBACK_BUFFER_COUNT;
+    // 该 slot 还没被 culling 写过(前几帧):跳过,避免读到未初始化数据
+    if (!m_readbackValid[readIndex]) return;
     if (!m_readbackBuffers_[readIndex]) {
         std::cerr << "[ClusterCulling] Readback buffer[" << readIndex << "] is null" << std::endl;
         m_dataCopyPending = false; return;

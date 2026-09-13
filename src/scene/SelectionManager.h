@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 class Scene;
 class Entity;
@@ -128,4 +128,4 @@ private:
     Scene* m_scene = nullptr;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

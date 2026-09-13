@@ -12,8 +12,8 @@ layout(push_constant) uniform PushConstants {
     mat4 normalMatrix;
     uint clusterIndex;      // Cluster 索引（用于生成颜色）
     uint totalClusters;     // 总 Cluster 数量
-    uint debugMode;         // 调试模式: 0=Cluster颜色, 1=法线, 2=LOD
-    float padding;
+    uint debugMode;         // 调试模式: 0=Cluster颜色, 1=法线, 2=LOD, 3=哈希色
+    uint lodLevel;          // 该 Cluster 的 LOD 层级
 } push;
 
 // 顶点输入
@@ -29,6 +29,7 @@ layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) flat out uint fragClusterIndex;
 layout(location = 4) flat out uint fragTotalClusters;
 layout(location = 5) flat out uint fragDebugMode;
+layout(location = 6) flat out uint fragLodLevel;
 
 // UBO - 全局共享数据
 layout(binding = 0) uniform UniformBufferObject {
@@ -55,6 +56,7 @@ void main() {
     fragClusterIndex = push.clusterIndex;
     fragTotalClusters = push.totalClusters;
     fragDebugMode = push.debugMode;
+    fragLodLevel = push.lodLevel;
     
     // 输出裁剪空间位置
     gl_Position = ubo.proj * ubo.view * worldPos;

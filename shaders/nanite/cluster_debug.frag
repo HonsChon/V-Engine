@@ -16,6 +16,7 @@ layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) flat in uint fragClusterIndex;
 layout(location = 4) flat in uint fragTotalClusters;
 layout(location = 5) flat in uint fragDebugMode;
+layout(location = 6) flat in uint fragLodLevel;
 
 layout(location = 0) out vec4 outColor;
 
@@ -126,11 +127,16 @@ void main() {
             break;
         }
         
-        case 2:  // LOD 可视化模式 (TODO: 当实现 LOD 后)
+        case 2:  // LOD 可视化模式
         {
-            // 目前只有 LOD 0，显示绿色
-            // 未来：LOD 0 = 绿色, LOD 1 = 黄色, LOD 2 = 橙色, LOD 3+ = 红色
-            color = vec3(0.2, 0.8, 0.3);
+            // LOD 0 = 绿色, LOD 1 = 黄色, LOD 2 = 橙色, LOD 3+ = 红色
+            vec3 lodColors[4] = vec3[4](
+                vec3(0.2, 0.8, 0.3),
+                vec3(0.9, 0.85, 0.2),
+                vec3(0.95, 0.55, 0.15),
+                vec3(0.9, 0.15, 0.15)
+            );
+            color = lodColors[min(fragLodLevel, 3u)];
             break;
         }
         

@@ -18,7 +18,7 @@ class RHICommandBuffer;
 class RHITexture;
 class RHISampler;
 
-namespace VulkanEngine {
+namespace VEngine {
     class Entity;
     struct GPUMesh;
 }

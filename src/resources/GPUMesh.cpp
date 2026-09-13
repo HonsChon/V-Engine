@@ -6,7 +6,7 @@
 #include "MeshManager.h"
 #include "RHIDevice.h"
 
-namespace VulkanEngine {
+namespace VEngine {
 
 bool MeshManager::createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh) {
     if (!gpuMesh || !gpuMesh->mesh || !m_rhiDevice) return false;
@@ -40,4 +40,4 @@ bool MeshManager::createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh) {
     return true;
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine

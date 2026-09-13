@@ -409,6 +409,11 @@ MeshSimplifier::EdgeCollapse MeshSimplifier::computeEdgeCollapse(uint32_t edgeIn
         collapse.error = 0;
     }
     
+    // 纯几何误差（不含下面的边界/锁定惩罚）: LOD 误差统计必须用它,
+    // 否则 +100/+50 的惩罚会把整个 cluster 的 lodError 放大到 50~100,
+    // 导致这些区域永远无法选中 L1+（只能退回 LOD0）。
+    collapse.geometricError = collapse.error;
+    
     // 边界惩罚
     if (edge.isBoundary) {
         collapse.error += 100.0;  // 大惩罚，但不阻止折叠
@@ -463,9 +468,9 @@ void MeshSimplifier::performSimplification(const SimplifierConfig& config) {
         // 执行折叠
         collapseEdge(collapse);
         
-        // 更新统计
-        m_maxError = std::max(m_maxError, static_cast<float>(collapse.error));
-        m_totalError += collapse.error;
+        // 更新统计（用纯几何误差, 不含惩罚）
+        m_maxError = std::max(m_maxError, static_cast<float>(collapse.geometricError));
+        m_totalError += collapse.geometricError;
         m_collapseCount++;
         
         // 进度回调

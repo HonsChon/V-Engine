@@ -5,7 +5,7 @@
 #include <limits>
 #include <vector>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 /**
  * @brief 射线结构
@@ -247,4 +247,4 @@ public:
     }
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

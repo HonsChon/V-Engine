@@ -330,3 +330,39 @@ Vulkan 回归干净。
 - SSAO resize 走 cleanup+init,会泄漏旧的持久描述符(有界,水位线方案下不损坏渲染)。
 - 存量未改:`SSRPass` 输出无消费者;Water SSR `ssrMaxSteps=2048` 偏大;延迟路径未启用
   GPU culling(与 Vulkan 行为一致)。
+
+---
+
+## Phase 4.1 后续:Nanite GPU DAG LOD 选择(2026/09/11)
+
+**背景**:Phase 4 时 GPU culling 只做视锥/法线锥剔除(`clusterCountPacked.w=0`),
+LOD 由 CPU 按硬编码距离阈值"整 mesh 切级";`cluster_culling.comp` 里的 LOD 分支是
+"只渲染 LOD0"的调试 hack。本轮打通真正的 DAG 屏幕误差选择。
+
+**改动**
+- `cluster_culling.comp`:实现 `selfError <= T < parentError`;父索引越界按根处理;
+  `proj[1][1]` 取 `abs()`(Vulkan Y 翻转后为负);用 `GPUClusterData.meshIndex` 索引
+  `TransformBuffer` 做每 mesh 世界变换。
+- `GPUClusterData.vertexOffset` 更名为 `meshIndex`(布局不变,仍是 96B),
+  `uploadToGPU` 按排序后的 mesh 顺序填充。
+- `NaniteManager`:新增 `setMeshTransforms()`(每 mesh mat4,GPUOnly + staging,变化才上传);
+  `performCulling` 的 `w` 改为 `enableLODSelection`;删除死代码 `updateUniformBuffer`。
+- `NaniteDebugPass`:删除 CPU 距离阈值逻辑,直接绘制 GPU 回读的可见列表;
+  回读未就绪时降级为只画 LOD0;push constant 用 `lodLevel` 替换 padding。
+- `cluster_debug.*`:LOD 模式按层级着色(0 绿 / 1 黄 / 2 橙 / 3+ 红)。
+- 键 `0` 循环调试模式;F1 Debug Panel 增加 `GPU LOD Selection` 与两个调参滑条。
+- **readback slot 修复**:`prepareNaniteCulling`/`recordNaniteDebugCommands` 改用
+  `frameIndex`(此前用 `imageIndex`,交换链 3 图与 2 帧槽错位 → 可能读到未完成 slot,
+  即历史"颜色颤抖"根因);`ClusterCullingPass` 增加 per-slot `m_readbackValid`,
+  未写入的 slot 不回读。
+
+**验收(Windows)**
+- DX12/Vulkan Release:近处 `L0:18 L1:48 L2:5`,后退 8s 后 `L0:6 L1:4 L2:12 L3:1`;
+  UI 关闭同机位截图跨运行/跨后端一致。
+- DX12 Debug:键 8→9→0 soak(376 cluster 全链路),validation 0 error/warning。
+- 该改动同时覆盖 DX12 与 Vulkan 后端(单一 GLSL 源 + 各自内容管线)。
+
+**已知残留**
+- `MeshSimplifier` 的 QEM 误差逐次运行不稳定(seam/boundary 惩罚可能把个别 cluster
+  误差放大到 ~50),可见列表统计逐次略有差异(图像稳定);不影响选择机制本身。
+- 可见列表仍需 CPU readback 后逐 cluster 绘制;完全 GPU-Driven 间接绘制是 backlog。

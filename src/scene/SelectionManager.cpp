@@ -4,7 +4,7 @@
 #include "Components.h"
 #include <algorithm>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 SelectionManager& SelectionManager::getInstance() {
     static SelectionManager instance;
@@ -89,4 +89,4 @@ void SelectionManager::notifySelectionChanged() {
     }
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine

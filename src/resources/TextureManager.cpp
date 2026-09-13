@@ -13,7 +13,7 @@
 #include <cstring>
 #include <cstdlib>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 // ============================================================
 // Helper: create GPUTexture from raw pixels
@@ -159,4 +159,4 @@ std::shared_ptr<GPUTexture> TextureManager::loadTexture(const std::string& textu
     return gpuTex;
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine

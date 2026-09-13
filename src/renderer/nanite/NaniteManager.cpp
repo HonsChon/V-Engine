@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iostream>
 #include <chrono>
+#include <cstring>
 
 namespace Nanite {
 
@@ -61,6 +62,8 @@ void NaniteManager::cleanup() {
     m_uniformBuffer.reset();
     m_visibleIndicesBuffer.reset();
     m_counterBuffer.reset();
+    m_meshTransformCount = 0;
+    m_lastMeshTransforms.clear();
     
     // 清理缓存
     m_meshCache.clear();
@@ -157,12 +160,14 @@ void NaniteManager::uploadToGPU() {
     std::sort(sortedMeshNames.begin(), sortedMeshNames.end());
     
     // 按排序后的顺序遍历，同时修正 parentGroupIndex 为全局索引
+    uint32_t meshIndex = 0;
     for (const auto& name : sortedMeshNames) {
         const auto& mesh = m_meshCache.at(name);
         uint32_t meshBaseOffset = static_cast<uint32_t>(allClusterData.size());
         
         for (const auto& cluster : mesh->clusters) {
             GPUClusterData data = cluster.gpuData;
+            data.meshIndex = meshIndex;
             
             // 将 mesh 内部的本地 parentGroupIndex 转换为全局索引
             if (data.parentGroupIndex != 0xFFFFFFFF) {
@@ -175,6 +180,7 @@ void NaniteManager::uploadToGPU() {
             
             allClusterData.push_back(data);
         }
+        meshIndex++;
     }
     
     m_totalClusterCount = static_cast<uint32_t>(allClusterData.size());
@@ -213,7 +219,7 @@ void NaniteManager::uploadToGPU() {
         std::cout << "  offset aabbMin = " << offsetof(GPUClusterData, aabbMin) << std::endl;
         std::cout << "  offset aabbMax = " << offsetof(GPUClusterData, aabbMax) << std::endl;
         std::cout << "  offset normalCone = " << offsetof(GPUClusterData, normalCone) << std::endl;
-        std::cout << "  offset vertexOffset = " << offsetof(GPUClusterData, vertexOffset) << std::endl;
+        std::cout << "  offset meshIndex = " << offsetof(GPUClusterData, meshIndex) << std::endl;
         std::cout << "  offset indexOffset = " << offsetof(GPUClusterData, indexOffset) << std::endl;
         std::cout << "  offset triangleCount = " << offsetof(GPUClusterData, triangleCount) << std::endl;
         std::cout << "  offset lodLevel = " << offsetof(GPUClusterData, lodLevel) << std::endl;
@@ -434,10 +440,10 @@ void NaniteManager::performCulling(
     uniforms.cameraPosition = glm::vec4(cameraPosition, 1.0f);
     m_lastCameraPosition = cameraPosition;  // 缓存用于 CPU 端 LOD 选择
     uniforms.clusterCountPacked = glm::uvec4(
-        m_totalClusterCount,  // x: cluster count
-        1,                    // y: enable frustum cull
-        1,                    // z: enable cone cull
-        0                     // w: disable GPU LOD selection (使用 CPU 端 LOD)
+        m_totalClusterCount,                            // x: cluster count
+        m_config.enableClusterCulling ? 1u : 0u,        // y: enable frustum cull
+        m_config.enableConeCulling ? 1u : 0u,           // z: enable cone cull
+        m_config.enableLODSelection ? 1u : 0u           // w: enable GPU DAG LOD selection
     );
     uniforms.screenParams = glm::vec4(
         m_screenWidth,                          // x: screen width
@@ -456,54 +462,30 @@ void NaniteManager::performCulling(
     m_cullingPass->record(cmd, frameIndex);
 }
 
-void NaniteManager::updateUniformBuffer(
-    const glm::mat4& viewMatrix,
-    const glm::mat4& projMatrix,
-    const glm::vec3& cameraPosition) 
-{
-    // 计算 viewProj
-    glm::mat4 viewProj = projMatrix * viewMatrix;
+void NaniteManager::setMeshTransforms(const std::vector<glm::mat4>& transforms) {
+    if (transforms.empty()) return;
     
-    // 提取视锥平面
-    glm::vec4 frustumPlanes[6];
-    extractFrustumPlanes(viewProj, frustumPlanes);
-    
-    // 构建 uniform 数据（需要与 shader 匹配）
-    // 必须和cluster_culling.comp 中的 CullingUniforms 完全一致
-    struct ClusterCullingUniforms {
-        glm::mat4 viewMatrix;        // 64 bytes
-        glm::mat4 projMatrix;        // 64 bytes
-        glm::mat4 viewProjMatrix;    // 64 bytes
-        glm::vec4 frustumPlanes[6];  // 96 bytes
-        glm::vec4 cameraPosition;    // 16 bytes (xyz: position, w: unused)
-        glm::uvec4 clusterCountPacked; // 16 bytes (x=count, y=frustumCull, z=coneCull, w=lodSelect)
-        glm::vec4 screenParams;      // 16 bytes (x=width, y=height, z=errorScale, w=threshold)
-        // Total: 336 bytes
-    };
-    
-    ClusterCullingUniforms uniforms{};
-    uniforms.viewMatrix = m_lastViewMatrix;
-    uniforms.projMatrix = m_lastProjMatrix;
-    uniforms.viewProjMatrix = viewProj;
-    for (int i = 0; i < 6; i++) {
-        uniforms.frustumPlanes[i] = frustumPlanes[i];
+    // 只在变换变化时上传（GPUOnly 缓冲的 uploadData 会走 staging + 一次性提交）
+    if (m_lastMeshTransforms.size() == transforms.size() &&
+        std::memcmp(m_lastMeshTransforms.data(), transforms.data(),
+                    transforms.size() * sizeof(glm::mat4)) == 0) {
+        return;
     }
-    uniforms.cameraPosition = glm::vec4(cameraPosition, 1.0f);
-    uniforms.clusterCountPacked = glm::uvec4(
-        m_totalClusterCount,  // x: cluster count
-        1,                    // y: enable frustum cull
-        1,                    // z: enable cone cull
-        1                     // w: enable LOD selection
-    );
-    uniforms.screenParams = glm::vec4(
-        m_screenWidth,                          // x: screen width
-        m_screenHeight,                         // y: screen height
-        m_config.lodErrorScale,                 // z: LOD error scale
-        m_config.screenSpaceErrorThreshold      // w: pixel threshold
-    );
+    m_lastMeshTransforms = transforms;
     
-    // 直接写入 HOST_VISIBLE 缓冲区
-    m_uniformBuffer->uploadData(&uniforms, sizeof(uniforms));
+    const uint64_t size = sizeof(glm::mat4) * transforms.size();
+    if (!m_transformBuffer || m_meshTransformCount != transforms.size()) {
+        RHIBufferDesc desc{};
+        desc.size = size;
+        desc.usage = RHIBufferUsage::Storage;
+        desc.memoryUsage = RHIMemoryUsage::GPUOnly;
+        m_transformBuffer = m_rhiDevice->createBuffer(desc);
+        m_meshTransformCount = static_cast<uint32_t>(transforms.size());
+        if (m_cullingPass) {
+            m_cullingPass->setTransformBuffer(m_transformBuffer.get());
+        }
+    }
+    m_transformBuffer->uploadData(transforms.data(), size);
 }
 
 void NaniteManager::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {

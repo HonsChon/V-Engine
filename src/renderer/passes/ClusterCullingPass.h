@@ -82,6 +82,7 @@ private:
     // Double-buffered readback
     static constexpr uint32_t READBACK_BUFFER_COUNT = 2;
     std::shared_ptr<RHIBuffer> m_readbackBuffers_[READBACK_BUFFER_COUNT];
+    bool m_readbackValid[READBACK_BUFFER_COUNT] = { false, false };
     uint32_t m_currentReadbackIndex_ = 0;
 
     // Binding group

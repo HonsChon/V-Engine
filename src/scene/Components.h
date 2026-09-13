@@ -9,7 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 // 前向声明
 class ScriptableEntity;
@@ -330,4 +330,4 @@ struct UUIDComponent {
     UUIDComponent(uint64_t id) : uuid(id) {}
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

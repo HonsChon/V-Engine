@@ -11,7 +11,7 @@
 // Forward declaration
 class RHIDevice;
 
-namespace VulkanEngine {
+namespace VEngine {
 
 /**
  * @brief GPU Mesh 数据结构
@@ -203,4 +203,4 @@ private:
     std::unordered_map<std::string, std::shared_ptr<GPUMesh>> m_meshCache;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

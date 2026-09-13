@@ -10,6 +10,19 @@ DebugPanel::DebugPanel() {
     }
 }
 
+void DebugPanel::setNaniteStats(uint32_t total, uint32_t visible, uint32_t drawn,
+                                uint32_t triangles, uint32_t vertices,
+                                const uint32_t* lodCounts, int lodCount) {
+    naniteTotal = total;
+    naniteVisible = visible;
+    naniteDrawn = drawn;
+    naniteTriangles = triangles;
+    naniteVertices = vertices;
+    for (int i = 0; i < NANITE_MAX_LOD; ++i) {
+        naniteLodCounts[i] = (lodCounts && i < lodCount) ? lodCounts[i] : 0;
+    }
+}
+
 void DebugPanel::render() {
     // 更新 FPS 历史
     fpsHistory[fpsHistoryIndex] = fps;
@@ -102,9 +115,40 @@ void DebugPanel::render() {
                 renderSettings->ssaoQuality = quality;
             }
         }
+
+        // === Nanite (Cluster Vis) 设置 ===
+        if (ImGui::CollapsingHeader("Nanite (Cluster Vis)")) {
+            ImGui::Checkbox("GPU LOD Selection", &renderSettings->naniteLODSelection);
+            ImGui::Checkbox("Frustum Culling (Z)", &renderSettings->naniteFrustumCulling);
+            ImGui::Checkbox("Cone Culling (X)", &renderSettings->naniteConeCulling);
+            ImGui::SliderInt("Force LOD (B, -1=off)", &renderSettings->naniteForceLOD, -1, 7);
+            ImGui::SliderFloat("Error Threshold (px)", &renderSettings->naniteErrorThreshold, 0.1f, 20.0f, "%.2f");
+            ImGui::SliderFloat("Error Scale", &renderSettings->naniteErrorScale, 1.0f, 1000.0f, "%.0f");
+            ImGui::TextDisabled("Press 9 to toggle cluster vis, 0 to cycle mode");
+        }
     }
 
     ImGui::Spacing();
+
+    // === Nanite 绘制统计（Cluster Vis 激活时跟随实际绘制）===
+    if (naniteTotal > 0) {
+        if (ImGui::CollapsingHeader("Nanite Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Text("Clusters: %u total / %u visible / %u drawn",
+                        naniteTotal, naniteVisible, naniteDrawn);
+            ImGui::Text("Drawn: %u tris, %u verts", naniteTriangles, naniteVertices);
+
+            char lodText[192] = { 0 };
+            size_t used = 0;
+            for (int lod = 0; lod < NANITE_MAX_LOD; ++lod) {
+                if (naniteLodCounts[lod] == 0) continue;
+                used += snprintf(lodText + used, sizeof(lodText) - used,
+                                 "[L%d:%u] ", lod, naniteLodCounts[lod]);
+                if (used >= sizeof(lodText)) break;
+            }
+            if (lodText[0] != '\0') ImGui::Text("LOD: %s", lodText);
+        }
+        ImGui::Spacing();
+    }
 
     // === 控制说明 ===
     if (ImGui::CollapsingHeader("Controls")) {

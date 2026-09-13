@@ -39,6 +39,9 @@ struct NaniteConfig {
     // 是否启用法线锥背面剔除
     bool enableConeCulling = true;
     
+    // 是否启用 GPU 端 DAG LOD 选择（屏幕误差规则）
+    bool enableLODSelection = true;
+    
     // 是否启用 HZB 遮挡剔除（需要HZB pass）
     bool enableOcclusionCulling = false;
     

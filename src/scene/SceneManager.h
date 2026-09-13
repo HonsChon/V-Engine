@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <functional>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 class Scene;
 
@@ -149,4 +149,4 @@ private:
     std::vector<SceneCallback> m_sceneChangeCallbacks;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

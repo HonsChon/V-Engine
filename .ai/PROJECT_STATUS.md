@@ -452,64 +452,103 @@ cd build/bin
 
 ## 当前工作状态
 
-### 上次会话结束点 (2026/03/10 v0.11.2)
-- **完成**: Nanite Phase 2 - LOD 层级生成 (METIS 风格图分割 + 简化)
-- **完成**: Nanite Phase 2 - DAG 层级构建 (父子关系)
-- **状态**: CPU 端 LOD 过滤工作正常，球体渲染稳定
+### 上次会话结束点 (2026/09/12 v0.12.1)
+- **完成**: 修复 cone culling 公式(`-cos` → `-sin`),消除宽锥 cluster 的过度剔除
+- **完成**: cluster 变换修正(包围球半径乘缩放、法线锥轴用逆转置矩阵)
+- **完成**: `MeshSimplifier` 分离"几何误差"与"惩罚代价",lodError 不再被 +100/+50 污染
+- **完成**: Force LOD 诊断(键 `B` 循环 -1..7;强制时关闭 GPU LOD 选择后 CPU 过滤)
+- **完成**: `X`/`Z` 切换 cone/frustum 剔除;F1 面板滑条
+- **状态**: Force LOD 序列 DX12/VK 一致(LOD0→250 簇、L1→70、L2→20、L3→10);
+  DX12 Debug validation 0 error(仅存量 clear-value 性能 warning)
 
-### 🔴 待修复问题: GPU Culling 颜色颤抖
+### 已修复: 简化 mesh "看起来没简化" / 块状空洞 (2026/09/12)
 
-**问题描述**: 
-当使用 GPU Culling 路径时（`ClusterCullingPass` 返回可见 cluster 列表），Cluster 可视化会出现**颜色颤抖**（每帧渲染的 cluster 列表不稳定）。
+**现象**: 键 8+9 后 cluster 可视化出现一块一块的洞,且感觉还是 LOD0 的 mesh。
 
-**已排查**:
-1. ✅ LOD 数据在 CPU 端正确（`lodLevels` 结构完整）
-2. ✅ LOD 数据上传到 GPU 正确（`GPUClusterData.lodLevel` 已验证）
-3. ✅ CPU-LOD0 模式渲染稳定（不颤抖）
-4. ❌ GPU Readback 同步有问题
+**根因(两个)**:
+1. `cluster_culling.comp` 的 cone 剔除条件写成了 `dot(viewDir, axis) < -cos θ`,
+   正确应为 `-sin θ`。对半角 >45° 的宽锥 cluster(主要是 LOD1+ 合并簇)会误判为背面,
+   整块剔除;而子簇又因 `parentError <= T` 被 LOD 规则跳过 → 块状空洞。
+2. `MeshSimplifier` 用含惩罚的折叠代价(边界 +100、锁定顶点 +50)更新 `m_maxError`,
+   再作为 `geometricError` 传给 lodError → 误差被放大到 50~100(正常 1e-5 量级),
+   父级再累加 `maxChildError` → 这些区域永远选不中 L1+,只能退回 LOD0。
 
-**根本原因**:
-- `readbackCullingResults()` 在 `drawFrame()` 开始时调用
-- 读取的是上一帧（或更早）的 GPU 数据
-- 每帧读取时机不稳定，导致可见 cluster 列表跳变
+**修复**:
+- `coneCull()` 改用 `-sqrt(max(0, 1-cos²))`;cone 轴按 mesh 逆转置矩阵变换;
+  包围球半径乘最大轴缩放。
+- `EdgeCollapse` 增加 `geometricError`(纯 QEM,不含惩罚),优先队列仍用含惩罚的
+  `error` 排序,`m_maxError`/`m_totalError` 改用 `geometricError`。
+- 新增 Force LOD(`B` 键 + F1 滑条):强制某级时 `w=0` 关闭 GPU LOD 选择,
+  所有层级先过剔除,再由 CPU 按 `lodLevel` 过滤(层级不存在的 mesh 用根兜底)。
+- `X`/`Z` 键切换 cone/frustum 剔除;`performCulling` 不再硬编码这两个开关。
 
-**临时解决方案**:
-- 当前使用 **CPU-LOD0 模式** 渲染（在 `NaniteDebugPass::recordCommandsWithLOD()` 中）
-- 跳过 GPU culling readback，直接在 CPU 端过滤 LOD 0 cluster
+**验证**:
+- 误差恢复:UFO L1 ≈ 5e-5、sphere L1 ≈ 4.3e-6(不再出现 50/100)。
+- Force LOD 统计:DX12 `LOD0:250 / LOD1:70 / LOD2:20 / LOD3:10`,VK 同;
+  相邻层级截图 diff ≈19%(简化可见)。
+- DX12 Debug:键 8→9→0→B×9→X→Z soak,validation 0 error。
+- Vulkan Release:stderr 0,Force LOD 序列与 DX12 一致。
 
-**相关文件**:
-- `src/passes/NaniteDebugPass.cpp` - `recordCommandsWithLOD()` 方法
-- `src/passes/ClusterCullingPass.cpp` - `readbackData()` 方法
-- `src/nanite/NaniteManager.cpp` - `readbackCullingResults()` 方法
-- `shaders/nanite/cluster_culling.comp` - LOD 选择逻辑
+**已知残留**:
+- QEM 折叠顺序仍受 `unordered_map` 迭代顺序影响 → 每次运行简化结果/误差略有差异
+  (量级已正常,不再影响可用性)。彻底确定性化留作后续。
+- `MeshSimplifier` 的边界惩罚仍可能让少数 collapse 代价偏高(排序层面),属设计如此。
+
+### ✅ 已解决: GPU Culling 颜色颤抖 (2026/09/11)
+
+**原问题**: GPU readback 的可见 cluster 列表不稳定,可视化每帧跳变。
+
+**根因**:
+- `ClusterCullingPass::record()` 用 `imageIndex` 选 readback slot,而
+  `Engine::readbackCullingResults()` 用 `frameIndex` —— 交换链图像数(3)与帧槽数(2)
+  不同,CPU 可能读到尚未完成/未写入的 slot。
+- 另外 GPU 端没有真正的 LOD 选择,CPU 用硬编码距离阈值"整 mesh 切 LOD"。
+
+**修复**:
+1. readback slot 统一用 `frameIndex`(`SceneRenderer::prepareNaniteCulling` /
+   `recordNaniteDebugCommands`);`ClusterCullingPass` 增加 per-slot `m_readbackValid`,
+   未写入的 slot 不回读。
+2. `cluster_culling.comp` 实现真正的 Nanite DAG LOD 选择:
+   `selfScreenError <= threshold < parentScreenError`,并支持每 mesh 世界矩阵
+   (`GPUClusterData.meshIndex` + TransformBuffer)。
+3. `NaniteDebugPass::recordCommandsWithLOD` 删除 CPU 距离阈值逻辑,直接绘制 GPU
+   回读的可见列表;回读未就绪时降级只画 LOD0。
+4. 键 `0` 循环调试模式(ClusterColor/Normal/LOD/HashColor),LOD 模式按层级着色;
+   F1 Debug Panel 可实时调 `screenSpaceErrorThreshold` / `lodErrorScale`。
+
+**验证**:
+- DX12/Vulkan Release:近处 `L0:18 L1:48 L2:5`,后退后 `L0:6 L1:4 L2:12 L3:1`。
+- 同机位截图跨运行/跨后端一致(UI 关闭后逐像素对比)。
+- DX12 Debug validation 0 error(见 docs/DX12-Port-Plan.md)。
+
+**已知残留**:
+- ~~`MeshSimplifier` 的 QEM 误差被 seam/boundary 惩罚放大到 ~50~~ → 已于 2026/09/12
+  分离 `geometricError` 修复(见上节)。
 
 ### 下一步建议
-1. **修复 GPU Culling 同步问题**（新开窗口解决）
-   - 方案 A: 使用 Timeline Semaphore 确保 GPU->CPU 同步
-   - 方案 B: 使用 N 帧延迟的 ring buffer 读取
-   - 方案 C: 完全 GPU-Driven 渲染（不需要 readback）
-2. 实现基于距离的 LOD 选择（CPU 端先实现，再迁移到 GPU）
-3. 优化 Cluster 分割质量（METIS 边切权重调整）
+1. 让 `MeshSimplifier` 完全确定(unordered_map 迭代顺序 → 排序后的确定性遍历)
+2. Cluster BVH / 层级剔除,避免每帧全量 dispatch
+3. 完全 GPU-Driven 间接绘制(command signature + indirect draw),去掉 readback
 
 ### 当前渲染模式
 ```
-NaniteDebugPass 使用 CPU-LOD0 模式:
-- 不依赖 GPU Culling 结果
-- 在 CPU 端构建 cluster index -> LOD level 映射
-- 只渲染 LOD 0 的 cluster
-- 每帧稳定，不颤抖
+NaniteDebugPass: GPU DAG LOD 选择
+- GPU 一次 dispatch 完成 世界变换 + LOD 选择 + 视锥/法线锥剔除
+- 双缓冲 readback 后 CPU 逐 cluster 绘制(2 帧延迟)
+- 回读未就绪时降级为只画 LOD0
+- 诊断: B=Force LOD 循环, X=Cone 开关, Z=Frustum 开关, 0=调试模式循环
 ```
 
 ### 关键代码位置
 ```cpp
-// NaniteDebugPass.cpp - recordCommandsWithLOD() 约 820 行
-// 调试模式：跳过 GPU culling，在 CPU 端直接过滤 LOD 0
-for (const auto& [idx, lod] : clusterLODMap) {
-    if (lod == 0) {  // 只渲染 LOD 0
-        visibleSet.insert(idx);
-    }
-}
+// shaders/nanite/cluster_culling.comp  - DAG 规则 + 每 mesh 变换 + abs(proj) + cone -sin
+// NaniteManager::performCulling()      - y/z/w = frustum/cone/LODSelection
+// NaniteManager::setMeshTransforms()   - 每 mesh 世界矩阵上传
+// MeshSimplifier.cpp                   - geometricError 与惩罚分离
+// NaniteDebugPass::recordCommandsWithLOD() - GPU 可见列表 + Force LOD 过滤
+// SceneRenderer::prepareNaniteCulling() - frameIndex readback slot + UI 调参
 ```
+
 
 ---
 

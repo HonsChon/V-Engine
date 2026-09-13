@@ -12,13 +12,19 @@ IDXGIAdapter1               VkPhysicalDevice            RHIDevice (内部持有)
 ID3D12Device                VkDevice                    RHIDevice
 ID3D12CommandQueue          VkQueue                     RHIDevice (内部持有)
 ID3D12Fence + HANDLE Event  VkFence                     RHIDevice (内部持有)
+ID3D12CommandAllocator/List VkCommandPool/CommandBuffer RHICommandBuffer
 IDXGISwapChain3             VkSwapchainKHR              RHISwapChain
 ID3D12Resource (Buffer)     VkBuffer + VkDeviceMemory   RHIBuffer
 ID3D12Resource (Texture)    VkImage + VkImageView       RHITexture
 ID3D12DescriptorHeap        VkDescriptorPool            RHIBindingGroup/Layout
+D3D12_SAMPLER_DESC          VkSampler                   RHISampler
 ID3D12PipelineState         VkPipeline                  RHIPipeline
 ID3D12RootSignature         VkPipelineLayout            RHIBindingLayout
+root 32-bit constants       VkPushConstantRange         addPushConstant
 ```
+
+> 完整的两后端对象 / 描述符 / 状态 / 同步 / 命令 / Shader / 坐标系对应关系见
+> **§十三 "DX12 ↔ Vulkan 对应关系总表(Phase 4 实现为准)"**。
 
 ### DX12 Device 创建流程（对应 `DX12RHIDevice` 构造函数）
 
@@ -522,3 +528,143 @@ Debug 构建下回绕会打一行 `[DX12RHIDevice] descriptor ring wrap (heap=..
 - **每帧新建 heap / CopyDescriptors**:分配或拷贝开销大,无收益。
 - **ImGui 的做法**:自带固定 bump heap(只加不减),因为 ImGui 的描述符全是持久的——
   说明"持久用 bump、临时用环形"本来就是合理分工,问题只在混用。
+
+## 十三、DX12 ↔ Vulkan 对应关系总表(Phase 4 实现为准)
+
+> 本文前面各节按主题展开;本节把两个后端**实际实现**的对应关系汇总成一张速查表,
+> 供双后端同步修改时对照。Vulkan 侧代码在 `src/RHI/Vulkan/`,DX12 侧在 `src/RHI/DX12/`,
+> 公共接口在 `src/RHI/*.h`。
+
+### 13.1 对象级对应
+
+| 概念 | Vulkan | DX12(本仓库) | RHI 抽象 |
+|---|---|---|---|
+| 实例 / 工厂 | `VkInstance` | `IDXGIFactory4` | `RHIDevice`(内部持有) |
+| 物理设备 | `VkPhysicalDevice` | `IDXGIAdapter1` | `RHIDevice`(内部持有) |
+| 逻辑设备 | `VkDevice` | `ID3D12Device` | `RHIDevice` |
+| 队列 | `VkQueue` | `ID3D12CommandQueue`(单个 DIRECT) | `RHIDevice`(内部持有) |
+| 命令池 / 命令缓冲 | `VkCommandPool` + `VkCommandBuffer` | `ID3D12CommandAllocator` + `ID3D12GraphicsCommandList` | `RHICommandBuffer`(包装外部句柄) |
+| 队列提交 | `vkQueueSubmit` | `ExecuteCommandLists` | `submitGraphicsQueue` |
+| Fence(CPU 等 GPU) | `VkFence` | `ID3D12Fence` + Win32 Event | `createFence/waitForFence/resetFence`(`DX12FenceSync`) |
+| 信号量 | `VkSemaphore` | 无原生对象,用 `ID3D12Fence` 单调值模拟 | `createSemaphore` |
+| 交换链 | `VkSwapchainKHR` | `IDXGISwapChain3`(FLIP_DISCARD) | `RHISwapChain` |
+| Buffer | `VkBuffer` + `VkDeviceMemory` | `ID3D12Resource`(DIMENSION_BUFFER) | `RHIBuffer` |
+| 纹理 / ImageView | `VkImage` + `VkImageView` | `ID3D12Resource`(TEXTURE2D) + RTV/DSV/SRV/UAV 描述符 | `RHITexture` |
+| 采样器 | `VkSampler` | `D3D12_SAMPLER_DESC`(写入 sampler heap) | `RHISampler` |
+| 描述符集布局 | `VkDescriptorSetLayout` | root signature 的 descriptor table / range | `RHIBindingLayout` |
+| 描述符集 | `VkDescriptorSet`(pool 分配) | heap 内 ring 分配的一段连续描述符 | `RHIBindingGroup` |
+| 描述符池 | `VkDescriptorPool`(自动增长) | 4 段环形堆 + CPU-only 环(见 §十二) | `RHIDevice` 内部 |
+| Push constant | `VkPushConstantRange` + `vkCmdPushConstants` | root 32-bit constants(`SetGraphics/ComputeRoot32BitConstants`) | `addPushConstant` / `pushConstants` |
+| 管线布局 | `VkPipelineLayout` | `ID3D12RootSignature` | 多个 `RHIBindingLayout` + PC range |
+| 管线 | `VkPipeline` | `ID3D12PipelineState` | `RHIPipeline` |
+| RenderPass / Framebuffer | `VkRenderPass` + `VkFramebuffer` | **无对应对象**:`begin/endRenderPass` 手工做状态迁移 + `OMSetRenderTargets` | `RHIRenderPass` / `RHIFramebuffer` |
+| 动态状态 | `vkCmdSetViewport/Scissor/...` | `RSSetViewports/RSSetScissorRects` | `setViewport/setScissor` |
+| 屏障 | `vkCmdPipelineBarrier` | `ResourceBarrier`(TRANSITION / UAV) | `pipelineBarrier/bufferBarrier/transitionImageLayout` |
+| Blit | `vkCmdBlitImage` | 内部全屏三角形 blit pipeline(按 RTV 格式缓存) | `blitImage` |
+| Clear | `vkCmdClearColorImage` | 内部常量色全屏三角形 clear pipeline(按 RTV 格式缓存) | `clearColorImage` |
+| Fill | `vkCmdFillBuffer` | `ClearUnorderedAccessViewUint`(CPU-only UAV 描述符 + shader-visible 环副本) | `fillBuffer` |
+| 调试标注 | `vkCmdBeginDebugUtilsLabelEXT` | PIX `BeginEvent`(动态加载 WinPixEventRuntime,缺失降级为 no-op) | `beginDebugLabel` 等 |
+
+### 13.2 描述符与绑定模型(详见 §十一 附录)
+
+| 概念 | Vulkan | DX12 |
+|---|---|---|
+| 绑定编号 | `layout(set = i, binding = b)` | register space `i`,register `b`(`ShaderRegister=b, RegisterSpace=i`) |
+| layout → 根参数 | 每个 set 一个 descriptor set | 每个 layout 最多两张表:**资源表**(CBV/SRV/UAV 合并)+ **采样器表**(D3D12 禁止 SAMPLER 混入资源表) |
+| 参数顺序 | set 顺序 | layout 表顺序 + push constants 放最后 |
+| 可见性 | stageFlags | 表内 entry stage 并集:仅 VS→`VERTEX`,仅 FS→`PIXEL`,VS+FS / Compute→`ALL` |
+| CombinedImageSampler | 一个 `COMBINED_IMAGE_SAMPLER` | 拆成 SRV(`t#`)+ SAMPLER(`s#`)两组描述符 |
+| Push constant | `VkPushConstantRange`(可多段) | **单个** 32-bit constants 参数,`register(b0, space = layout 数)`,按 16B register 粒度(8B 块会被读成未初始化,故 SSAO compute PC 补到 16B) |
+| 描述符类型映射 | `UNIFORM_BUFFER` / `STORAGE_BUFFER` / `SAMPLED_IMAGE` / `STORAGE_IMAGE` / `SAMPLER` | CBV / UAV / SRV / UAV / SAMPLER |
+| StorageBuffer 视图 | `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` | spirv-cross 把 SSBO 降级为 `RWByteAddressBuffer` → UAV 必须用 **RAW 视图**(`R32_TYPELESS` + `D3D12_BUFFER_UAV_FLAG_RAW`);`structStride>0` 时才是 structured UAV |
+| 描述符更新时机 | 可随时 `vkUpdateDescriptorSets`(需避免 in-flight 冲突) | CPU 写堆;持久描述符由水位线保护,临时描述符按 segment fence 轮转(§十二) |
+| 堆绑定 | 无此概念 | 一次绘制只能绑定**一个** shader-visible CBV/SRV/UAV heap + 一个 sampler heap;`bindPipelineInternal` 每次重绑 |
+
+### 13.3 资源状态 / 布局对应
+
+| `RHIImageLayout` / Vulkan 布局 | DX12 `D3D12_RESOURCE_STATES` |
+|---|---|
+| `Undefined` / `General` | `COMMON`(`General` 且纹理带 `Storage` 用途 → `UNORDERED_ACCESS`) |
+| `ShaderReadOnly` | `PIXEL_SHADER_RESOURCE \| NON_PIXEL_SHADER_RESOURCE` |
+| `ColorAttachment` | `RENDER_TARGET` |
+| `DepthStencilAttachment` | `DEPTH_WRITE` |
+| `DepthStencilReadOnly` | `DEPTH_READ` |
+| `TransferSrc` | `COPY_SOURCE` |
+| `TransferDst` | `COPY_DEST` |
+| `PresentSrc` | `PRESENT`(与 `COMMON` 同为 0,barrier 层不区分) |
+
+- Vulkan 的布局迁移可由 render pass 的 `initialLayout/finalLayout` 隐式完成;DX12 全部显式:
+  `beginRenderPass` 前 `ensureState(RENDER_TARGET/DEPTH_WRITE)`,`endRenderPass` 按 attachment 的
+  `finalLayout` 再迁移一次(见 `DX12RHICommandBuffer.cpp`)。
+- 状态追踪:Vulkan 由驱动 + 引擎显式迁移;DX12 在 `DX12RHITexture`/`DX12RHIBuffer` 上维护
+  `currentState`(layer view 与父纹理**共享**同一个 tracker)。
+- `bufferBarrier` 的 access → state 映射:`ShaderWrite→UNORDERED_ACCESS`、
+  `ShaderRead→UAV(Storage)/shader-read`、`TransferWrite→COPY_DEST`、
+  `TransferRead→COPY_SOURCE`、`Vertex/Uniform→VERTEX_AND_CONSTANT_BUFFER`、`Index→INDEX_BUFFER`。
+- **READBACK heap 只能处于 `COMMON`/`COPY_DEST`**(GPU 不能读),`bufferBarrier` 会钳制,
+  否则引擎里"把 readback buffer 迁到 shader-read"(Vulkan 无害)会在 D3D 报错。
+
+### 13.4 同步与帧循环对应
+
+| 概念 | Vulkan | DX12 |
+|---|---|---|
+| 帧在飞 | `MAX_FRAMES_IN_FLIGHT=2`:`inFlightFences[2]` | 同左,`createFence(true)` 预信号语义一致 |
+| 图像可用 | `imageAvailableSemaphores[2]` + `vkAcquireNextImageKHR` | 无对应等待(单队列 + FLIP):`GetCurrentBackBufferIndex()`,per-image fence 等待上一帧 present 完成 |
+| 渲染完成 | `renderFinishedSemaphores[2]` + present wait | `present()` 后在队列上 Signal per-image fence(单调值) |
+| GPU-GPU 等待 | 二进制信号量 | **省略**:单 DIRECT 队列内天然有序;信号量仅作记账(递增 fence 值) |
+| Fence 复用 | `vkResetFences` 重置为未触发 | 不可回退:单调递增 value;`resetFence` = `value++`,`waitForFence` 等该值 |
+| 交换链重建 | `vkCreateSwapchainKHR` + 旧的销毁;OutOfDate 每帧可重试 | `ResizeBuffers`,失败回退整体重建;失败可重入重试(`Engine::recreateSwapChain` 捕获后置位重试) |
+| 呈现结果 | `VK_ERROR_OUT_OF_DATE_KHR` / `VK_SUBOPTIMAL_KHR` | `Present` 返回 `0x887A0005`(OUT_OF_DATE 与 DEVICE_REMOVED 共用此值)/ `0x087A0001`(OCCLUDED 视为成功) |
+
+### 13.5 命令录制对应
+
+| 概念 | Vulkan | DX12 |
+|---|---|---|
+| 会话开始 / 结束 | `vkResetCommandBuffer` + `vkBeginCommandBuffer` / `vkEndCommandBuffer` | allocator + list `Reset` / `Close` |
+| RenderPass 开始 | `vkCmdBeginRenderPass`(loadOp/clear 由 render pass 驱动) | 手工 `ensureState` + `OMSetRenderTargets` + 按 loadOp `ClearRenderTargetView/ClearDepthStencilView` |
+| RenderPass 结束 | `vkCmdEndRenderPass`(隐式 finalLayout) | 空实现(D3D12 无此对象,语义合法)+ 按 `finalLayout` 显式迁移 |
+| 顶点缓冲绑定 | `vkCmdBindVertexBuffers`(stride 来自绑定) | `IASetVertexBuffers`(stride 来自 PSO 的 input layout,`bindVertexBuffer` 查 pipeline 缓存的 stride) |
+| 描述符绑定 | `vkCmdBindDescriptorSets` | `SetGraphics/ComputeRootDescriptorTable`(pipeline 缓存 `layout → rootParam` 映射) |
+| Push constant | `vkCmdPushConstants` | `SetGraphics/ComputeRoot32BitConstants`(单 root 参数,offset 必须 0/4 对齐) |
+| 间接绘制 | `vkCmdDrawIndexedIndirect` | **未实现**:显式抛错(需要 command signature,Phase 5 backlog);引擎当前零调用 |
+
+### 13.6 Shader 内容管线对应
+
+| 阶段 | Vulkan | DX12 |
+|---|---|---|
+| 源 | GLSL(`shaders/**.vert/frag/comp`) | 同一份 GLSL(单一源) |
+| 编译 | `glslc → .spv`(输出 `bin/shaders/`) | `glslc → .spv → spirv-cross --hlsl --shader-model 60 [--flip-vert-y] → inject_hlsl.ps1(PC register)→ dxc → .dxil`(输出 `bin/shaders_dx12/`) |
+| 全屏 pass | Vulkan NDC 约定顶点着色器,无需处理 | `--flip-vert-y`(仅 `deferred_lighting/ssr/ssao/ssao_blur/blit` 顶点) |
+| 加载路径 | 直接 `shaders/X.spv` | `DX12RHIShader` 把 `shaders/X.spv` 转译为 `shaders_dx12/X.dxil`(优先),避免把 SPIR-V 当 DXIL 读 |
+| 绑定校验 | Validation Layers(运行时) | D3D12 debug layer + **Debug-only DXIL↔root signature 反射断言**(dxcompiler.dll 动态加载;缺失时降级提示) |
+| 采样器 | 随 descriptor set 绑定 | 独立 sampler heap;非 compare 采样器 `ComparisonFunc=NEVER` 避免告警 |
+
+### 13.7 坐标系与约定
+
+| 项 | Vulkan | DX12 |
+|---|---|---|
+| NDC Y 方向 | 向下 | 向上 |
+| 投影矩阵 | `applyApiYFlip()` 翻转 `proj[1][1]`(`SceneRenderer.cpp`) | 不翻转(GLM 原生 Y-up 即 D3D 约定) |
+| 全屏 pass 顶点 | `gl_Position = uv*2-1` 直接可用 | 需 `--flip-vert-y`(见 §13.6) |
+| 屏幕 UV / 深度重建 | `ndc.xy*0.5+0.5` 直接可用 | `worldToScreen()` 里按 `projection[1][1]` 符号翻转 Y(water/ssr;`ssao.frag` 用 `abs()` 规避) |
+| 纹理 V 坐标 / 正面剔除 | 与 D3D 约定一致 | 无需调整 |
+| Depth range | GLM perspective NDC z ∈ [-1,1],viewport 映射到 [0,1] | 同上(两 API 默认 depth range 一致) |
+
+### 13.8 已知不对称 / 不可直接映射
+
+- **无 render pass 对象**:`endRenderPass` 是空实现 + `finalLayout` 迁移;`getNativeRenderPass()` 返回
+  nullptr(ImGui 等按 RHI 抽象走)。
+- **无二进制信号量**:单队列下 GPU-GPU 等待省略,`createSemaphore` 用 fence 值模拟。
+- **只能绑定一个 shader-visible resource heap + 一个 sampler heap**:所有描述符(持久+临时)
+  必须住在同一个堆内,靠 ring 子分配(§十二)。
+- **READBACK heap 限制**:不能带 `ALLOW_UNORDERED_ACCESS`(`Storage|GPUToCPU` 组合非法),
+  也不能被 GPU 读;`map()` 仅在 CPU 侧。
+- **root constants 16B register 粒度**:push constant 小于 16B 时 HLSL cbuffer 会读满一个 register,
+  需要补齐(SSAO compute 案例)。
+- **spirv-cross SSBO → `RWByteAddressBuffer`**:UAV 必须 RAW 视图;`readonly` 会变成 SRV,与
+  RHI 的 UAV 模型冲突(故 compute SSBO 不带 `readonly`)。
+- **设备移除**:DXGI `0x887A0005` 同时表示 OUT_OF_DATE 与 DEVICE_REMOVED;后者需要重建
+  `ID3D12Device` 与全部资源才能恢复(本轮只做了重试保护,不崩溃但不自动恢复)。
+- **present/acquire 模型**:FLIP 模式 `GetCurrentBackBufferIndex` + per-image fence,与
+  `vkAcquireNextImageKHR` 的信号量模型不对等(见 §13.4)。
+

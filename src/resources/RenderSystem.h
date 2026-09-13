@@ -17,7 +17,7 @@
 #include <vector>
 #include <typeinfo>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 /**
  * @brief 可渲染实体数据
@@ -78,17 +78,17 @@ public:
      * @param scene 要渲染的场景
      * @param renderPasses 渲染通道列表（支持ForwardPass、GBufferPass 等）
      */
-    void updateRenderables(VulkanEngine::Scene* scene, const std::vector<RenderPassBase*>& renderPasses) {
+    void updateRenderables(VEngine::Scene* scene, const std::vector<RenderPassBase*>& renderPasses) {
         if (!scene) return;
         
         auto& registry = scene->getRegistry();
-        auto view = registry.view<VulkanEngine::TransformComponent, VulkanEngine::MeshRendererComponent>();
+        auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
         
         m_renderables.clear();
         
         for (auto entity : view) {
-            auto& transform = view.get<VulkanEngine::TransformComponent>(entity);
-            auto& meshRenderer = view.get<VulkanEngine::MeshRendererComponent>(entity);
+            auto& transform = view.get<VEngine::TransformComponent>(entity);
+            auto& meshRenderer = view.get<VEngine::MeshRendererComponent>(entity);
             
             if (!meshRenderer.visible) continue;
             
@@ -106,8 +106,8 @@ public:
             // 获取纹理和材质ID
             std::string albedoPath, normalPath, metallicPath;
             
-            if (registry.all_of<VulkanEngine::PBRMaterialComponent>(entity)) {
-                auto& material = registry.get<VulkanEngine::PBRMaterialComponent>(entity);
+            if (registry.all_of<VEngine::PBRMaterialComponent>(entity)) {
+                auto& material = registry.get<VEngine::PBRMaterialComponent>(entity);
                 
                 albedoPath = material.albedoMap;
                 normalPath = material.normalMap;
@@ -190,7 +190,7 @@ public:
      * @param scene 要渲染的场景
      * @param forwardPass 用于分配材质描述符
      */
-    void updateRenderables(VulkanEngine::Scene* scene, ForwardPass* forwardPass) {
+    void updateRenderables(VEngine::Scene* scene, ForwardPass* forwardPass) {
         std::vector<RenderPassBase*> passes;
         if (forwardPass) passes.push_back(forwardPass);
         updateRenderables(scene, passes);
@@ -417,4 +417,4 @@ private:
     std::vector<RenderableEntity> m_renderables;
 };
 
-} // namespace VulkanEngine
+} // namespace VEngine

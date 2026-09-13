@@ -48,7 +48,7 @@ struct GPUClusterData {
     glm::vec4 normalCone;       // xyz: axis, w: cos(angle)
     
     // 数据偏移
-    uint32_t vertexOffset;      // 顶点数据偏移
+    uint32_t meshIndex;         // 所属 mesh 索引（用于 TransformBuffer 查世界矩阵）
     uint32_t indexOffset;       // 索引数据偏移
     uint32_t triangleCount;     // 三角形数量
     uint32_t lodLevel;          // LOD 层级

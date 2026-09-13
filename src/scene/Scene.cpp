@@ -5,7 +5,7 @@
 #include <random>
 #include <chrono>
 
-namespace VulkanEngine {
+namespace VEngine {
 
 Scene::Scene(const std::string& name)
     : m_name(name) {
@@ -245,4 +245,4 @@ uint64_t Scene::generateUUID() {
     return m_nextUUID++;
 }
 
-} // namespace VulkanEngine
+} // namespace VEngine
