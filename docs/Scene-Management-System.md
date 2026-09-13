@@ -339,9 +339,27 @@ void RenderSystem::render(Scene& scene, VulkanRenderer& renderer) {
 
 ## 10. 后续扩展计划
 
-### 10.1 场景序列化
-- 支持 JSON/YAML 格式保存和加载场景
-- 实现 SceneSerializer 类
+### 10.1 场景序列化 ✅ (v1.2.0 已实现)
+
+`src/scene/SceneSerializer.h/.cpp` — JSON 格式 `.vscene` 场景文件（nlohmann-json，vcpkg 引入）。
+
+关键设计：
+
+- **父子关系用 UUID 引用**：`"parent": <uuid>`（0 = 根），entt 句柄不序列化；
+  加载两遍——先创建实体+组件，再按 UUID 重建 `setParent`
+- **确定性顺序**：实体按 Hierarchy 顺序（根→子深度优先，环防护）保存，
+  兄弟顺序在往返后保持不变
+- **复用 Scene 对象**：`deserialize` 只清空 registry（`Scene::clear()`），
+  Engine/各面板/SelectionManager 持有的指针无需重挂
+- **序列化组件**：Tag / Transform / Relationship(经 parent UUID) /
+  MeshRenderer / PBRMaterial(含 opacity/alphaMode/alphaCutoff) / Light / Camera
+- **路径兜底**：mesh/贴图路径原样保存，加载时经 `resolveAssetPath()`
+  （`src/resources/AssetPath.h`）按运行目录层级回退查找
+- **编辑器集成**：File > Save/Save As (Ctrl+S) + NFD 原生对话框；
+  启动时经 `bin/editor_settings.json` 恢复上次打开的场景
+
+glTF meshId 约定：`<文件路径>#<meshIdx>_<primIdx>`，MeshManager 惰性加载
+（场景重开时按需解析整个 glTF 并注册全部 primitive）。
 
 ### 10.2 预制体系统
 - 支持将实体及其组件保存为预制体
