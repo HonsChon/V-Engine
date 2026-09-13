@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mesh.h"
+#include "AssetPath.h"
 #include "RHIBuffer.h"
 #include "RayPicker.h"  // for AABB
 #include <memory>
@@ -12,6 +13,8 @@
 class RHIDevice;
 
 namespace VEngine {
+
+class ModelImporter;  // loadMesh 的 glTF 分支依赖（实现在 MeshManager.cpp）
 
 /**
  * @brief GPU Mesh 数据结构
@@ -84,23 +87,37 @@ public:
     /**
      * @brief 加载或获取网格
      * 如果网格已缓存，直接返回；否则加载并缓存
-     * @param meshId 网格标识符（路径或预设名称如 "sphere", "cube", "plane"：
+     * @param meshId 网格标识符：
+     *   - 预设名 "sphere"/"cube"/"plane"
+     *   - OBJ 文件路径
+     *   - glTF meshId："<路径>#<meshIdx>_<primIdx>"（惰性解析整个文件并注册全部 primitive）
      * @return 指向 GPUMesh 的共享指针，失败返回 nullptr
      */
     std::shared_ptr<GPUMesh> getMesh(const std::string& meshId) {
+        // 路径归一化：序列化场景重开时工作目录可能变化（见 AssetPath.h）
+        std::string key = resolveAssetPath(meshId);
+
         // 检查缓存
-        auto it = m_meshCache.find(meshId);
+        auto it = m_meshCache.find(key);
         if (it != m_meshCache.end()) {
             return it->second;
         }
-        
+
         // 加载网格
-        auto gpuMesh = loadMesh(meshId);
+        auto gpuMesh = loadMesh(key);
         if (gpuMesh) {
-            m_meshCache[meshId] = gpuMesh;
+            m_meshCache[key] = gpuMesh;
         }
         return gpuMesh;
     }
+
+    /**
+     * @brief 注册外部构建的网格（ModelImporter 解析 glTF 后逐 primitive 注册）
+     * @param meshId 缓存键（glTF: "<路径>#<meshIdx>_<primIdx>"）
+     * @param mesh 已构建好的 CPU 几何
+     * @return GPUMesh（创建 GPU 缓冲区并缓存），失败返回 nullptr；已注册时直接返回缓存
+     */
+    std::shared_ptr<GPUMesh> registerMesh(const std::string& meshId, std::shared_ptr<Mesh> mesh);
     
     void preloadMesh(const std::string& meshId) {
         getMesh(meshId);
@@ -142,60 +159,9 @@ public:
 private:
     MeshManager() = default;
     ~MeshManager() { cleanup(); }
-    
-    std::shared_ptr<GPUMesh> loadMesh(const std::string& meshId) {
-        if (!m_rhiDevice) {
-            std::cerr << "[MeshManager] Error: RHI Device not initialized!" << std::endl;
-            return nullptr;
-        }
-        
-        auto gpuMesh = std::make_shared<GPUMesh>();
-        gpuMesh->mesh = std::make_shared<Mesh>();
-        
-        bool loadSuccess = false;
-        
-        // 处理预设网格
-        if (meshId == "sphere") {
-            gpuMesh->mesh->createSphere(64);
-            loadSuccess = true;
-        }
-        else if (meshId == "cube") {
-            gpuMesh->mesh->createCube();
-            loadSuccess = true;
-        }
-        else if (meshId == "plane") {
-            gpuMesh->mesh->createPlane(10.0f, 10);
-            loadSuccess = true;
-        }
-        // 处理 OBJ 文件路径
-        else if (meshId.find(".obj") != std::string::npos || 
-                 meshId.find(".OBJ") != std::string::npos) {
-            if (gpuMesh->mesh->loadFromOBJ(meshId)) {
-                gpuMesh->mesh->centerAndNormalize();
-                loadSuccess = true;
-            } else {
-                std::cerr << "[MeshManager] Failed to load OBJ: " << meshId << std::endl;
-            }
-        }
-        else {
-            std::cerr << "[MeshManager] Unknown mesh type: " << meshId << std::endl;
-        }
-        
-        if (!loadSuccess) {
-            return nullptr;
-        }
-        
-        // 通过 RHI 创建 GPU 缓冲区
-        if (!createGPUBuffers(gpuMesh)) {
-            return nullptr;
-        }
-        
-        std::cout << "[MeshManager] Loaded mesh: " << meshId 
-                  << " (vertices: " << gpuMesh->mesh->getVertices().size()
-                  << ", indices: " << gpuMesh->mesh->getIndices().size() << ")" << std::endl;
-        
-        return gpuMesh;
-    }
+
+    // 实现位于 MeshManager.cpp（glTF 分支依赖 ModelImporter）
+    std::shared_ptr<GPUMesh> loadMesh(const std::string& meshId);
     
     bool createGPUBuffers(std::shared_ptr<GPUMesh> gpuMesh);
     
