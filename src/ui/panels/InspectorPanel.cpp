@@ -309,6 +309,21 @@ void InspectorPanel::renderPBRMaterialComponent() {
     ImGui::SliderFloat("Roughness", &mat.roughness, 0.03f, 1.0f);
     ImGui::SliderFloat("AO", &mat.ao, 0.0f, 1.0f);
 
+    // 透明度与 alpha 模式
+    {
+        const char* modes[] = { "Opaque", "Mask (alpha test)", "Blend (transparent)" };
+        int mode = static_cast<int>(mat.alphaMode);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("Alpha Mode", &mode, modes, 3)) {
+            mat.alphaMode = static_cast<AlphaMode>(mode);
+        }
+        if (mat.alphaMode == AlphaMode::Blend) {
+            ImGui::SliderFloat("Opacity", &mat.opacity, 0.0f, 1.0f);
+        } else if (mat.alphaMode == AlphaMode::Mask) {
+            ImGui::SliderFloat("Cutoff", &mat.alphaCutoff, 0.0f, 1.0f);
+        }
+    }
+
     // 自发光
     if (ImGui::TreeNode("Emissive")) {
         ImGui::ColorEdit3("Color", &mat.emissive.x);

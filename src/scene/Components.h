@@ -140,6 +140,15 @@ struct MeshRendererComponent {
 };
 
 /**
+ * @brief Alpha 混合模式
+ */
+enum class AlphaMode {
+    Opaque = 0,   // 不透明（默认）
+    Mask = 1,     // alpha 测试：alpha < cutoff 的片元 discard（植被叶子）
+    Blend = 2     // alpha 混合：半透明，进入透明渲染队列（back-to-front 排序）
+};
+
+/**
  * @brief PBR 材质组件 - 物理材质属性
  */
 struct PBRMaterialComponent {
@@ -149,7 +158,12 @@ struct PBRMaterialComponent {
     float ao = 1.0f;
     glm::vec3 emissive = { 0.0f, 0.0f, 0.0f };
     float emissiveStrength = 0.0f;
-    
+
+    // 透明度（glTF: baseColorFactor.a / OBJ mtl: d dissolve）
+    float opacity = 1.0f;
+    AlphaMode alphaMode = AlphaMode::Opaque;
+    float alphaCutoff = 0.5f;   // 仅 Mask 模式使用
+
     // 纹理路径
     std::string albedoMap;
     std::string normalMap;
@@ -157,6 +171,9 @@ struct PBRMaterialComponent {
     std::string roughnessMap;
     std::string aoMap;
     std::string emissiveMap;
+
+    /// 是否进入透明渲染队列
+    bool isTransparent() const { return alphaMode == AlphaMode::Blend && opacity < 1.0f; }
 };
 
 // ============================================================

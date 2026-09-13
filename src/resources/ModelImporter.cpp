@@ -290,11 +290,22 @@ PBRMaterialComponent buildMaterialFromGLTF(const tinygltf::Model& model, int mat
         static_cast<float>(pbr.baseColorFactor[2]));
     mat.metallic = static_cast<float>(pbr.metallicFactor);
     mat.roughness = static_cast<float>(pbr.roughnessFactor);
+    if (pbr.baseColorFactor.size() >= 4) {
+        mat.opacity = static_cast<float>(pbr.baseColorFactor[3]);
+    }
     if (m.emissiveFactor.size() == 3) {
         mat.emissive = glm::vec3(
             static_cast<float>(m.emissiveFactor[0]),
             static_cast<float>(m.emissiveFactor[1]),
             static_cast<float>(m.emissiveFactor[2]));
+    }
+
+    // alpha 模式: "MASK" → alpha 测试, "BLEND" → 半透明混合
+    if (m.alphaMode == "MASK") {
+        mat.alphaMode = AlphaMode::Mask;
+        mat.alphaCutoff = static_cast<float>(m.alphaCutoff);
+    } else if (m.alphaMode == "BLEND") {
+        mat.alphaMode = AlphaMode::Blend;
     }
 
     auto texPath = [&](int texIdx) -> std::string {
@@ -321,6 +332,11 @@ PBRMaterialComponent buildMaterialFromOBJ(const tinyobj::material_t& m, const st
     if (m.shininess > 0.0f) {
         // MTL 高光指数(Ns 0~1000) → 粗糙度近似映射
         mat.roughness = std::clamp(1.0f - static_cast<float>(m.shininess) / 1000.0f, 0.03f, 1.0f);
+    }
+    // MTL 溶解度 d (1=不透明, 0=全透明) → opacity + Blend 模式
+    if (m.dissolve < 1.0f) {
+        mat.opacity = std::clamp(static_cast<float>(m.dissolve), 0.0f, 1.0f);
+        mat.alphaMode = AlphaMode::Blend;
     }
     auto map = [&](const std::string& texname) {
         return texname.empty() ? std::string() : joinPath(mtlDir, texname);

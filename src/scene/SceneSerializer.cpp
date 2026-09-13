@@ -55,6 +55,20 @@ LightType lightTypeFromString(const std::string& s) {
     return LightType::Point;
 }
 
+const char* alphaModeToString(AlphaMode m) {
+    switch (m) {
+        case AlphaMode::Mask: return "Mask";
+        case AlphaMode::Blend: return "Blend";
+        default: return "Opaque";
+    }
+}
+
+AlphaMode alphaModeFromString(const std::string& s) {
+    if (s == "Mask") return AlphaMode::Mask;
+    if (s == "Blend") return AlphaMode::Blend;
+    return AlphaMode::Opaque;
+}
+
 // ============================================================
 // 组件序列化
 // ============================================================
@@ -85,6 +99,9 @@ json serializePBRMaterial(const PBRMaterialComponent& m) {
         {"ao", m.ao},
         {"emissive", vec3ToJson(m.emissive)},
         {"emissiveStrength", m.emissiveStrength},
+        {"opacity", m.opacity},
+        {"alphaMode", alphaModeToString(m.alphaMode)},
+        {"alphaCutoff", m.alphaCutoff},
         {"albedoMap", m.albedoMap},
         {"normalMap", m.normalMap},
         {"metallicMap", m.metallicMap},
@@ -151,6 +168,9 @@ void deserializePBRMaterial(const json& j, PBRMaterialComponent& m) {
     m.ao = j.value("ao", m.ao);
     m.emissive = jsonToVec3(j.value("emissive", json::array()), m.emissive);
     m.emissiveStrength = j.value("emissiveStrength", m.emissiveStrength);
+    m.opacity = j.value("opacity", m.opacity);
+    m.alphaMode = alphaModeFromString(j.value("alphaMode", std::string("Opaque")));
+    m.alphaCutoff = j.value("alphaCutoff", m.alphaCutoff);
     m.albedoMap = j.value("albedoMap", m.albedoMap);
     m.normalMap = j.value("normalMap", m.normalMap);
     m.metallicMap = j.value("metallicMap", m.metallicMap);
