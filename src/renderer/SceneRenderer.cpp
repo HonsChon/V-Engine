@@ -356,13 +356,12 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
                     if (idx >= entityList.size()) continue;
 
                     auto entity = entityList[idx];
-                    auto& transform = ecsView.get<VEngine::TransformComponent>(entity);
                     auto& meshRenderer = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
                     auto gpuMesh = VEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
                     if (!gpuMesh) continue;
 
-                    m_forwardPass->pushModelMatrix(cmd, transform.getTransform());
+                    m_forwardPass->pushModelMatrix(cmd, VEngine::computeWorldMatrix(registry, entity));
 
                     ForwardPass::MaterialDescriptor* matDesc = nullptr;
                     for (const auto& r : m_renderSystem->getRenderables()) {
@@ -632,11 +631,10 @@ void SceneRenderer::prepareGPUCullingData() {
     auto* meshManager = m_renderSystem->getMeshManager();
 
     for (auto entity : view) {
-        auto& transform = view.get<VEngine::TransformComponent>(entity);
         auto& meshRenderer = view.get<VEngine::MeshRendererComponent>(entity);
 
         GPUInstanceData data{};
-        data.modelMatrix = transform.getTransform();
+        data.modelMatrix = VEngine::computeWorldMatrix(registry, entity);
 
         VEngine::AABB meshAABB;
         if (meshManager) meshAABB = meshManager->getMeshAABB(meshRenderer.meshPath);
@@ -797,8 +795,7 @@ void SceneRenderer::prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIn
             auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
             for (auto entity : view) {
                 auto& mr = view.get<VEngine::MeshRendererComponent>(entity);
-                auto& tx = view.get<VEngine::TransformComponent>(entity);
-                xforms[mr.meshPath] = tx.getTransform();
+                xforms[mr.meshPath] = VEngine::computeWorldMatrix(registry, entity);
             }
         }
         std::vector<glm::mat4> ordered;
@@ -847,8 +844,7 @@ void SceneRenderer::recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t fr
         for (auto entity : view) {
             auto& mr = view.get<VEngine::MeshRendererComponent>(entity);
             if (nameSet.count(mr.meshPath)) {
-                auto& t = view.get<VEngine::TransformComponent>(entity);
-                meshMatrices[mr.meshPath] = t.getTransform();
+                meshMatrices[mr.meshPath] = VEngine::computeWorldMatrix(registry, entity);
             }
         }
     }

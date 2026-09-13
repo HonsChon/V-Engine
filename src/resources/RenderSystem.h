@@ -87,14 +87,13 @@ public:
         m_renderables.clear();
         
         for (auto entity : view) {
-            auto& transform = view.get<VEngine::TransformComponent>(entity);
             auto& meshRenderer = view.get<VEngine::MeshRendererComponent>(entity);
             
             if (!meshRenderer.visible) continue;
             
             RenderableEntity renderable;
             renderable.entityHandle = entity;
-            renderable.modelMatrix = transform.getTransform();
+            renderable.modelMatrix = computeWorldMatrix(registry, entity);  // 世界矩阵（含父链）
             renderable.visible = meshRenderer.visible;
             
             // 获取网格
