@@ -19,6 +19,10 @@
 #include "RayPicker.h"
 #include "RenderSettings.h"
 #include "nanite/NaniteManager.h"
+#include "SceneSerializer.h"
+#include "ModelImporter.h"
+
+#include "nfd/nfd.h"
 
 #include "RHI.h"
 #include "RHIDevice.h"
@@ -142,6 +146,9 @@ void Engine::initializeSubsystems() {
 
         m_uiManager->setRenderSettings(&m_renderer->getSettings());
 
+        // File 菜单 / 快捷键 / 资源浏览器动作回调
+        setupUICallbacks();
+
         // Pass UI refs to SceneRenderer so it can render UI inside command recording
         m_renderer->setImGuiLayer(m_imguiLayer.get());
         m_renderer->setUIManager(m_uiManager.get());
@@ -244,13 +251,8 @@ void Engine::setupInputCallbacks() {
     // Drag & drop
     m_window->setDropCallback([this](int count, const char** paths) {
         if (count == 0 || !m_scene) return;
-        std::string filePath = paths[0];
-        std::string ext = std::filesystem::path(filePath).extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".obj") {
-            auto e = m_scene->createEntity("Dropped Model");
-            e.addComponent<VEngine::MeshRendererComponent>(filePath, "default_material");
-            std::cout << "[Engine] Loaded: " << filePath << "\n";
+        for (int i = 0; i < count; ++i) {
+            importModelFile(paths[i]);
         }
     });
 
@@ -585,14 +587,13 @@ void Engine::handleMousePicking() {
     auto* meshMgr = m_renderSystem->getMeshManager();
 
     for (auto entity : ecsView) {
-        auto& tx = ecsView.get<VEngine::TransformComponent>(entity);
         auto& mr = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
         VEngine::AABB aabb;
         if (meshMgr) aabb = meshMgr->getMeshAABB(mr.meshPath);
         else { aabb.min = glm::vec3(-1); aabb.max = glm::vec3(1); }
 
-        VEngine::AABB world = aabb.transform(tx.getTransform());
+        VEngine::AABB world = aabb.transform(VEngine::computeWorldMatrix(registry, entity));
         float tMin, tMax;
         if (VEngine::RayPicker::rayIntersectsAABB(ray, world, tMin, tMax)) {
             if (tMin >= 0 && tMin < closestT) { closestT = tMin; hitEntity = entity; }
@@ -668,4 +669,147 @@ void Engine::updateFrameStats() {
 void Engine::requestExit() {
     std::cout << "[Engine] Exit requested\n";
     m_running = false;
+}
+
+// ============================================================
+// Scene file & model import
+// ============================================================
+
+void Engine::setupUICallbacks() {
+    if (!m_uiManager) return;
+
+    m_uiManager->setOnNewScene([this]() { newScene(); });
+    m_uiManager->setOnOpenScene([this]() { openSceneDialog(); });
+    m_uiManager->setOnSaveScene([this]() { saveScene(); });
+    m_uiManager->setOnSaveSceneAs([this]() { saveSceneAs(); });
+    m_uiManager->setOnExit([this]() { requestExit(); });
+
+    // 资源浏览器：双击模型 → 导入；双击场景文件 → 打开
+    if (auto* browser = m_uiManager->getAssetBrowserPanel()) {
+        browser->setOnAssetDoubleClicked([this](const std::string& path, AssetBrowserPanel::AssetType type) {
+            if (type == AssetBrowserPanel::AssetType::Model) {
+                importModelFile(path);
+            } else if (type == AssetBrowserPanel::AssetType::Scene) {
+                openSceneFromFile(path);
+            }
+        });
+    }
+    updateSceneTitle();
+}
+
+void Engine::importModelFile(const std::string& filePath) {
+    if (!m_scene) return;
+    if (!VEngine::ModelImporter::isSupported(filePath)) {
+        std::cout << "[Engine] Unsupported model file (expect .obj/.gltf/.glb): " << filePath << "\n";
+        return;
+    }
+    auto root = VEngine::ModelImporter::importModel(m_scene.get(), filePath);
+    if (root) {
+        VEngine::SelectionManager::getInstance().select(root.getHandle());
+        if (m_uiManager) {
+            if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(root.getHandle());
+            if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(root.getHandle());
+        }
+    }
+}
+
+void Engine::newScene() {
+    if (!m_scene) return;
+    m_scene->clear();
+    VEngine::SelectionManager::getInstance().clearSelection();
+    if (m_uiManager) {
+        if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(entt::null);
+        if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(entt::null);
+    }
+    m_currentScenePath.clear();
+    updateSceneTitle();
+    std::cout << "[Engine] New scene\n";
+}
+
+void Engine::openSceneDialog() {
+    nfdchar_t* outPath = nullptr;
+    nfdfilteritem_t filterItems[2] = {
+        { "V-Engine Scene", "vscene,json" },
+        { "All Files", "*" }
+    };
+    nfdresult_t result = NFD_OpenDialog(&outPath, filterItems, 2, nullptr);
+    if (result == NFD_OKAY && outPath) {
+        openSceneFromFile(outPath);
+        NFD_FreePath(outPath);
+    } else if (result == NFD_ERROR) {
+        std::cout << "[Engine] Open dialog error: " << NFD_GetError() << "\n";
+    }
+}
+
+void Engine::openSceneFromFile(const std::string& filePath) {
+    if (!m_scene) return;
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.deserialize(filePath)) {
+        m_currentScenePath = filePath;
+        updateSceneTitle();
+        if (m_window) {
+            // 窗口标题反映当前场景（失败则忽略——纯显示用途）
+            std::string title = m_config.title + " - " +
+                std::filesystem::path(filePath).filename().string();
+            m_window->setTitle(title);
+        }
+    }
+}
+
+void Engine::saveSceneToPath(const std::string& filePath) {
+    if (!m_scene || filePath.empty()) return;
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.serialize(filePath)) {
+        m_currentScenePath = filePath;
+        updateSceneTitle();
+    }
+}
+
+void Engine::saveScene() {
+    if (!m_scene) return;
+    if (m_currentScenePath.empty()) {
+        saveSceneAs();
+        return;
+    }
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.serialize(m_currentScenePath)) {
+        updateSceneTitle();
+    }
+}
+
+void Engine::saveSceneAs() {
+    if (!m_scene) return;
+    nfdchar_t* outPath = nullptr;
+    nfdfilteritem_t filterItems[1] = { "V-Engine Scene", "vscene" };
+    nfdresult_t result = NFD_SaveDialog(&outPath, filterItems, 1, nullptr, "scene.vscene");
+    if (result == NFD_OKAY && outPath) {
+        std::string path = outPath;
+        NFD_FreePath(outPath);
+
+        // 未带扩展名时补默认后缀
+        if (!std::filesystem::path(path).has_extension()) {
+            path += ".vscene";
+        }
+
+        VEngine::SceneSerializer serializer(m_scene.get());
+        if (serializer.serialize(path)) {
+            m_currentScenePath = path;
+            updateSceneTitle();
+            if (m_window) {
+                std::string title = m_config.title + " - " +
+                    std::filesystem::path(path).filename().string();
+                m_window->setTitle(title);
+            }
+        }
+    } else if (result == NFD_ERROR) {
+        std::cout << "[Engine] Save dialog error: " << NFD_GetError() << "\n";
+    }
+}
+
+void Engine::updateSceneTitle() {
+    if (!m_uiManager) return;
+    std::string title = m_currentScenePath.empty()
+        ? std::string("Untitled")
+        : std::filesystem::path(m_currentScenePath).filename().string();
+    m_uiManager->setSceneTitle("Scene: " + title);
 }

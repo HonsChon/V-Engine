@@ -173,7 +173,7 @@ AssetBrowserPanel::AssetType AssetBrowserPanel::getAssetType(const std::string& 
         return AssetType::Material;
     }
     // 场景
-    if (extension == ".scene" || extension == ".json") {
+    if (extension == ".vscene" || extension == ".scene" || extension == ".json") {
         return AssetType::Scene;
     }
 

@@ -211,7 +211,9 @@ void SceneHierarchyPanel::renderEntityNode(entt::entity entity) {
             }
         }
         if (ImGui::MenuItem("Duplicate")) {
-            // TODO: 实现复制功能
+            Entity src(entity, m_scene);
+            Entity copy = m_scene->duplicateEntity(src);
+            if (copy) setSelectedEntity(copy.getHandle());
         }
         ImGui::EndPopup();
     }

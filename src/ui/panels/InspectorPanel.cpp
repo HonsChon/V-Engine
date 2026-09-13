@@ -88,6 +88,9 @@ void InspectorPanel::renderECSInspector() {
     // 渲染网格渲染器组从
     renderMeshRendererComponent();
 
+    // 渲染 PBR 材质组件
+    renderPBRMaterialComponent();
+
     // 渲染光源组件
     renderLightComponent();
 
@@ -279,6 +282,73 @@ void InspectorPanel::renderMeshRendererComponent() {
     }
 }
 
+void InspectorPanel::renderPBRMaterialComponent() {
+    auto& registry = m_scene->getRegistry();
+
+    if (!registry.all_of<PBRMaterialComponent>(m_selectedEntity)) return;
+
+    bool componentOpen = ImGui::CollapsingHeader("PBR Material", ImGuiTreeNodeFlags_DefaultOpen);
+
+    // 右键删除组件
+    if (ImGui::BeginPopupContextItem("PBRMaterialContext")) {
+        if (ImGui::MenuItem("Remove Component")) {
+            registry.remove<PBRMaterialComponent>(m_selectedEntity);
+            ImGui::EndPopup();
+            return;
+        }
+        ImGui::EndPopup();
+    }
+
+    if (!componentOpen) return;
+    auto& mat = registry.get<PBRMaterialComponent>(m_selectedEntity);
+
+    // 基础参数
+    ImGui::ColorEdit3("Albedo", &mat.albedo.x);
+
+    ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f);
+    ImGui::SliderFloat("Roughness", &mat.roughness, 0.03f, 1.0f);
+    ImGui::SliderFloat("AO", &mat.ao, 0.0f, 1.0f);
+
+    // 自发光
+    if (ImGui::TreeNode("Emissive")) {
+        ImGui::ColorEdit3("Color", &mat.emissive.x);
+        ImGui::SliderFloat("Strength", &mat.emissiveStrength, 0.0f, 10.0f);
+        ImGui::TreePop();
+    }
+
+    // 贴图路径（与 RenderSystem 的材质描述符键直接对应，改动立即生效）
+    auto textureField = [](const char* label, std::string& path) {
+        char buffer[256] = {0};
+        strncpy(buffer, path.c_str(), sizeof(buffer) - 1);
+        ImGui::Text("%s", label);
+        ImGui::SameLine(100);
+        ImGui::SetNextItemWidth(-1);
+        ImGui::PushID(label);
+        if (ImGui::InputText("##TexPath", buffer, sizeof(buffer))) {
+            path = buffer;
+        }
+        ImGui::PopID();
+    };
+
+    ImGui::Separator();
+    ImGui::Text("Texture Maps");
+    textureField("Albedo", mat.albedoMap);
+    textureField("Normal", mat.normalMap);
+    textureField("Metallic", mat.metallicMap);
+    textureField("Roughness", mat.roughnessMap);
+    textureField("AO", mat.aoMap);
+    textureField("Emissive", mat.emissiveMap);
+
+    if (ImGui::Button("Clear Maps")) {
+        mat.albedoMap.clear();
+        mat.normalMap.clear();
+        mat.metallicMap.clear();
+        mat.roughnessMap.clear();
+        mat.aoMap.clear();
+        mat.emissiveMap.clear();
+    }
+}
+
 void InspectorPanel::renderLightComponent() {
     auto& registry = m_scene->getRegistry();
     
@@ -421,6 +491,11 @@ void InspectorPanel::renderAddComponentButton() {
         if (!registry.all_of<MeshRendererComponent>(m_selectedEntity)) {
             if (ImGui::MenuItem("Mesh Renderer")) {
                 registry.emplace<MeshRendererComponent>(m_selectedEntity);
+            }
+        }
+        if (!registry.all_of<PBRMaterialComponent>(m_selectedEntity)) {
+            if (ImGui::MenuItem("PBR Material")) {
+                registry.emplace<PBRMaterialComponent>(m_selectedEntity);
             }
         }
         if (!registry.all_of<LightComponent>(m_selectedEntity)) {

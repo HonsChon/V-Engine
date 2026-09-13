@@ -139,6 +139,7 @@ private:
     void renderTagComponent();
     void renderTransformComponent();
     void renderMeshRendererComponent();
+    void renderPBRMaterialComponent();
     void renderLightComponent();
     void renderCameraComponent();
     void renderAddComponentButton();

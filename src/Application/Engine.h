@@ -68,6 +68,11 @@ public:
     VEngine::Scene* getScene() const { return m_scene.get(); }
     Camera* getCamera() const { return m_camera.get(); }
 
+    // 场景操作（main.cpp 启动参数 / UI 菜单共用）
+    void importModelFile(const std::string& filePath);   // 导入 .obj/.gltf/.glb
+    void openSceneFromFile(const std::string& filePath); // 打开 .vscene
+    void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
+
     float getDeltaTime() const { return m_deltaTime; }
     float getFPS() const { return m_fps; }
 
@@ -93,6 +98,14 @@ private:
     void handleKey(int key);           // shared by GLFW callback + autotest
     void pumpAutotest();               // per-frame autotest driver: timed key
                                        // injection + timed exit (see Engine.cpp)
+
+    // Scene file & model import (File 菜单 / 拖拽 / 资源浏览器双击)
+    void setupUICallbacks();           // 注入 UIManager 的场景动作回调
+    void newScene();
+    void openSceneDialog();            // NFD 选择文件
+    void saveScene();                  // 无当前路径时弹另存为
+    void saveSceneAs();                // NFD 选择保存位置
+    void updateSceneTitle();           // 菜单栏显示 场景名*
 
     // Config
     Config m_config;
@@ -126,6 +139,9 @@ private:
     float m_lastMouseY = 360.0f;
     bool m_firstMouse = true;
     bool m_mouseEnabled = false;
+
+    // 当前场景文件路径（空 = 未保存过；Ctrl+S 直接保存于此）
+    std::string m_currentScenePath;
 
     // Frame stats
     float m_deltaTime = 0.0f;
