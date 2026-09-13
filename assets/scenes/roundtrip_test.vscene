@@ -1,0 +1,255 @@
+{
+  "entities": [
+    {
+      "parent": 0,
+      "tag": "Box",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295131
+    },
+    {
+      "parent": 2590295131,
+      "tag": "BoxRoot",
+      "transform": {
+        "position": [
+          0.0,
+          0.5,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          1.570451021194458,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295132
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "materialPath": "default_material",
+        "meshPath": "..\\..\\assets\\TestModels\\Box.gltf#0_0",
+        "receiveShadows": true,
+        "visible": true
+      },
+      "parent": 2590295132,
+      "pbrMaterial": {
+        "albedo": [
+          0.20000000298023224,
+          0.3499999940395355,
+          0.8999999761581421
+        ],
+        "albedoMap": "",
+        "ao": 1.0,
+        "aoMap": "",
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "emissiveMap": "",
+        "emissiveStrength": 0.0,
+        "metallic": 0.10000000149011612,
+        "metallicMap": "",
+        "normalMap": "",
+        "roughness": 0.44999998807907104,
+        "roughnessMap": ""
+      },
+      "tag": "BoxMesh",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295133
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "materialPath": "plane_material",
+        "meshPath": "plane",
+        "receiveShadows": true,
+        "visible": true
+      },
+      "pbrMaterial": {
+        "albedo": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "albedoMap": "",
+        "ao": 1.0,
+        "aoMap": "",
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "emissiveMap": "",
+        "emissiveStrength": 0.0,
+        "metallic": 0.0,
+        "metallicMap": "",
+        "normalMap": "",
+        "roughness": 0.5,
+        "roughnessMap": ""
+      },
+      "tag": "Plane",
+      "transform": {
+        "position": [
+          0.0,
+          -1.5,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295130
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "materialPath": "ufo_material",
+        "meshPath": "../../assets/UFO/UFO_Empty.obj",
+        "receiveShadows": true,
+        "visible": true
+      },
+      "pbrMaterial": {
+        "albedo": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "albedoMap": "../../assets/UFO/textures/UFO_color.jpg",
+        "ao": 1.0,
+        "aoMap": "",
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "emissiveMap": "",
+        "emissiveStrength": 0.0,
+        "metallic": 0.0,
+        "metallicMap": "../../assets/UFO/textures/UFO_metalness.jpg",
+        "normalMap": "../../assets/UFO/textures/UFO_nmap.jpg",
+        "roughness": 0.5,
+        "roughnessMap": ""
+      },
+      "tag": "UFO",
+      "transform": {
+        "position": [
+          3.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295129
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "materialPath": "earth_material",
+        "meshPath": "sphere",
+        "receiveShadows": true,
+        "visible": true
+      },
+      "pbrMaterial": {
+        "albedo": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "albedoMap": "../../assets/Earth/Maps/Color Map.jpg",
+        "ao": 1.0,
+        "aoMap": "",
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "emissiveMap": "",
+        "emissiveStrength": 0.0,
+        "metallic": 0.0,
+        "metallicMap": "../../assets/Earth/Maps/Spec Mask.png",
+        "normalMap": "../../assets/Earth/Maps/Bump.jpg",
+        "roughness": 0.5,
+        "roughnessMap": ""
+      },
+      "tag": "Sphere",
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "uuid": 2590295128
+    }
+  ],
+  "format": "vscene",
+  "scene": {
+    "name": "Untitled",
+    "nextUUID": 2590295134
+  },
+  "version": 1
+}
