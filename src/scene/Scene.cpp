@@ -150,6 +150,13 @@ std::vector<Entity> Scene::getRootEntities() {
     return roots;
 }
 
+void Scene::clear() {
+    m_registry.clear();
+    m_name = "Untitled";
+    m_isPaused = false;
+    // UUID 计数器保持时间种子语义不变，避免与历史实体冲突
+}
+
 // ============================================================
 // 场景生命周期
 // ============================================================
