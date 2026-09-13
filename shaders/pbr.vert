@@ -1,9 +1,11 @@
 #version 450
 
-// Push Constants - 每个物体独立的变换数据
+// Push Constants - 每个物体独立的变换数据 + 材质透明参数
+// 144 字节（两 mat4 + vec4），Vertex|Fragment 可见
 layout(push_constant) uniform PushConstants {
     mat4 model;
     mat4 normalMatrix;
+    vec4 materialParams;  // x=opacity, y=alphaMode(0/1/2), z=alphaCutoff, w=unused
 } push;
 
 // UBO - 全局共享的数据（相机、光照）
@@ -27,6 +29,7 @@ layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec3 fragBitangent;
 layout(location = 5) out vec3 fragViewPos;
 layout(location = 6) out vec3 fragLightPos;
+layout(location = 7) out vec4 fragMaterialParams;
 
 void main() {
     // Transform position to world space (使用 Push Constants 的 model)
@@ -48,7 +51,10 @@ void main() {
     // Pass view and light positions (提取 xyz 分量)
     fragViewPos = ubo.viewPos.xyz;
     fragLightPos = ubo.lightPos.xyz;
-    
+
+    // 传递材质透明参数
+    fragMaterialParams = push.materialParams;
+
     // Transform to clip space
     gl_Position = ubo.proj * ubo.view * worldPos;
 }

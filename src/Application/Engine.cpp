@@ -468,7 +468,8 @@ void Engine::drawFrame() {
         if (fp) passes.push_back(fp);
         if (settings.renderMode == RenderMode::WaterScene && m_renderer->getGBufferPass())
             passes.push_back(m_renderer->getGBufferPass());
-        m_renderSystem->updateRenderables(m_scene.get(), passes);
+        m_renderSystem->updateRenderables(m_scene.get(), passes,
+                                          m_camera ? m_camera->getPosition() : glm::vec3(0.0f));
     }
 
     // GPU culling data

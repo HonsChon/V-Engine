@@ -15,6 +15,7 @@
 #include "ForwardPass.h"
 #include "GBufferPass.h"
 #include "LightingPass.h"
+#include "TransparentPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
 #include "ssao/SSAOPass.h"
@@ -121,6 +122,14 @@ void SceneRenderer::initDeferredShading() {
         m_waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created\n";
 
+        // 3.5 Transparent（延迟模式半透明前向绘制，复用 ForwardPass 材质布局）
+        if (m_forwardPass) {
+            m_transparentPass = std::make_unique<TransparentPass>(
+                m_rhiDevice, m_swapChain->getRHIRenderPass(),
+                m_forwardPass->getMaterialLayout(), w, h, MAX_FRAMES_IN_FLIGHT);
+            std::cout << "  Transparent Pass created\n";
+        }
+
         // 4. Scene color image (for SSR sampling)
         createSceneColorImage();
         std::cout << "  Scene color image created\n";
@@ -182,11 +191,12 @@ void SceneRenderer::initDeferredShading() {
 
 void SceneRenderer::cleanupDeferredShading() {
     if (m_rhiDevice) m_rhiDevice->waitIdle();
-    
+
     cleanupSceneColorImage();
     m_waterPass.reset();
     m_ssrPass.reset();
     m_ssaoPass.reset();
+    m_transparentPass.reset();
     m_lightingPass.reset();
     m_gbuffer.reset();
     m_deferredInitialized = false;
@@ -282,6 +292,19 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
                                             glm::vec3(300.0f, 300.0f, 300.0f), 1.0f);
         }
 
+        // TransparentPass（与 ForwardPass 同光照 + 视口尺寸）
+        if (m_transparentPass) {
+            TransparentPass::UniformBufferObject tUbo{};
+            tUbo.view = view;
+            tUbo.proj = proj;
+            tUbo.viewPos = glm::vec4(camPos, 1.0f);
+            tUbo.lightPos = glm::vec4(lightPos, 1.0f);
+            tUbo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
+            tUbo.viewportInfo = glm::vec4(
+                static_cast<float>(scExtent.width), static_cast<float>(scExtent.height), 0.0f, 0.0f);
+            m_transparentPass->updateUniformBuffer(frameIndex, tUbo);
+        }
+
         // Water & SSR
         if (m_waterPass) {
             m_waterPass->updateUniforms(view, proj, camPos, m_totalTime, frameIndex);
@@ -358,10 +381,21 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
                     auto entity = entityList[idx];
                     auto& meshRenderer = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
+                    // 透明物体不走间接绘制（无序混合会出错），由 CPU 路径排序绘制
+                    if (m_renderSystem->isTransparentEntity(entity)) continue;
+
                     auto gpuMesh = VEngine::MeshManager::getInstance().getMesh(meshRenderer.meshPath);
                     if (!gpuMesh) continue;
 
-                    m_forwardPass->pushModelMatrix(cmd, VEngine::computeWorldMatrix(registry, entity));
+                    // 查找 renderable（取材质描述符 + 透明参数，Mask alpha test 需要）
+                    glm::vec4 materialParams(1.0f, 0.0f, 0.5f, 0.0f);
+                    for (const auto& r : m_renderSystem->getRenderables()) {
+                        if (r.entityHandle == entity) {
+                            materialParams = r.materialParams;
+                            break;
+                        }
+                    }
+                    m_forwardPass->pushModelMatrix(cmd, VEngine::computeWorldMatrix(registry, entity), materialParams);
 
                     ForwardPass::MaterialDescriptor* matDesc = nullptr;
                     for (const auto& r : m_renderSystem->getRenderables()) {
@@ -377,6 +411,9 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
                         gpuMesh->getIndexBuffer(),
                         gpuMesh->getIndexCount());
                 }
+
+                // 透明物体：CPU 收集 + back-to-front 排序后用透明管线绘制
+                m_renderSystem->renderTransparent(cmd, m_forwardPass.get(), frameIndex);
             } else {
                 m_renderSystem->render(cmd, m_forwardPass.get(), frameIndex);
             }
@@ -509,6 +546,15 @@ void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t image
         }
         m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
+        // Transparent（半透明物体前向绘制，手动深度剔除 against GBuffer depth）
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Transparent Pass", 0.6f, 0.9f, 0.3f, 1.0f);
+        if (m_transparentPass && m_gbuffer && m_renderSystem) {
+            m_transparentPass->setDepthTexture(m_gbuffer->getDepthTexture(),
+                                               m_gbuffer->getRHISampler());
+            m_transparentPass->render(cmd, m_renderSystem, frameIndex);
+        }
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+
         // Water
         m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Water Pass", 0.1f, 0.5f, 0.9f, 1.0f);
         if (m_waterPass) {
@@ -580,6 +626,9 @@ void SceneRenderer::renderUI(RHICommandBuffer* cmd) {
 void SceneRenderer::onResize(uint32_t width, uint32_t height) {
     if (m_forwardPass) {
         m_forwardPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
+    }
+    if (m_transparentPass) {
+        m_transparentPass->recreate(m_swapChain->getRHIRenderPass(), width, height);
     }
     if (m_ssaoPass) {
         m_ssaoPass->resize(width, height);

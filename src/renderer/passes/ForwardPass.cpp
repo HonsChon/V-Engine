@@ -46,6 +46,7 @@ void ForwardPass::cleanup() {
     uniformBuffers_.clear();
     materialDescriptorCache_.clear();
     pipeline_.reset();
+    transparentPipeline_.reset();
     globalLayout_.reset();
     materialLayout_.reset();
 }
@@ -53,6 +54,7 @@ void ForwardPass::cleanup() {
 void ForwardPass::recreate(RHIRenderPass* newRenderPass, uint32_t newWidth, uint32_t newHeight) {
     if (rhiDevice_) rhiDevice_->waitIdle();
     pipeline_.reset();
+    transparentPipeline_.reset();
     renderPass_ = newRenderPass;
     width_ = newWidth;
     height_ = newHeight;
@@ -85,26 +87,63 @@ void ForwardPass::createBindingLayouts() {
 void ForwardPass::createPipeline() {
     const auto vertexAttrs = Vertex::getRHIAttributes();
 
-    auto builder = rhiDevice_->createGraphicsPipelineBuilder();
-    builder->setVertexShader("shaders/pbr_vert.spv")
-        .setFragmentShader("shaders/pbr_frag.spv")
-        .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
-    for (const auto& a : vertexAttrs) {
-        builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
-    }
-    builder->setTopology(RHIPrimitiveTopology::TriangleList)
-        .setCullMode(RHICullMode::Back)
-        .setFrontFace(RHIFrontFace::CounterClockwise)
-        .setPolygonMode(RHIPolygonMode::Fill)
-        .setDepthTest(true, true, RHICompareOp::Less)
-        .setSampleCount(RHISampleCount::Count1)
-        .addBindingLayout(globalLayout_.get())
-        .addBindingLayout(materialLayout_.get())
-        .addPushConstant(RHIShaderStage::Vertex, 0, sizeof(PushConstantData))
-        .setRenderPass(renderPass_);
+    // ---- 不透明管线：blend 关闭，深度写入开 ----
+    {
+        auto builder = rhiDevice_->createGraphicsPipelineBuilder();
+        builder->setVertexShader("shaders/pbr_vert.spv")
+            .setFragmentShader("shaders/pbr_frag.spv")
+            .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+        for (const auto& a : vertexAttrs) {
+            builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+        }
+        builder->setTopology(RHIPrimitiveTopology::TriangleList)
+            .setCullMode(RHICullMode::Back)
+            .setFrontFace(RHIFrontFace::CounterClockwise)
+            .setPolygonMode(RHIPolygonMode::Fill)
+            .setDepthTest(true, true, RHICompareOp::Less)
+            .setSampleCount(RHISampleCount::Count1)
+            .addBindingLayout(globalLayout_.get())
+            .addBindingLayout(materialLayout_.get())
+            .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(PushConstantData))
+            .setRenderPass(renderPass_);
 
-    pipeline_ = builder->build();
-    std::cout << "[ForwardPass] Pipeline created (Pure RHI)" << std::endl;
+        pipeline_ = builder->build();
+    }
+
+    // ---- 透明管线：SrcAlpha/OneMinusSrcAlpha 混合，深度测试开/写入关（WaterPass 模板） ----
+    {
+        RHIColorBlendAttachment blend{};
+        blend.blendEnable = true;
+        blend.srcColorFactor = RHIBlendFactor::SrcAlpha;
+        blend.dstColorFactor = RHIBlendFactor::OneMinusSrcAlpha;
+        blend.colorBlendOp = RHIBlendOp::Add;
+        blend.srcAlphaFactor = RHIBlendFactor::One;
+        blend.dstAlphaFactor = RHIBlendFactor::Zero;
+        blend.alphaBlendOp = RHIBlendOp::Add;
+
+        auto builder = rhiDevice_->createGraphicsPipelineBuilder();
+        builder->setVertexShader("shaders/pbr_vert.spv")
+            .setFragmentShader("shaders/pbr_frag.spv")
+            .addVertexBinding(0, Vertex::getStride(), RHIVertexInputRate::Vertex);
+        for (const auto& a : vertexAttrs) {
+            builder->addVertexAttribute(a.binding, a.location, a.format, a.offset);
+        }
+        builder->setTopology(RHIPrimitiveTopology::TriangleList)
+            .setCullMode(RHICullMode::None)   // 透明面片（旗帜/玻璃）双面可见
+            .setFrontFace(RHIFrontFace::CounterClockwise)
+            .setPolygonMode(RHIPolygonMode::Fill)
+            .setDepthTest(true, false, RHICompareOp::Less)   // 测试但不写入
+            .setSampleCount(RHISampleCount::Count1)
+            .addColorBlendAttachment(blend)
+            .addBindingLayout(globalLayout_.get())
+            .addBindingLayout(materialLayout_.get())
+            .addPushConstant(RHIShaderStage::Vertex | RHIShaderStage::Fragment, 0, sizeof(PushConstantData))
+            .setRenderPass(renderPass_);
+
+        transparentPipeline_ = builder->build();
+    }
+
+    std::cout << "[ForwardPass] Pipelines created (opaque + transparent)" << std::endl;
 }
 
 void ForwardPass::createUniformBuffers() {
@@ -185,6 +224,10 @@ void ForwardPass::bindPipeline(RHICommandBuffer* cmd) {
     cmd->bindGraphicsPipeline(pipeline_.get());
 }
 
+void ForwardPass::bindTransparentPipeline(RHICommandBuffer* cmd) {
+    cmd->bindGraphicsPipeline(transparentPipeline_.get());
+}
+
 void ForwardPass::bindGlobalDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex) {
     cmd->setBindingGroup(0, globalBindingGroups_[frameIndex].get());
 }
@@ -197,11 +240,14 @@ void ForwardPass::bindMaterialDescriptorSet(RHICommandBuffer* cmd, uint32_t fram
     }
 }
 
-void ForwardPass::pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model) {
+void ForwardPass::pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model,
+                                  const glm::vec4& materialParams) {
     PushConstantData pushData{};
     pushData.model = model;
     pushData.normalMatrix = glm::transpose(glm::inverse(model));
-    cmd->pushConstants(RHIShaderStage::Vertex, 0, sizeof(PushConstantData), &pushData);
+    pushData.materialParams = materialParams;
+    cmd->pushConstants(RHIShaderStage::Vertex | RHIShaderStage::Fragment,
+                       0, sizeof(PushConstantData), &pushData);
 }
 
 void ForwardPass::drawMesh(RHICommandBuffer* cmd, RHIBuffer* vertexBuffer, RHIBuffer* indexBuffer,

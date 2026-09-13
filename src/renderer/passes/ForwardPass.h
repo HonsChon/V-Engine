@@ -26,6 +26,7 @@ public:
     struct PushConstantData {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 normalMatrix;
+        alignas(16) glm::vec4 materialParams;  // x=opacity y=alphaMode(0/1/2) z=alphaCutoff
     };
 
     struct UniformBufferObject {
@@ -66,10 +67,12 @@ public:
 
     // 渲染命令 (Pure RHI)
     void begin(RHICommandBuffer* cmd);
-    void bindPipeline(RHICommandBuffer* cmd);
+    void bindPipeline(RHICommandBuffer* cmd);                    // 不透明管线
+    void bindTransparentPipeline(RHICommandBuffer* cmd);         // 透明管线（blend + 深度写关）
     void bindGlobalDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex);
     void bindMaterialDescriptorSet(RHICommandBuffer* cmd, uint32_t frameIndex, MaterialDescriptor* material);
-    void pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model);
+    void pushModelMatrix(RHICommandBuffer* cmd, const glm::mat4& model,
+                         const glm::vec4& materialParams = glm::vec4(1.0f, 0.0f, 0.5f, 0.0f));
     void drawMesh(RHICommandBuffer* cmd, RHIBuffer* vertexBuffer, RHIBuffer* indexBuffer, uint32_t indexCount);
 
     // 访问器
@@ -77,7 +80,7 @@ public:
 
 private:
     void createBindingLayouts();
-    void createPipeline();
+    void createPipeline();          // 创建 opaque + transparent 两条管线
     void createUniformBuffers();
     void createGlobalBindingGroups();
     void cleanup();
@@ -89,7 +92,8 @@ private:
     uint32_t height_;
     uint32_t maxFramesInFlight_;
 
-    std::shared_ptr<RHIPipeline> pipeline_;
+    std::shared_ptr<RHIPipeline> pipeline_;            // 不透明
+    std::shared_ptr<RHIPipeline> transparentPipeline_; // 透明（SrcAlpha blend，深度写关）
     std::shared_ptr<RHIBindingLayout> globalLayout_;
     std::shared_ptr<RHIBindingLayout> materialLayout_;
     std::vector<std::shared_ptr<RHIBindingGroup>> globalBindingGroups_;

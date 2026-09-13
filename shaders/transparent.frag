@@ -1,5 +1,10 @@
 #version 450
 
+// TransparentPass - 延迟模式下的半透明前向绘制
+// 基于 pbr.frag，额外采样 GBuffer 深度做手动深度剔除
+//（不能开启固定管线深度测试：合成阶段的深度缓冲已被清空，
+//  不透明深度在 GBuffer 的深度纹理里，WaterPass 同款模式）
+
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
@@ -11,30 +16,31 @@ layout(location = 7) in vec4 fragMaterialParams;  // x=opacity y=alphaMode z=alp
 
 layout(location = 0) out vec4 outColor;
 
-// 纹理采样器 (Set 1)
+// Set 0: 全局 UBO + GBuffer 深度
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 view;
+    mat4 proj;
+    vec4 viewPos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 viewportInfo;  // x=width y=height
+} ubo;
+
+layout(binding = 1) uniform sampler2D gDepth;   // GBuffer 深度（NDC [0,1]，WaterPass 同款）
+
+// Set 1: 材质纹理（与 ForwardPass 共用布局）
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
 layout(set = 1, binding = 1) uniform sampler2D normalMap;
-layout(set = 1, binding = 2) uniform sampler2D specularMap;  // 用作金属度/粗糙度控制
+layout(set = 1, binding = 2) uniform sampler2D specularMap;
 
 const float PI = 3.14159265359;
 
-// 默认材质参数（当纹理不可用时的回退）
-const float DEFAULT_METALLIC = 0.0;   // 非金属
-const float DEFAULT_ROUGHNESS = 0.5;  // 中等粗糙度
-const float DEFAULT_AO = 1.0;         // 无遮蔽
-
-// 从法线贴图获取法线（切线空间到世界空间）
 vec3 getNormalFromMap() {
-    // 采样法线贴图
     vec3 tangentNormal = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
-    
-    // 构建 TBN 矩阵
     vec3 N = normalize(fragNormal);
     vec3 T = normalize(fragTangent);
     vec3 B = normalize(fragBitangent);
     mat3 TBN = mat3(T, B, N);
-    
-    // 转换到世界空间
     return normalize(TBN * tangentNormal);
 }
 
@@ -43,21 +49,17 @@ float DistributionGGX(vec3 N, vec3 H, float roughness) {
     float a2 = a * a;
     float NdotH = max(dot(N, H), 0.0);
     float NdotH2 = NdotH * NdotH;
-    
     float num = a2;
     float denom = (NdotH2 * (a2 - 1.0) + 1.0);
     denom = PI * denom * denom;
-    
     return num / denom;
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
     float r = (roughness + 1.0);
     float k = (r * r) / 8.0;
-    
     float num = NdotV;
     float denom = NdotV * (1.0 - k) + k;
-    
     return num / denom;
 }
 
@@ -66,7 +68,6 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotL = max(dot(N, L), 0.0);
     float ggx2 = GeometrySchlickGGX(NdotV, roughness);
     float ggx1 = GeometrySchlickGGX(NdotL, roughness);
-    
     return ggx1 * ggx2;
 }
 
@@ -75,74 +76,58 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 void main() {
-    // 从纹理采样材质参数（RGB + alpha 一次采样）
+    // ---- 手动深度剔除：与 GBuffer 中已写入的不透明深度比较 ----
+    vec2 screenUV = gl_FragCoord.xy / ubo.viewportInfo.xy;
+    float sceneDepth = texture(gDepth, screenUV).r;
+    // 少量偏移避免与不透明表面 z-fighting
+    if (gl_FragCoord.z > sceneDepth + 0.001) discard;
+
+    // ---- PBR 着色（与 pbr.frag 一致）----
     vec4 albedoRGBA = texture(albedoMap, fragTexCoord);
-    vec3 albedo = pow(albedoRGBA.rgb, vec3(2.2));  // sRGB 到线性空间
-    
-    // 从高光贴图获取金属度和粗糙度
-    // Spec Mask: 白色 = 高光/金属, 黑色 = 非高光/粗糙
+    vec3 albedo = pow(albedoRGBA.rgb, vec3(2.2));
+
     vec3 specMask = texture(specularMap, fragTexCoord).rgb;
     float specValue = (specMask.r + specMask.g + specMask.b) / 3.0;
-    
-    // 使用高光贴图控制粗糙度（反转：高光 = 低粗糙度）
-    float roughness = 1.0 - specValue * 0.8;  // 保留一些基础粗糙度
-    roughness = clamp(roughness, 0.05, 1.0);
-    
-    // 金属度：根据高光强度
-    float metallic = specValue * 0.3;  // 地球主要是非金属
-    
-    float ao = DEFAULT_AO;
-    
-    // 从法线贴图获取法线
+    float roughness = clamp(1.0 - specValue * 0.8, 0.05, 1.0);
+    float metallic = specValue * 0.3;
+    float ao = 1.0;
+
     vec3 N = getNormalFromMap();
     vec3 V = normalize(fragViewPos - fragWorldPos);
-    
-    // Calculate reflectance at normal incidence
+
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
-    
-    // Reflectance equation
+
     vec3 Lo = vec3(0.0);
-    
-    // Light calculations
     vec3 L = normalize(fragLightPos - fragWorldPos);
     vec3 H = normalize(V + L);
     float distance = length(fragLightPos - fragWorldPos);
     float attenuation = 1.0 / (distance * distance);
-    vec3 lightColor = vec3(300.0, 300.0, 300.0);  // 强光源
+    vec3 lightColor = vec3(300.0, 300.0, 300.0);
     vec3 radiance = lightColor * attenuation;
-    
-    // Cook-Torrance BRDF
+
     float NDF = DistributionGGX(N, H, roughness);
     float G = GeometrySmith(N, V, L, roughness);
     vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-    
+
     vec3 kS = F;
     vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;  // 金属没有漫反射
-    
+    kD *= 1.0 - metallic;
+
     vec3 numerator = NDF * G * F;
     float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
     vec3 specular = numerator / denominator;
-    
+
     float NdotL = max(dot(N, L), 0.0);
     Lo += (kD * albedo / PI + specular) * radiance * NdotL;
-    
-    // Ambient lighting (简化的环境光)
-    vec3 ambient = vec3(0.03) * albedo * ao;
-    
-    vec3 color = ambient + Lo;
-    
-    // HDR tonemapping (Reinhard)
-    color = color / (color + vec3(1.0));
 
-    // Gamma correction
+    vec3 ambient = vec3(0.03) * albedo * ao;
+    vec3 color = ambient + Lo;
+
+    color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0/2.2));
 
-    // Alpha 模式（由管线 + RenderSystem 分桶配合）：
-    //   0 = Opaque: alpha 恒为 1（不透明管线绘制）
-    //   1 = Mask:   alpha < cutoff 的片元 discard（植被 alpha test，不透明管线绘制）
-    //   2 = Blend:  半透明混合管线绘制（SrcAlpha/OneMinusSrcAlpha，深度写关）
+    // ---- alpha（此 pass 只处理 Blend 模式，保留完整逻辑以备用）----
     float alpha = 1.0;
     if (fragMaterialParams.y < 0.5) {
         alpha = 1.0;

@@ -33,6 +33,7 @@ class Camera;
 class GBufferPass;
 class LightingPass;
 class ForwardPass;
+class TransparentPass;
 class SSRPass;
 class WaterPass;
 class SSAOPass;
@@ -194,6 +195,7 @@ private:
     std::unique_ptr<ForwardPass> m_forwardPass;
     std::unique_ptr<GBufferPass> m_gbuffer;
     std::unique_ptr<LightingPass> m_lightingPass;
+    std::unique_ptr<TransparentPass> m_transparentPass;
     std::unique_ptr<SSAOPass> m_ssaoPass;
     std::unique_ptr<SSRPass> m_ssrPass;
     std::unique_ptr<WaterPass> m_waterPass;

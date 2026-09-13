@@ -11,6 +11,7 @@
 #include "RHIBuffer.h"
 #include "RHIDevice.h"
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <string>
@@ -32,13 +33,18 @@ struct RenderableEntity {
     glm::mat4 modelMatrix = glm::mat4(1.0f);
     bool visible = true;
     bool valid = false;
-    
+
+    // 透明渲染支持
+    bool transparent = false;                          // Blend 模式 → 透明队列
+    float cameraDistance = 0.0f;                        // 用于 back-to-front 排序
+    glm::vec4 materialParams = glm::vec4(1.0f, 0.0f, 0.5f, 0.0f);  // x=opacity y=alphaMode z=cutoff
+
     // ForwardPass 材质描述符引用
     ForwardPass::MaterialDescriptor* materialDescriptor = nullptr;
-    
+
     // GBufferPass 材质描述符引用
     GBufferPass::MaterialDescriptor* gbufferMaterialDescriptor = nullptr;
-    
+
     std::string materialId;  // 用于查找/创建材质描述符
 };
 
@@ -74,16 +80,18 @@ public:
     
     /**
      * @brief 更新渲染数据（使用RTTI 多态版本）
-     * 从场景中收集所有可渲染实体，根据传入的 RenderPass 类型分配相应的材质描述符
+     * 从场景中收集所有可渲染实体，根据传入的 RenderPass 的类型分配相应的材质描述符
      * @param scene 要渲染的场景
      * @param renderPasses 渲染通道列表（支持ForwardPass、GBufferPass 等）
+     * @param cameraPos 相机世界位置（用于透明物体 back-to-front 排序，可为空）
      */
-    void updateRenderables(VEngine::Scene* scene, const std::vector<RenderPassBase*>& renderPasses) {
+    void updateRenderables(VEngine::Scene* scene, const std::vector<RenderPassBase*>& renderPasses,
+                           const glm::vec3& cameraPos = glm::vec3(0.0f)) {
         if (!scene) return;
-        
+
         auto& registry = scene->getRegistry();
         auto view = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
-        
+
         m_renderables.clear();
         
         for (auto entity : view) {
@@ -95,6 +103,19 @@ public:
             renderable.entityHandle = entity;
             renderable.modelMatrix = computeWorldMatrix(registry, entity);  // 世界矩阵（含父链）
             renderable.visible = meshRenderer.visible;
+
+            // 透明材质参数（opacity/alphaMode/cutoff → push constant）
+            if (registry.all_of<VEngine::PBRMaterialComponent>(entity)) {
+                auto& material = registry.get<VEngine::PBRMaterialComponent>(entity);
+                renderable.materialParams = glm::vec4(
+                    material.opacity,
+                    static_cast<float>(material.alphaMode),
+                    material.alphaCutoff, 0.0f);
+                renderable.transparent = material.isTransparent();
+            }
+            // 世界位置到相机的距离（透明排序用）
+            renderable.cameraDistance =
+                glm::length(glm::vec3(renderable.modelMatrix[3]) - cameraPos);
             
             // 获取网格
             renderable.gpuMesh = MeshManager::getInstance().getMesh(meshRenderer.meshPath);
@@ -178,9 +199,16 @@ public:
         
         // 避免每帧输出日志
         static size_t lastCount = 0;
-        if (m_renderables.size() != lastCount) {
-            std::cout << "[RenderSystem] Updated " << m_renderables.size() << " renderables" << std::endl;
+        static size_t lastTransparentCount = 0;
+        size_t transparentCount = 0;
+        for (const auto& r : m_renderables) {
+            if (r.transparent) transparentCount++;
+        }
+        if (m_renderables.size() != lastCount || transparentCount != lastTransparentCount) {
+            std::cout << "[RenderSystem] Updated " << m_renderables.size() << " renderables ("
+                      << transparentCount << " transparent)" << std::endl;
             lastCount = m_renderables.size();
+            lastTransparentCount = transparentCount;
         }
     }
     
@@ -259,7 +287,7 @@ public:
      */
     void render(RHICommandBuffer* cmd, RenderPassBase* renderPass, uint32_t frameIndex) {
         if (!renderPass) return;
-        
+
         // 使用 RTTI 判断 Pass 类型并调用对应的渲染逻辑
         if (ForwardPass* forwardPass = dynamic_cast<ForwardPass*>(renderPass)) {
             renderForwardPass(cmd, forwardPass, frameIndex);
@@ -269,26 +297,80 @@ public:
         }
         // 可扩展其从Pass 类型...
     }
+
+    /**
+     * @brief 收集透明队列并按相机距离降序排序（远 → 近）
+     * Forward 模式（ForwardPass 透明管线）与延迟模式（TransparentPass）共用
+     */
+    std::vector<const RenderableEntity*> getSortedTransparentList() const {
+        std::vector<const RenderableEntity*> list;
+        for (const auto& renderable : m_renderables) {
+            if (renderable.valid && renderable.gpuMesh && renderable.transparent) {
+                list.push_back(&renderable);
+            }
+        }
+        std::sort(list.begin(), list.end(),
+                  [](const RenderableEntity* a, const RenderableEntity* b) {
+                      return a->cameraDistance > b->cameraDistance;
+                  });
+        return list;
+    }
+
+    /**
+     * @brief 透明物体渲染（透明管线 + back-to-front 排序）
+     * Forward 模式下由 renderForwardPass 内部调用；
+     * GPU culling 间接绘制路径需在 opaque 之后单独调用。
+     */
+    void renderTransparent(RHICommandBuffer* cmd, ForwardPass* forwardPass, uint32_t frameIndex) {
+        auto transparentList = getSortedTransparentList();
+        if (transparentList.empty()) return;
+
+        forwardPass->bindTransparentPipeline(cmd);
+        for (const auto* renderable : transparentList) {
+            if (renderable->materialDescriptor) {
+                forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable->materialDescriptor);
+            }
+            forwardPass->pushModelMatrix(cmd, renderable->modelMatrix, renderable->materialParams);
+            forwardPass->drawMesh(
+                cmd,
+                renderable->gpuMesh->getVertexBuffer(),
+                renderable->gpuMesh->getIndexBuffer(),
+                renderable->gpuMesh->getIndexCount()
+            );
+        }
+    }
+
+    /**
+     * @brief 查询实体是否在透明队列（GPU culling 间接路径过滤用）
+     */
+    bool isTransparentEntity(entt::entity entity) const {
+        for (const auto& renderable : m_renderables) {
+            if (renderable.entityHandle == entity) return renderable.transparent;
+        }
+        return false;
+    }
     
 private:
     /**
      * @brief ForwardPass 渲染实现 (Pure RHI)
+     * 两阶段：opaque（不透明管线，深度写开）→ transparent（透明管线，back-to-front）
      */
     void renderForwardPass(RHICommandBuffer* cmd, ForwardPass* forwardPass, uint32_t frameIndex) {
         // 绑定全局描述符集（Set 0: UBO） 只需绑定一次
         forwardPass->bindGlobalDescriptorSet(cmd, frameIndex);
-        
+
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
-            
+            if (renderable.transparent) continue;   // 透明物体第二阶段绘制
+
             // 绑定材质描述符集（Set 1: 纹理） 每个实体独立的描述符
             if (renderable.materialDescriptor) {
                 forwardPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable.materialDescriptor);
             }
-            
-            // 推送模型矩阵（Push Constants）
-            forwardPass->pushModelMatrix(cmd, renderable.modelMatrix);
-            
+
+            // 推送模型矩阵 + 材质透明参数（Push Constants）
+            forwardPass->pushModelMatrix(cmd, renderable.modelMatrix, renderable.materialParams);
+
             // 绘制网格
             forwardPass->drawMesh(
                 cmd,
@@ -297,18 +379,23 @@ private:
                 renderable.gpuMesh->getIndexCount()
             );
         }
+
+        // 透明阶段（无透明物体时无操作）
+        renderTransparent(cmd, forwardPass, frameIndex);
     }
-    
+
     /**
      * @brief GBufferPass 渲染实现 (Pure RHI)
+     * 透明物体跳过（GBuffer 不支持混合；延迟模式透明由 TransparentPass 前向绘制）
      */
     void renderGBufferPass(RHICommandBuffer* cmd, GBufferPass* gbufferPass, uint32_t frameIndex) {
         // 绑定全局描述符集（Set 0: UBO） 只需绑定一次
         gbufferPass->bindGlobalDescriptorSet(cmd, frameIndex);
-        
+
         for (const auto& renderable : m_renderables) {
             if (!renderable.valid || !renderable.gpuMesh) continue;
-            
+            if (renderable.transparent) continue;
+
             // 绑定材质描述符集（Set 1: 纹理） 每个实体独立的描述符
             if (renderable.gbufferMaterialDescriptor) {
                 gbufferPass->bindMaterialDescriptorSet(cmd, frameIndex, renderable.gbufferMaterialDescriptor);

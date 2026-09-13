@@ -341,6 +341,7 @@ set(PASSES_SOURCES
     src/renderer/passes/WaterPass.cpp
     src/renderer/passes/ForwardPass.cpp
     src/renderer/passes/LightingPass.cpp
+    src/renderer/passes/TransparentPass.cpp
     src/renderer/passes/ComputePassBase.cpp
     src/renderer/passes/FrustumCullingPass.cpp
     src/renderer/passes/GPUDrivenRenderer.cpp
@@ -356,6 +357,7 @@ set(PASSES_HEADERS
     src/renderer/passes/WaterPass.h
     src/renderer/passes/ForwardPass.h
     src/renderer/passes/LightingPass.h
+    src/renderer/passes/TransparentPass.h
     src/renderer/passes/ComputePassBase.h
     src/renderer/passes/FrustumCullingPass.h
     src/renderer/passes/GPUDrivenRenderer.h
@@ -781,6 +783,7 @@ if(WIN32)
         set(DX12_ENGINE_SHADERS
             pbr.vert|vs|2|pbr_vert.dxil|0
             pbr.frag|ps|2|pbr_frag.dxil|0
+            transparent.frag|ps|2|transparent_frag.dxil|0
             gbuffer.vert|vs|2|gbuffer_vert.dxil|0
             gbuffer.frag|ps|2|gbuffer_frag.dxil|0
             deferred_lighting.vert|vs|1|deferred_lighting_vert.dxil|1
@@ -906,6 +909,7 @@ if(GLSLC)
         mesh.frag
         pbr.vert
         pbr.frag
+        transparent.frag
         simple_mesh.vert
         simple_mesh.frag
         gbuffer.vert
