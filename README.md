@@ -1,6 +1,6 @@
 # 🎮 V Engine
 
-**V Engine** 是一个基于 Vulkan 的现代游戏引擎，专注于图形渲染技术、ECS 架构和实时编辑器的学习与实践。
+**V Engine** 是一个基于自研 RHI 双后端（Vulkan / D3D12）的现代游戏引擎，专注于图形渲染技术、ECS 架构和实时编辑器的学习与实践。
 
 ![image-20260217233930395](./assets/image-20260217233930395.png)
 
@@ -9,6 +9,17 @@
 ---
 
 ## ✨ 特性
+
+### 🔌 RHI 双后端 (v0.12)
+- **自研 Pure RHI 抽象层** - Device/SwapChain/Buffer/Texture/Pipeline/
+  Descriptor/CommandBuffer/Sampler 等完整资源与同步抽象，
+  渲染层（Pass/RenderSystem/Scene）零图形 API 依赖
+- **双后端支持** - Vulkan (Windows/macOS) + D3D12 (Windows)，
+  编译期选择 `-DVENGINE_RHI_BACKEND=vulkan|dx12`
+- **双内容着色器管线** - GLSL 单一源码 → glslc `.spv` (Vulkan) /
+  glslc→spirv-cross→dxc `.dxil` (DX12) 自动转译
+- **全功能对齐** - Forward/延迟/GPU 剔除/Nanite/GPU-driven 间接绘制/
+  mip 生成/半透明/FXAA 在两个后端行为一致
 
 ### 🎨 渲染系统
 - **双管线渲染** - 前向渲染 + 延迟渲染，可实时切换
@@ -54,7 +65,8 @@
 ### 🏗️ 引擎架构 (v1.0 新架构)
 - **模块化设计** - 参考 Unreal Engine 架构，职责清晰分离
 - **ECS 系统** - Entity-Component-System，基于 EnTT 库
-- **RHI 抽象层** - Vulkan 资源管理与同步抽象
+- **RHI 抽象层** - Vulkan/D3D12 双后端资源管理与同步抽象（Pure RHI，
+  渲染层零图形 API 依赖）
 - **SceneRenderer** - 渲染通道调度器，管理多 Pass 渲染流程
 - **射线拾取** - 基于 AABB 包围盒的鼠标点击选择
 - **场景层级** - 带变换继承的场景图系统（父子链世界矩阵）
@@ -238,10 +250,10 @@ VEngine/
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                                RHI Layer                                 │
+│                     RHI Layer (Vulkan / D3D12 双后端)                     │
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌─────────────────────┐   │
-│  │  Vulkan   │  │  Vulkan   │  │   Frame   │  │   VulkanBuffer/     │   │
-│  │  Device   │  │ SwapChain │  │ Resources │  │   VulkanTexture     │   │
+│  │ RHIDevice │  │ RHISwap-  │  │ RHI Buffer│  │  RHITexture /       │   │
+│  │ (Vk / D3D)│  │ Chain     │  │ Pipeline  │  │  Descriptor / Cmd   │   │
 │  └───────────┘  └───────────┘  └───────────┘  └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -474,15 +486,19 @@ private:
 ### 系统要求
 
 - **Windows 10/11** 或 **macOS 10.15+**
-- **Vulkan SDK 1.3+**
+- **Vulkan SDK 1.3+**（DX12 后端同样需要：着色器转译链使用其 glslc）
+- DX12 后端（可选）：支持 DirectX 12 的 GPU + 系统 dxc/spirv-cross
+  （CMake 自动查找，缺失时跳过 DX12 着色器编译）
 - **CMake 3.16+**
 - **C++17 编译器** (MSVC 2019+ / Clang 12+)
+- **vcpkg**（classic mode，安装 nlohmann-json 等依赖）
 
 ### 依赖库
 
 | 库 | 用途 |
 |---|---|
-| Vulkan | 图形 API |
+| Vulkan | 图形 API（默认后端） |
+| DirectX-Headers | D3D12 后端（git 子模块，仅 Windows） |
 | GLFW | 窗口和输入 |
 | GLM | 数学库 |
 | EnTT | ECS 框架 |
@@ -496,14 +512,14 @@ private:
 ### Windows 构建
 
 ```bash
-# 克隆项目
-git clone <repository-url>
+# 克隆项目（含子模块：DirectX-Headers）
+git clone --recurse-submodules <repository-url>
 cd VEngine
 
 # 创建构建目录
 mkdir build && cd build
 
-# 配置 (Visual Studio 2022)
+# 配置 - Vulkan 后端（默认）
 cmake .. -G "Visual Studio 17 2022" -A x64
 
 # 构建
@@ -512,6 +528,18 @@ cmake --build . --config Release
 # 运行
 cd bin
 ./VulkanPBR.exe
+```
+
+#### DX12 后端（可选，仅 Windows）
+
+```bash
+mkdir build-dx12 && cd build-dx12
+
+# 配置 - 编译期选择 DX12 后端
+cmake .. -G "Visual Studio 17 2022" -A x64 -DVENGINE_RHI_BACKEND=dx12
+
+cmake --build . --config Release
+cd bin && ./VulkanPBR.exe
 ```
 
 ### macOS 构建
@@ -561,6 +589,14 @@ make -j$(sysctl -n hw.ncpu)
 - [x] **水面渲染系统** - 波纹动画 + SSR 反射 + 智能深度遮挡
 - [x] **GPU-Driven / Nanite** - GPU 视锥剔除、Mesh Clustering、动态 LOD
 - [x] **编辑器 UI** - ImGui 集成，多面板布局
+
+### ✅ 已完成 (v0.12.0) - RHI 双后端 (DX12 移植)
+- [x] **Pure RHI 抽象层** - 全资源/命令/同步抽象，渲染层零图形 API 依赖
+- [x] **Phase 3** - DX12 后端运行默认 Forward 管线 + ImGui
+- [x] **Phase 4** - 延迟渲染 / GPU 剔除 / Nanite 在 DX12 后端全对齐
+- [x] **Phase 5** - GPU-driven 间接绘制、mip 生成、stencil 完成
+- [x] **双内容着色器管线** - GLSL 单一源 → `.spv` / `.dxil` 自动转译
+  （详见 [docs/DX12-Port-Plan.md](docs/DX12-Port-Plan.md)）
 
 ### ✅ 已完成 (v1.2.0) - 资产工作流 + 半透明渲染
 - [x] **模型导入** - OBJ(.mtl) + glTF(.glb) 节点层级导入，逐 primitive 材质
