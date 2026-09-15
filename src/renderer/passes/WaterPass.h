@@ -95,7 +95,7 @@ private:
     float waterHeight = 0.0f;
     float ssrMaxDistance = 30.0f;
     float ssrMaxSteps = 2048.0f;
-    float ssrThickness = 0.03f;
+    float ssrThickness = 0.05f;   // 线性深度空间厚度窗口；穿越由深度连续性守卫+二分细化兜底，小窗口可减少掠过后方的误命中
 
     std::unique_ptr<Mesh> waterMesh;
     std::shared_ptr<RHIBuffer> vertexBuffer_;
