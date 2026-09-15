@@ -1,6 +1,6 @@
 # 🎮 V Engine
 
-**V Engine** 是一个基于 Vulkan 的现代游戏引擎，专注于图形渲染技术、ECS 架构和实时编辑器的学习与实践。
+**V Engine** 是一个基于自研 RHI 双后端（Vulkan / D3D12）的现代游戏引擎，专注于图形渲染技术、ECS 架构和实时编辑器的学习与实践。
 
 ![image-20260217233930395](./assets/image-20260217233930395.png)
 
@@ -10,14 +10,30 @@
 
 ## ✨ 特性
 
+### 🔌 RHI 双后端 (v0.12)
+- **自研 Pure RHI 抽象层** - Device/SwapChain/Buffer/Texture/Pipeline/
+  Descriptor/CommandBuffer/Sampler 等完整资源与同步抽象，
+  渲染层（Pass/RenderSystem/Scene）零图形 API 依赖
+- **双后端支持** - Vulkan (Windows/macOS) + D3D12 (Windows)，
+  编译期选择 `-DVENGINE_RHI_BACKEND=vulkan|dx12`
+- **双内容着色器管线** - GLSL 单一源码 → glslc `.spv` (Vulkan) /
+  glslc→spirv-cross→dxc `.dxil` (DX12) 自动转译
+- **全功能对齐** - Forward/延迟/GPU 剔除/Nanite/GPU-driven 间接绘制/
+  mip 生成/半透明/FXAA 在两个后端行为一致
+
 ### 🎨 渲染系统
 - **双管线渲染** - 前向渲染 + 延迟渲染，可实时切换
 - **G-Buffer** - 多渲染目标 (MRT)，存储世界位置/法线/Albedo/深度
+- **SSAO** - 屏幕空间环境光遮蔽（延迟管线，分块采样 deinterleave/
+  reinterleave + 双边模糊，三级质量预设，默认启用，DebugPanel 实时开关）
 - **PBR 材质** - Cook-Torrance BRDF，工业标准物理渲染
 - **屏幕空间反射 (SSR)** - 实时反射效果，支持透视正确的射线步进
-  - 基于线性深度的精确相交检测
-  - 世界空间单位的厚度阈值（直观可调）
+  - 基于线性深度的精确相交检测，世界空间单位的厚度阈值（直观可调）
+  - 穿越检测（修复远处每步深度增量超过厚度窗口的穿透）+ 深度连续性守卫
+    （区分真实穿越与从物体后方掠过轮廓的误命中）
   - 二分搜索细化命中点
+  - 已知局限：无法反射被前景遮挡/屏幕外的几何，轮廓处有原理性歧义
+    （详见 [docs/SSR_Water_Rendering.md](docs/SSR_Water_Rendering.md)）
 - **水面渲染** - 波纹动画 + 反射/折射 + 深度融合
   - 内置 SSR 反射（高效的逐水面像素计算）
   - 智能深度遮挡（结合世界高度 + 深度比较）
@@ -38,6 +54,7 @@
   - **METIS 风格多级图分区算法**（与 UE Nanite 相同）
   - 重边缘匹配（Heavy Edge Matching）粗化
   - KL/FM 风格局部细化（边界优化）
+  - **QEM 边折叠简化**（Garland-Heckbert 二次误差度量）生成多级 Cluster LOD
   - 16-bit 顶点量化（内存带宽优化）
   - 法线锥背面剔除（整 Cluster 级别）
   - GPU Storage Buffer 管理
@@ -51,7 +68,8 @@
 ### 🏗️ 引擎架构 (v1.0 新架构)
 - **模块化设计** - 参考 Unreal Engine 架构，职责清晰分离
 - **ECS 系统** - Entity-Component-System，基于 EnTT 库
-- **RHI 抽象层** - Vulkan 资源管理与同步抽象
+- **RHI 抽象层** - Vulkan/D3D12 双后端资源管理与同步抽象（Pure RHI，
+  渲染层零图形 API 依赖）
 - **SceneRenderer** - 渲染通道调度器，管理多 Pass 渲染流程
 - **射线拾取** - 基于 AABB 包围盒的鼠标点击选择
 - **场景层级** - 带变换继承的场景图系统（父子链世界矩阵）
@@ -235,10 +253,10 @@ VEngine/
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                                RHI Layer                                 │
+│                     RHI Layer (Vulkan / D3D12 双后端)                     │
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌─────────────────────┐   │
-│  │  Vulkan   │  │  Vulkan   │  │   Frame   │  │   VulkanBuffer/     │   │
-│  │  Device   │  │ SwapChain │  │ Resources │  │   VulkanTexture     │   │
+│  │ RHIDevice │  │ RHISwap-  │  │ RHI Buffer│  │  RHITexture /       │   │
+│  │ (Vk / D3D)│  │ Chain     │  │ Pipeline  │  │  Descriptor / Cmd   │   │
 │  └───────────┘  └───────────┘  └───────────┘  └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -471,15 +489,19 @@ private:
 ### 系统要求
 
 - **Windows 10/11** 或 **macOS 10.15+**
-- **Vulkan SDK 1.3+**
+- **Vulkan SDK 1.3+**（DX12 后端同样需要：着色器转译链使用其 glslc）
+- DX12 后端（可选）：支持 DirectX 12 的 GPU + 系统 dxc/spirv-cross
+  （CMake 自动查找，缺失时跳过 DX12 着色器编译）
 - **CMake 3.16+**
 - **C++17 编译器** (MSVC 2019+ / Clang 12+)
+- **vcpkg**（classic mode，安装 nlohmann-json 等依赖）
 
 ### 依赖库
 
 | 库 | 用途 |
 |---|---|
-| Vulkan | 图形 API |
+| Vulkan | 图形 API（默认后端） |
+| DirectX-Headers | D3D12 后端（git 子模块，仅 Windows） |
 | GLFW | 窗口和输入 |
 | GLM | 数学库 |
 | EnTT | ECS 框架 |
@@ -493,14 +515,14 @@ private:
 ### Windows 构建
 
 ```bash
-# 克隆项目
-git clone <repository-url>
+# 克隆项目（含子模块：DirectX-Headers）
+git clone --recurse-submodules <repository-url>
 cd VEngine
 
 # 创建构建目录
 mkdir build && cd build
 
-# 配置 (Visual Studio 2022)
+# 配置 - Vulkan 后端（默认）
 cmake .. -G "Visual Studio 17 2022" -A x64
 
 # 构建
@@ -509,6 +531,18 @@ cmake --build . --config Release
 # 运行
 cd bin
 ./VulkanPBR.exe
+```
+
+#### DX12 后端（可选，仅 Windows）
+
+```bash
+mkdir build-dx12 && cd build-dx12
+
+# 配置 - 编译期选择 DX12 后端
+cmake .. -G "Visual Studio 17 2022" -A x64 -DVENGINE_RHI_BACKEND=dx12
+
+cmake --build . --config Release
+cd bin && ./VulkanPBR.exe
 ```
 
 ### macOS 构建
@@ -559,6 +593,24 @@ make -j$(sysctl -n hw.ncpu)
 - [x] **GPU-Driven / Nanite** - GPU 视锥剔除、Mesh Clustering、动态 LOD
 - [x] **编辑器 UI** - ImGui 集成，多面板布局
 
+### ✅ 已完成 (v0.12.0) - RHI 双后端 (DX12 移植)
+- [x] **Pure RHI 抽象层** - 全资源/命令/同步抽象，渲染层零图形 API 依赖
+- [x] **Phase 3** - DX12 后端运行默认 Forward 管线 + ImGui
+- [x] **Phase 4** - 延迟渲染 / GPU 剔除 / Nanite 在 DX12 后端全对齐
+- [x] **Phase 5** - GPU-driven 间接绘制、mip 生成、stencil 完成
+- [x] **双内容着色器管线** - GLSL 单一源 → `.spv` / `.dxil` 自动转译
+  （详见 [docs/DX12-Port-Plan.md](docs/DX12-Port-Plan.md)）
+
+### ✅ 已完成 (v0.11-0.12) - Nanite LOD 完整链路 + SSAO
+- [x] **QEM 网格简化** - Garland-Heckbert 二次误差度量边折叠，
+      生成多级 Cluster LOD（MeshSimplifier）
+- [x] **GPU DAG LOD 选择** - 屏幕空间误差阈值驱动的层级遍历 +
+      父子互斥渲染（避免 Z-Fighting），支持 Force LOD 诊断
+- [x] **GPU-driven 间接绘制** - cluster 几何 GPU 展开 + 单次 drawIndirect，
+      绘制路径零 CPU 回读（Vulkan/DX12 双后端）
+- [x] **SSAO** - 分块采样（deinterleave/reinterleave Compute）+ 双边模糊，
+      三级质量预设（32/64/128 采样），延迟管线默认启用
+
 ### ✅ 已完成 (v1.2.0) - 资产工作流 + 半透明渲染
 - [x] **模型导入** - OBJ(.mtl) + glTF(.glb) 节点层级导入，逐 primitive 材质
 - [x] **场景序列化** - JSON `.vscene` 保存/加载，UUID 层级引用
@@ -568,16 +620,18 @@ make -j$(sysctl -n hw.ncpu)
       两遍绘制（背面→正面）、延迟模式 GBuffer 深度手动剔除
 - [x] **FXAA 抗锯齿** - 离屏合成 + UI 前绘制，双渲染模式可用
 - [x] **glTF alpha 模式** - alphaMode/alphaCutoff 导入（Sponza 植被镂空）
+- [x] **SSR 穿透修复** - 穿越检测 + 深度连续性守卫；确认遮挡区域反射
+      （如物体背后墙面）为 SSR 固有局限，出路为平面反射（见计划）
 
 ### 🔄 进行中 (v1.1.0)
-- [ ] **网格简化算法** - 边折叠（Edge Collapse）生成多级 Cluster
-- [ ] **屏幕空间误差 LOD** - 基于投影像素误差的精确 LOD 选择
 - [ ] **Visibility Buffer** - 延迟材质着色，进一步减少 overdraw
+      （网格简化/误差 LOD/GPU-driven 间接绘制已完成，见 v0.11-0.12）
 
 ### 🚀 计划中 (v1.3.0)
+- [ ] **水面平面反射** - 镜像相机 + 半分辨率反射 RT 替代 SSR 步进，
+      平坦水面精确反射（遮挡/屏幕外/轮廓歧义全部消除，业界标准做法）
 - [ ] **多光源支持** - 点光源、聚光灯、方向光数组 (LightComponent 已可序列化)
 - [ ] **阴影系统** - Shadow Mapping / Cascaded Shadow Maps (CSM)
-- [ ] **环境光遮蔽** - Screen-Space Ambient Occlusion (SSAO)
 - [ ] **后处理管线** - Bloom, Tone Mapping, TAA (FXAA 已完成)
 - [ ] **天空盒系统** - HDR 环境贴图 + IBL (基于图像的光照)
 - [ ] **材质编辑器** - 节点式材质编辑，实时预览

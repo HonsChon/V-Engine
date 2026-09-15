@@ -32,7 +32,7 @@ SSRPass::SSRPass(RHIDevice* rhiDevice,
     // 初始化默认参数
     params.maxDistance = 50.0f;
     params.resolution = 1.0f;
-    params.thickness = 0.01f;
+    params.thickness = 0.05f;   // 线性深度空间厚度窗口；穿越由深度连续性守卫+二分细化兜底
     params.maxSteps = 64.0f;
     params.screenSize = glm::vec4(width_, height_, 1.0f / width_, 1.0f / height_);
     params.nearPlane = 0.1f;

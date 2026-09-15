@@ -101,21 +101,51 @@ vec2 binarySearchScreen(vec2 startUV, vec2 endUV, float startNDCDepth, float end
     return midUV;
 }
 
+// 处理一次命中：背面剔除 + 边缘/距离衰减 + 采样反射色
+// 返回 vec4(rgb, fade)；背面命中返回 w < 0（调用方继续步进）
+vec4 processHit(vec2 hitUV, vec3 rayDir, float stepIndex, float numSteps) {
+    // 背面剔除
+    vec3 hitNormal = texture(gNormal, hitUV).rgb;
+    if (dot(hitNormal, rayDir) > 0.0) {
+        return vec4(0.0, 0.0, 0.0, -1.0);
+    }
+
+    // 边缘衰减（屏幕边界处反射淡出）
+    float edgeFade = 1.0 - max(
+        abs(hitUV.x - 0.5) * 2.0,
+        abs(hitUV.y - 0.5) * 2.0
+    );
+    edgeFade = clamp(edgeFade, 0.0, 1.0);
+    edgeFade = pow(edgeFade, 2.0);
+
+    // 距离衰减
+    float distanceFade = 1.0 - stepIndex / numSteps;
+
+    // 采样反射颜色
+    vec3 reflectionColor = texture(sceneColor, hitUV).rgb;
+    return vec4(reflectionColor, edgeFade * distanceFade);
+}
+
+// 穿越判定的深度连续性容差：相邻采样点的场景深度差小于此值视为连续表面（真实穿越），
+// 大于此值视为屏幕空间深度断层（物体轮廓——光线从物体后方掠过，并非穿越表面）。
+// 真实穿越的相邻像素深度差通常 < 0.1；轮廓断层为米级跳变。
+const float CROSSING_DEPTH_TOLERANCE = 0.5;
+
 // 屏幕空间光线步进
 // 在屏幕空间 (UV, NDC depth) 步进以保持透视正确性
 // 深度比较时转换为线性深度以使用世界空间单位的厚度阈值
 vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
     float maxSteps = ubo.ssrParams.y;
     float thickness = ubo.ssrParams.z;  // 线性深度空间的厚度阈值
-    
+
     // 计算光线起点和终点在屏幕空间的位置（UV + NDC depth）
     vec3 startScreen = worldToScreen(rayOrigin);
-    
+
     // 在世界空间沿光线方向走一段距离作为终点
     float maxDistance = ubo.ssrParams.x;
     vec3 endWorld = rayOrigin + rayDir * maxDistance;
     vec3 endScreen = worldToScreen(endWorld);
-    
+
     // 处理光线指向相机后方的情况（NDC depth < 0 或 > 1）
     if (endScreen.z < 0.0) {
         float t = (0.0 - startScreen.z) / (endScreen.z - startScreen.z);
@@ -125,7 +155,7 @@ vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
             return vec4(0.0);
         }
     }
-    
+
     // 裁剪到远平面
     if (endScreen.z > 1.0) {
         float t = (1.0 - startScreen.z) / (endScreen.z - startScreen.z);
@@ -133,82 +163,83 @@ vec4 rayMarchScreenSpace(vec3 rayOrigin, vec3 rayDir) {
             endScreen = mix(startScreen, endScreen, t);
         }
     }
-    
+
     // 在屏幕空间计算步进方向和距离
     vec3 screenDelta = endScreen - startScreen;
     float screenDistance = length(screenDelta.xy);
-    
+
     // 如果屏幕空间距离太短，跳过
     if (screenDistance < 0.001) {
         return vec4(0.0);
     }
-    
+
     // 计算步进参数
     float numSteps = min(maxSteps, screenDistance * ubo.screenSize.x);
     numSteps = max(numSteps, 32.0);
-    
+
     // 添加抖动来打破规律性条纹
     float jitter = hash(gl_FragCoord.xy);
-    
+
     vec3 stepScreen = screenDelta / numSteps;
-    
+
     // 开始步进（加入起始抖动）
     vec3 currentScreen = startScreen + stepScreen * jitter;
     vec3 prevScreen = startScreen;
-    
+
+    // 起点：深度差（穿越检测基准：通常 < 0，即光线在场景表面前方）
+    // 与场景深度（深度连续性守卫基准）
+    float prevSampledLinearDepth = linearizeDepth(texture(gDepth, startScreen.xy).r);
+    float prevDelta = linearizeDepth(startScreen.z) - prevSampledLinearDepth;
+
     for (int i = 0; i < int(numSteps); i++) {
         // 检查边界
-        if (currentScreen.x < 0.0 || currentScreen.x > 1.0 || 
+        if (currentScreen.x < 0.0 || currentScreen.x > 1.0 ||
             currentScreen.y < 0.0 || currentScreen.y > 1.0 ||
             currentScreen.z < 0.0 || currentScreen.z > 1.0) {
             break;
         }
-        
+
         // 采样深度缓冲
         float sampledNDCDepth = texture(gDepth, currentScreen.xy).r;
-        
+
         // 转换为线性深度进行比较
         float sampledLinearDepth = linearizeDepth(sampledNDCDepth);
         float rayLinearDepth = linearizeDepth(currentScreen.z);
-        
+
         float deltaDepth = rayLinearDepth - sampledLinearDepth;
-        
-        // 检测命中（使用线性深度空间的厚度阈值）
+
+        // 检测命中（步进落在厚度窗口内）
         if (deltaDepth > 0.0 && deltaDepth < thickness) {
             // 二分搜索细化命中点
-            vec2 hitUV = binarySearchScreen(prevScreen.xy, currentScreen.xy, 
+            vec2 hitUV = binarySearchScreen(prevScreen.xy, currentScreen.xy,
                                             prevScreen.z, currentScreen.z, thickness);
-            
-            // 背面剔除
-            vec3 hitNormal = texture(gNormal, hitUV).rgb;
-            if (dot(hitNormal, rayDir) > 0.0) {
-                // 背面，跳过继续搜索
-                prevScreen = currentScreen;
-                currentScreen += stepScreen;
-                continue;
-            }
-            
-            // 计算衰减
-            float edgeFade = 1.0 - max(
-                abs(hitUV.x - 0.5) * 2.0,
-                abs(hitUV.y - 0.5) * 2.0
-            );
-            edgeFade = clamp(edgeFade, 0.0, 1.0);
-            edgeFade = pow(edgeFade, 2.0);
-            
-            float distanceFade = 1.0 - float(i) / numSteps;
-            float fade = edgeFade * distanceFade;
-            
-            // 采样反射颜色
-            vec3 reflectionColor = texture(sceneColor, hitUV).rgb;
-            
-            return vec4(reflectionColor, fade);
+            vec4 hit = processHit(hitUV, rayDir, float(i), numSteps);
+            if (hit.w >= 0.0) return hit;
+            // 背面：跳过继续搜索
         }
-        
+        // 穿越检测（tunneling）：一步从表面前方跳到厚度窗口之外。
+        // 屏幕空间等距步进在远处每步的线性深度增量可能超过厚度阈值
+        // （透视导致 dL/dd 随距离急剧增大），光线"穿透"表面 → 未命中回退。
+        // 在 prev→current 之间二分细化找回交面。
+        // 深度连续性守卫：仅当相邻采样点的场景深度连续（真实穿越）才接受；
+        // 否则是屏幕空间深度断层（物体轮廓——光线从物体后方掠过），拒绝。
+        // 无此守卫时，轮廓处的 delta 符号翻转与真实穿越完全同构，
+        // 会把物体颜色误涂到大片水面 → 倒影被拉长成条纹。
+        else if (deltaDepth >= thickness && prevDelta <= 0.0 &&
+                 abs(sampledLinearDepth - prevSampledLinearDepth) < CROSSING_DEPTH_TOLERANCE) {
+            vec2 hitUV = binarySearchScreen(prevScreen.xy, currentScreen.xy,
+                                            prevScreen.z, currentScreen.z, thickness);
+            vec4 hit = processHit(hitUV, rayDir, float(i), numSteps);
+            if (hit.w >= 0.0) return hit;
+            // 背面：跳过继续搜索
+        }
+
+        prevDelta = deltaDepth;
+        prevSampledLinearDepth = sampledLinearDepth;
         prevScreen = currentScreen;
         currentScreen += stepScreen;
     }
-    
+
     // 未命中
     return vec4(0.0);
 }

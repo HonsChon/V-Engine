@@ -132,6 +132,10 @@ GPU剔除/Nanite(可选) -> ForwardPass(opaque → 透明两遍) -> 离屏
 - [x] **RenderSettings.enableFXAA** (默认开) + DebugPanel 开关
 
 ### 已知限制
+- **SSR 水面反射固有局限**：无法反射被前景物体遮挡的几何（如球后墙面，
+  表现为点状回退）；轮廓歧义靠连续性守卫取舍（紧贴轮廓的真实穿越被误拒）；
+  无 TAA 掩盖 jitter 点斑。平坦水面的正解是平面反射（已规划，见
+  docs/SSR_Water_Rendering.md 局限性与后续方向章节）
 - 透明为对象级排序近似（穿插透明物体需 OIT/Weighted Blended，列入计划）
 - glTF metallicRoughness 打包贴图近似映射 metallicMap (G/B 通道未拆分)
 - .glb 内嵌贴图不提取（外部 URI 贴图正常）；alpha 贴图按不透明渲染已改善
@@ -484,6 +488,15 @@ cd build-win/bin
 ---
 
 ## 开发历史笔记
+
+### 2026/09/14 - SSR 穿透修复 + 局限性确认 (e0a5151)
+1. 现象: 水面倒影远处点状蓝色回退 → 根因穿透(远处每步线性深度增量 > 厚度窗口)
+2. 修复: 穿越检测(二分细化) + 采样深度连续性守卫(区分真实穿越/轮廓后方掠过),
+   厚度 0.03/0.01 → 0.05 (water/ssr 两份 shader 同步)
+3. 四轮迭代教训: 射线历史判据/步长窗口等替代方案均在轮廓歧义下失败;
+   球体遮挡区域的墙倒影为 SSR 固有局限(屏幕空间只有最前表面), 调参无解
+4. 定稿: 回退守卫版(拉长已修, 点斑为固有局限); 平面反射(镜像相机+反射RT)
+   列为后续方案, 详见 docs/SSR_Water_Rendering.md
 
 ### 2026/09/13-14 - 资产工作流 + 半透明渲染 + FXAA (v1.2.0)
 1. 模型导入: ModelImporter (OBJ .mtl + glTF 节点层级), MeshManager 惰性加载,
