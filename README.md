@@ -24,6 +24,8 @@
 ### 🎨 渲染系统
 - **双管线渲染** - 前向渲染 + 延迟渲染，可实时切换
 - **G-Buffer** - 多渲染目标 (MRT)，存储世界位置/法线/Albedo/深度
+- **SSAO** - 屏幕空间环境光遮蔽（延迟管线，分块采样 deinterleave/
+  reinterleave + 双边模糊，三级质量预设，默认启用，DebugPanel 实时开关）
 - **PBR 材质** - Cook-Torrance BRDF，工业标准物理渲染
 - **屏幕空间反射 (SSR)** - 实时反射效果，支持透视正确的射线步进
   - 基于线性深度的精确相交检测，世界空间单位的厚度阈值（直观可调）
@@ -52,6 +54,7 @@
   - **METIS 风格多级图分区算法**（与 UE Nanite 相同）
   - 重边缘匹配（Heavy Edge Matching）粗化
   - KL/FM 风格局部细化（边界优化）
+  - **QEM 边折叠简化**（Garland-Heckbert 二次误差度量）生成多级 Cluster LOD
   - 16-bit 顶点量化（内存带宽优化）
   - 法线锥背面剔除（整 Cluster 级别）
   - GPU Storage Buffer 管理
@@ -598,6 +601,16 @@ make -j$(sysctl -n hw.ncpu)
 - [x] **双内容着色器管线** - GLSL 单一源 → `.spv` / `.dxil` 自动转译
   （详见 [docs/DX12-Port-Plan.md](docs/DX12-Port-Plan.md)）
 
+### ✅ 已完成 (v0.11-0.12) - Nanite LOD 完整链路 + SSAO
+- [x] **QEM 网格简化** - Garland-Heckbert 二次误差度量边折叠，
+      生成多级 Cluster LOD（MeshSimplifier）
+- [x] **GPU DAG LOD 选择** - 屏幕空间误差阈值驱动的层级遍历 +
+      父子互斥渲染（避免 Z-Fighting），支持 Force LOD 诊断
+- [x] **GPU-driven 间接绘制** - cluster 几何 GPU 展开 + 单次 drawIndirect，
+      绘制路径零 CPU 回读（Vulkan/DX12 双后端）
+- [x] **SSAO** - 分块采样（deinterleave/reinterleave Compute）+ 双边模糊，
+      三级质量预设（32/64/128 采样），延迟管线默认启用
+
 ### ✅ 已完成 (v1.2.0) - 资产工作流 + 半透明渲染
 - [x] **模型导入** - OBJ(.mtl) + glTF(.glb) 节点层级导入，逐 primitive 材质
 - [x] **场景序列化** - JSON `.vscene` 保存/加载，UUID 层级引用
@@ -611,16 +624,14 @@ make -j$(sysctl -n hw.ncpu)
       （如物体背后墙面）为 SSR 固有局限，出路为平面反射（见计划）
 
 ### 🔄 进行中 (v1.1.0)
-- [ ] **网格简化算法** - 边折叠（Edge Collapse）生成多级 Cluster
-- [ ] **屏幕空间误差 LOD** - 基于投影像素误差的精确 LOD 选择
 - [ ] **Visibility Buffer** - 延迟材质着色，进一步减少 overdraw
+      （网格简化/误差 LOD/GPU-driven 间接绘制已完成，见 v0.11-0.12）
 
 ### 🚀 计划中 (v1.3.0)
 - [ ] **水面平面反射** - 镜像相机 + 半分辨率反射 RT 替代 SSR 步进，
       平坦水面精确反射（遮挡/屏幕外/轮廓歧义全部消除，业界标准做法）
 - [ ] **多光源支持** - 点光源、聚光灯、方向光数组 (LightComponent 已可序列化)
 - [ ] **阴影系统** - Shadow Mapping / Cascaded Shadow Maps (CSM)
-- [ ] **环境光遮蔽** - Screen-Space Ambient Occlusion (SSAO)
 - [ ] **后处理管线** - Bloom, Tone Mapping, TAA (FXAA 已完成)
 - [ ] **天空盒系统** - HDR 环境贴图 + IBL (基于图像的光照)
 - [ ] **材质编辑器** - 节点式材质编辑，实时预览
