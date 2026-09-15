@@ -15,9 +15,12 @@
 - **G-Buffer** - 多渲染目标 (MRT)，存储世界位置/法线/Albedo/深度
 - **PBR 材质** - Cook-Torrance BRDF，工业标准物理渲染
 - **屏幕空间反射 (SSR)** - 实时反射效果，支持透视正确的射线步进
-  - 基于线性深度的精确相交检测
-  - 世界空间单位的厚度阈值（直观可调）
+  - 基于线性深度的精确相交检测，世界空间单位的厚度阈值（直观可调）
+  - 穿越检测（修复远处每步深度增量超过厚度窗口的穿透）+ 深度连续性守卫
+    （区分真实穿越与从物体后方掠过轮廓的误命中）
   - 二分搜索细化命中点
+  - 已知局限：无法反射被前景遮挡/屏幕外的几何，轮廓处有原理性歧义
+    （详见 [docs/SSR_Water_Rendering.md](docs/SSR_Water_Rendering.md)）
 - **水面渲染** - 波纹动画 + 反射/折射 + 深度融合
   - 内置 SSR 反射（高效的逐水面像素计算）
   - 智能深度遮挡（结合世界高度 + 深度比较）
@@ -568,6 +571,8 @@ make -j$(sysctl -n hw.ncpu)
       两遍绘制（背面→正面）、延迟模式 GBuffer 深度手动剔除
 - [x] **FXAA 抗锯齿** - 离屏合成 + UI 前绘制，双渲染模式可用
 - [x] **glTF alpha 模式** - alphaMode/alphaCutoff 导入（Sponza 植被镂空）
+- [x] **SSR 穿透修复** - 穿越检测 + 深度连续性守卫；确认遮挡区域反射
+      （如物体背后墙面）为 SSR 固有局限，出路为平面反射（见计划）
 
 ### 🔄 进行中 (v1.1.0)
 - [ ] **网格简化算法** - 边折叠（Edge Collapse）生成多级 Cluster
@@ -575,6 +580,8 @@ make -j$(sysctl -n hw.ncpu)
 - [ ] **Visibility Buffer** - 延迟材质着色，进一步减少 overdraw
 
 ### 🚀 计划中 (v1.3.0)
+- [ ] **水面平面反射** - 镜像相机 + 半分辨率反射 RT 替代 SSR 步进，
+      平坦水面精确反射（遮挡/屏幕外/轮廓歧义全部消除，业界标准做法）
 - [ ] **多光源支持** - 点光源、聚光灯、方向光数组 (LightComponent 已可序列化)
 - [ ] **阴影系统** - Shadow Mapping / Cascaded Shadow Maps (CSM)
 - [ ] **环境光遮蔽** - Screen-Space Ambient Occlusion (SSAO)
