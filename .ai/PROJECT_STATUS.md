@@ -1,30 +1,34 @@
 ﻿# V Engine - AI Context Document
 
 > 此文档供 AI 编程助手了解项目当前状态，便于在新对话中快速上手。
-> 最后更新: 2026/03/10  版本: v0.11.2
+> 最后更新: 2026/09/14  版本: v1.2.0 (资产工作流: 模型导入/场景序列化;
+> 半透明渲染 + FXAA 抗锯齿; 延迟管线也走离屏合成。
+> 本文档部分章节为历史快照,最新进展以文末各 Phase 执行记录与
+> docs/DX12-Port-Plan.md 为准)
 
 ---
 
 ## 项目概述
 
-**V Engine** 是一个基于 Vulkan 的现代游戏引擎学习项目，专注于图形渲染技术和 ECS 架构。
+**V Engine** 是一个基于 RHI 抽象层(Vulkan / DX12 双后端)的现代游戏引擎学习项目，
+专注于图形渲染技术、GPU-driven 渲染和 ECS 架构。
 
 ### 技术栈
-- 图形 API: Vulkan 1.3
+- 图形 API: Vulkan 1.0(Windows/macOS) / D3D12(Windows, 经统一 RHI 抽象)
 - 语言: C++17
 - 窗口库: GLFW
 - 数学库: GLM
 - ECS: EnTT
-- UI: ImGui
-- 构建系统: CMake
+- UI: ImGui(Vulkan / DX12 双后端)
+- 构建系统: CMake(DX12 后端: `-DVENGINE_RHI_BACKEND=dx12`,仅 Windows)
 
 
 ### 项目路径
-- 根目录: f:\图形学习\PBR\PBR
+- 根目录: F:\图形学习\PBR\V-Engine
 - 源代码: src/
-- 着色器: shaders/ (GLSL -> SPIR-V)
+- 着色器: shaders/ (GLSL 单一源 → Vulkan .spv / DX12 .dxil 双内容管线)
 - 资源: assets/
-- 构建输出: build/bin/
+- 构建输出: build*/bin/
 
 ---
 
@@ -34,44 +38,105 @@
 
 ```
 src/
-├── core/           # Vulkan 底层封装
-│   ├── VulkanDevice.*      # 设备管理
-│   ├── VulkanSwapChain.*   # 交换链
-│   ├── VulkanBuffer.*      # GPU 缓冲区
-│   ├── VulkanTexture.*     # 纹理管理
-│   ├── ComputePipeline.*   # 计算管线封装
-│   └── ComputePassBase.*   # 计算通道基类
+├── Application/    # Engine 生命周期 / Window / Input
 │
-├── renderer/       # 主渲染器
-│   ├── VulkanRenderer.*    # 协调所有 Pass
-│   └── GPUDrivenRenderer.* # GPU驱动渲染器
+├── RHI/            # 渲染硬件抽象 (Vulkan/ + DX12/ 双后端)
+│   ├── RHIDevice.h/Buffer/Texture/Pipeline/...   # 抽象接口
+│   ├── Vulkan/     # Vulkan 实现
+│   └── DX12/       # D3D12 实现 (仅 Windows)
 │
-├── passes/         # 模块化渲染通道
-│   ├── RenderPassBase.h    # Pass 基类
-│   ├── GBufferPass.*       # G-Buffer 阶段
-│   ├── SSRPass.*           # 屏幕空间反射
-│   ├── WaterPass.*         # 水面渲染
-│   ├── FrustumCullingPass.*# GPU视锥体剔除
-│   └── NaniteDebugPass.*   # Nanite Cluster 可视化 (NEW)
-│
-├── nanite/         # Nanite 虚拟几何系统 (NEW)
-│   ├── MeshClusterizer.*   # 网格聚类算法
-│   └── NaniteCommon.h      # 数据结构定义
+├── renderer/       # 渲染器
+│   ├── SceneRenderer.*     # Pass 调度 + 离屏目标 + FXAA 合成
+│   ├── RenderSettings.h    # 渲染设置 (enableFXAA 等)
+│   ├── passes/             # 模块化渲染通道
+│   │   ├── ForwardPass.*        # 前向 (opaque + 透明两遍)
+│   │   ├── GBufferPass.*        # G-Buffer
+│   │   ├── LightingPass.*       # 延迟光照合成
+│   │   ├── TransparentPass.*    # 半透明 (延迟模式, GBuffer 深度剔除)
+│   │   ├── FXAAPass.*           # FXAA 后处理
+│   │   ├── SSRPass/WaterPass/SSAOPass/...
+│   │   └── FrustumCullingPass/GPUDrivenRenderer/NaniteDebugPass
+│   └── nanite/            # Nanite 虚拟几何系统
 │
 ├── scene/          # ECS 场景管理
-│   ├── Scene.*             # 场景容器
-│   └── Components.h        # ECS 组件
+│   ├── Scene/Entity/Components   # 核心 (UUID/层级/alpha 模型/世界矩阵)
+│   ├── SceneSerializer.*         # .vscene JSON 序列化
+│   └── SelectionManager/RayPicker
 │
-└── ui/             # 编辑器 UI
-    └── panels/             # UI 面板
+├── resources/      # 资源管理
+│   ├── Mesh/MeshManager          # 几何 + glTF 惰性加载
+│   ├── ModelImporter.*           # OBJ/.mtl + glTF 节点层级导入
+│   ├── AssetPath.h               # 路径兜底解析
+│   ├── TextureManager            # 贴图缓存 (强制 RGBA)
+│   └── RenderSystem.h            # ECS→渲染数据 (透明分桶/排序)
+│
+├── ui/             # 编辑器 UI
+│   ├── UIManager/ImGuiLayer      # File 菜单动作/快捷键接线
+│   └── panels/                   # Debug/Hierarchy/Inspector/AssetBrowser
+│
+└── third_party/    # imgui / tinygltf / tinyobj / stb / nfd
 ```
 
 ### 渲染管线 (延迟渲染模式)
 ```
-GBufferPass -> SSRPass -> LightingPass -> WaterPass -> Swapchain
-                                              ↓
-                              [Key 9] NaniteDebugPass (覆盖渲染)
+GBufferPass -> SSRPass -> LightingPass -> TransparentPass -> WaterPass
+                                                      ↓
+                                    离屏合成 → FXAAPass -> UI -> Swapchain
 ```
+
+### 渲染管线 (前向渲染模式)
+```
+GPU剔除/Nanite(可选) -> ForwardPass(opaque → 透明两遍) -> 离屏
+                                                        ↓
+                                              FXAAPass -> UI -> Swapchain
+```
+
+---
+
+## 已完成功能 (v1.2.0) — 资产工作流 + 半透明渲染
+
+### 资产与场景工作流
+- [x] **模型导入** (`src/resources/ModelImporter.*`) - OBJ(.mtl 材质) + glTF/.glb
+  - glTF 场景图 → ECS 父子实体树，逐 primitive 材质映射 (PBRMetallicRoughness)
+  - meshId 约定 `<路径>#<meshIdx>_<primIdx>`，MeshManager 惰性加载+registerMesh
+  - `AssetPath.h`: resolveAssetPath 路径兜底（跨工作目录重开场景不失效）
+- [x] **场景序列化** (`src/scene/SceneSerializer.*`) - JSON `.vscene`
+  - 父子关系 UUID 引用两遍重建；Hierarchy 顺序确定性保存；复用 Scene 对象
+  - 组件: Tag/Transform/MeshRenderer/PBRMaterial(含 alpha 字段)/Light/Camera
+- [x] **世界变换继承** - `computeWorldMatrix()` (Components.h) 沿父链累乘，
+  Forward/GPU剔除/Nanite/拾取全路径使用
+- [x] **编辑器工作流** - File 菜单(New/Open/Save/SaveAs) + NFD 原生对话框 +
+  Ctrl+N/O/S；AssetBrowser 双击导入；启动恢复上次场景 (bin/editor_settings.json)
+- [x] **启动参数** - `--scene <p>` / `--import <p>` / `--save <p>` (自动化 E2E)
+- [x] **测试资产** - Khronos Sponza glTF (103 primitives/25 材质)、Box 层级测试模型、
+  transparent_test/sponza/roundtrip_test 示例场景
+
+### 半透明渲染
+- [x] **数据模型** - PBRMaterialComponent: opacity / alphaMode(Opaque|Mask|Blend) /
+  alphaCutoff；glTF alphaMode 导入、OBJ `d` 映射；序列化+Inspector 编辑
+- [x] **前向路径** - ForwardPass 3 管线: opaque(cull Back) + 透明两遍
+  (cull Front 画背面 → cull Back 画正面, SrcAlpha 混合, 深度测试开/写关)
+- [x] **延迟路径** - TransparentPass (LightingPass 后): 采样 GBuffer 深度手动
+  discard (合成阶段深度缓冲已清空)，同样两遍绘制，复用 ForwardPass 材质布局
+- [x] **排序** - 对象级 back-to-front (相机距离)；GPU culling 间接路径过滤透明
+- [x] **双面光照** - `if (!gl_FrontFacing) N = -N;` (pbr.frag/transparent.frag)
+- [x] **关键教训** - 单遍 cull None 时前后表面绘制顺序=索引存储序，UV 球按纬度
+  存储导致顺序在球心屏幕水平线翻转 → 顺序相关混合产生上下色差+锯齿分界线；
+  两遍绘制是凸网格的标准解法，FXAA 无法修复顺序错误
+
+### FXAA 抗锯齿
+- [x] **FXAAPass** + fxaa.vert/.frag (FXAA 3.11 console + 平坦区早退；
+  push constant 开关，关闭=同管线直通)
+- [x] **离屏合成架构** - SceneRenderer 离屏目标(RGBA8+D32)，两种渲染模式的
+  场景/合成均画到离屏，swapchain Pass 只剩 FXAA + ImGui(UI 保持锐利)
+- [x] **RenderSettings.enableFXAA** (默认开) + DebugPanel 开关
+
+### 已知限制
+- 透明为对象级排序近似（穿插透明物体需 OIT/Weighted Blended，列入计划）
+- glTF metallicRoughness 打包贴图近似映射 metallicMap (G/B 通道未拆分)
+- .glb 内嵌贴图不提取（外部 URI 贴图正常）；alpha 贴图按不透明渲染已改善
+  (Mask/Blend 模式可用)；doubleSided 材质按单面（透明管线除外）
+- 混合发生在 tonemap/gamma 之后（管线现状）
 
 ---
 
@@ -382,8 +447,9 @@ struct GPUInstanceData {
 - [ ] 多光源支持
 - [ ] 阴影系统 (Shadow Mapping / CSM)
 - [ ] SSAO
-- [ ] 后处理 (Bloom, Tone Mapping, FXAA)
+- [x] 后处理 FXAA (v1.2.0 已完成; Bloom/Tone Mapping 仍待做)
 - [ ] 天空盒 + IBL
+- [x] 场景序列化 .vscene (v1.2.0 已完成)
 
 ### v2.0.0 计划
 - [ ] 骨骼动画
@@ -397,26 +463,41 @@ struct GPUInstanceData {
 ## 常用开发命令
 
 ```bash
-# 编译项目
-cd build
-cmake --build . --config Debug
+# 编译项目 (Vulkan 后端)
+cmake --build build-win --config Release --target VulkanPBR --parallel 8
 
-# 编译着色器
-cd shaders
-glslc ssr.frag -o ssr_frag.spv
-glslc water.frag -o water_frag.spv
-glslc nanite/cluster_debug.vert -o nanite/cluster_debug_vert.spv
-glslc nanite/cluster_debug.frag -o nanite/cluster_debug_frag.spv
+# 编译项目 (DX12 后端, Debug)
+cmake --build build-win-dx12 --config Debug --target VulkanPBR --parallel 8
 
-# 运行
-cd build/bin
-./VulkanPBR.exe
+# 着色器由 CompileShaders 目标自动编译 (glslc → .spv;
+# DX12 链: glslc → spirv-cross → dxc → .dxil), 无需手动
+
+# 运行 (工作目录 = build*/bin)
+cd build-win/bin
+./VulkanPBR.exe                                    # 恢复上次场景
+./VulkanPBR.exe --scene ../../assets/scenes/sponza.vscene
+./VulkanPBR.exe --import ../../assets/Sponza/Sponza.gltf --save out.vscene
+./VulkanPBR.exe --autotest 5 --seconds 6           # 自动按键(5=切延迟模式)+定时退出
 ```
 
 
 ---
 
 ## 开发历史笔记
+
+### 2026/09/13-14 - 资产工作流 + 半透明渲染 + FXAA (v1.2.0)
+1. 模型导入: ModelImporter (OBJ .mtl + glTF 节点层级), MeshManager 惰性加载,
+   AssetPath 路径兜底; 依赖: tinygltf(单头) + nlohmann-json(vcpkg) + NFD
+2. 场景序列化: SceneSerializer (.vscene JSON, UUID 父引用两遍重建);
+   File 菜单 + Ctrl+N/O/S + NFD 对话框; 启动恢复上次场景
+3. 世界变换继承: computeWorldMatrix() 替换全路径的局部矩阵
+4. Sponza (Khronos glTF) 导入验证: 103 primitives/25 材质, --import/--save E2E
+5. 半透明: alpha 三模式数据模型 → ForwardPass 透明两遍(cull Front/Back) →
+   TransparentPass(延迟, GBuffer 深度手动剔除) → gl_FrontFacing 法线翻转
+6. FXAA: 离屏合成架构(两种模式) + FXAAPass + DebugPanel 开关
+7. 关键调试: 透明球内部锯齿根因 = 前后表面混合顺序随索引序在球心水平线
+   翻转(顺序相关混合), 非走样(FXAA 无效); 两遍绘制修复
+8. E2E 自动化: --scene/--import/--save + --autotest, 双后端全验证
 
 ### 2026/03/09 - Nanite Phase 1: Mesh Clustering (v0.11.0)
 1. 实现 MeshClusterizer 贪婪聚类算法
@@ -528,24 +609,31 @@ cd build/bin
 ### 下一步建议
 1. 让 `MeshSimplifier` 完全确定(unordered_map 迭代顺序 → 排序后的确定性遍历)
 2. Cluster BVH / 层级剔除,避免每帧全量 dispatch
-3. 完全 GPU-Driven 间接绘制(command signature + indirect draw),去掉 readback
+3. ~~完全 GPU-Driven 间接绘制(command signature + indirect draw),去掉 readback~~
+   → 已于 2026/09/13 完成(Phase 5):GPU 展开 + 单 `drawIndirect`,
+   绘制零 CPU 回读(readback 仅统计显示);实例级链(键 6)仍为 CPU 回读绘制
 
 ### 当前渲染模式
 ```
-NaniteDebugPass: GPU DAG LOD 选择
-- GPU 一次 dispatch 完成 世界变换 + LOD 选择 + 视锥/法线锥剔除
-- 双缓冲 readback 后 CPU 逐 cluster 绘制(2 帧延迟)
-- 回读未就绪时降级为只画 LOD0
+NaniteDebugPass: GPU-driven 间接绘制 (Phase 5, 2026/09/13)
+- GPU dispatch #1: 世界变换 + LOD 选择 + 视锥/法线锥剔除 (cluster_culling.comp)
+- GPU dispatch #2: 可见 cluster 去索引展开为紧凑 VB + atomicMax 写 drawArgs
+                   (build_visible_geometry.comp, forceLOD 过滤在此完成)
+- 渲染: 一次 drawIndirect(数百 draw → 1 draw);首帧 culling 完成前画 0 个
+- readback 仅用于统计显示(Visible/tris/LOD 分布,滞后 2 帧无妨)
 - 诊断: B=Force LOD 循环, X=Cone 开关, Z=Frustum 开关, 0=调试模式循环
 ```
 
 ### 关键代码位置
 ```cpp
 // shaders/nanite/cluster_culling.comp  - DAG 规则 + 每 mesh 变换 + abs(proj) + cone -sin
+// shaders/nanite/build_visible_geometry.comp - 可见几何 GPU 展开 + drawArgs (Phase 5)
 // NaniteManager::performCulling()      - y/z/w = frustum/cone/LODSelection
 // NaniteManager::setMeshTransforms()   - 每 mesh 世界矩阵上传
+// NaniteManager::getTransformBuffer()  - 供展开/绘制的 VS 查询变换
 // MeshSimplifier.cpp                   - geometricError 与惩罚分离
-// NaniteDebugPass::recordCommandsWithLOD() - GPU 可见列表 + Force LOD 过滤
+// NaniteDebugPass::prepareIndirectDraw() - 展开 dispatch + 屏障(pass 外, Vulkan 约束)
+// NaniteDebugPass::recordCommandsWithLOD() - 单次 drawIndirect + 统计
 // SceneRenderer::prepareNaniteCulling() - frameIndex readback slot + UI 调参
 ```
 

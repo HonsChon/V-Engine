@@ -332,11 +332,39 @@ inline VkDynamicState toVkDynamicState(RHIDynamicState state) {
     }
 }
 
+// ---- Stencil Op ----
+inline VkStencilOp toVkStencilOp(RHIStencilOp op) {
+    switch (op) {
+        case RHIStencilOp::Keep:      return VK_STENCIL_OP_KEEP;
+        case RHIStencilOp::Zero:      return VK_STENCIL_OP_ZERO;
+        case RHIStencilOp::Replace:   return VK_STENCIL_OP_REPLACE;
+        case RHIStencilOp::IncrClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+        case RHIStencilOp::DecrClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+        case RHIStencilOp::IncrWrap:  return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+        case RHIStencilOp::DecrWrap:  return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+        case RHIStencilOp::Invert:    return VK_STENCIL_OP_INVERT;
+        default: return VK_STENCIL_OP_KEEP;
+    }
+}
+
+inline VkStencilOpState toVkStencilOpState(const RHIStencilOpState& s) {
+    VkStencilOpState vk{};
+    vk.failOp      = toVkStencilOp(s.failOp);
+    vk.passOp      = toVkStencilOp(s.passOp);
+    vk.depthFailOp = toVkStencilOp(s.depthFailOp);
+    vk.compareOp   = toVkCompareOp(s.compareOp);
+    vk.compareMask = s.compareMask;
+    vk.writeMask   = s.writeMask;
+    vk.reference   = s.reference;
+    return vk;
+}
+
 // ---- Pipeline Stage ----
 inline VkPipelineStageFlags toVkPipelineStage(RHIPipelineStage stage) {
     VkPipelineStageFlags flags = 0;
     if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::TopOfPipe))             flags |= VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::VertexInput))           flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+    if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::DrawIndirect))           flags |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+    if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::VertexInput))            flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
     if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::VertexShader))          flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
     if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::FragmentShader))        flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     if (static_cast<uint32_t>(stage) & static_cast<uint32_t>(RHIPipelineStage::EarlyFragmentTests))    flags |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;

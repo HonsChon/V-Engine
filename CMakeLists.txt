@@ -182,6 +182,19 @@ if(NOT glm_FOUND)
 endif()
 
 # ============================================================
+# nlohmann-json 配置 (场景序列化, vcpkg: nlohmann-json)
+# ============================================================
+find_package(nlohmann_json CONFIG QUIET)
+
+if(NOT nlohmann_json_FOUND)
+    message(WARNING
+        "nlohmann-json not found! Scene serialization will fail to build. "
+        "Install it via: vcpkg install nlohmann-json:x64-windows")
+else()
+    message(STATUS "Found nlohmann-json: ${nlohmann_json_VERSION}")
+endif()
+
+# ============================================================
 # DirectX-Headers 配置 (Microsoft 开源 DX12 头文件)
 # ============================================================
 if(WIN32)
@@ -328,6 +341,8 @@ set(PASSES_SOURCES
     src/renderer/passes/WaterPass.cpp
     src/renderer/passes/ForwardPass.cpp
     src/renderer/passes/LightingPass.cpp
+    src/renderer/passes/TransparentPass.cpp
+    src/renderer/passes/FXAAPass.cpp
     src/renderer/passes/ComputePassBase.cpp
     src/renderer/passes/FrustumCullingPass.cpp
     src/renderer/passes/GPUDrivenRenderer.cpp
@@ -343,6 +358,8 @@ set(PASSES_HEADERS
     src/renderer/passes/WaterPass.h
     src/renderer/passes/ForwardPass.h
     src/renderer/passes/LightingPass.h
+    src/renderer/passes/TransparentPass.h
+    src/renderer/passes/FXAAPass.h
     src/renderer/passes/ComputePassBase.h
     src/renderer/passes/FrustumCullingPass.h
     src/renderer/passes/GPUDrivenRenderer.h
@@ -373,7 +390,9 @@ set(WORLD_HEADERS
 set(RESOURCES_SOURCES
     src/resources/Mesh.cpp
     src/resources/GPUMesh.cpp
+    src/resources/MeshManager.cpp
     src/resources/TextureManager.cpp
+    src/resources/ModelImporter.cpp
 )
 
 set(RESOURCES_HEADERS
@@ -381,6 +400,8 @@ set(RESOURCES_HEADERS
     src/resources/MeshManager.h
     src/resources/TextureManager.h
     src/resources/RenderSystem.h
+    src/resources/ModelImporter.h
+    src/resources/AssetPath.h
 )
 
 # Scene - ECS 场景管理系统
@@ -389,6 +410,7 @@ set(SCENE_SOURCES
     src/scene/Entity.cpp
     src/scene/SceneManager.cpp
     src/scene/SelectionManager.cpp
+    src/scene/SceneSerializer.cpp
 )
 
 set(SCENE_HEADERS
@@ -398,6 +420,7 @@ set(SCENE_HEADERS
     src/scene/Components.h
     src/scene/SelectionManager.h
     src/scene/RayPicker.h
+    src/scene/SceneSerializer.h
 )
 
 # Nanite - 虚拟几何体系统 (moved to renderer/nanite/)
@@ -420,7 +443,21 @@ set(NANITE_HEADERS
 set(THIRD_PARTY_HEADERS
     src/third_party/stb_image.h
     src/third_party/tiny_obj_loader.h
+    src/third_party/tiny_gltf.h
 )
+
+# Third Party Sources - tinygltf 实现 + NFD 原生文件对话框
+set(THIRD_PARTY_SOURCES
+    src/third_party/tiny_gltf_impl.cpp
+)
+
+if(WIN32)
+    list(APPEND THIRD_PARTY_SOURCES src/third_party/nfd/nfd_win.cpp)
+    list(APPEND THIRD_PARTY_HEADERS src/third_party/nfd/nfd.h)
+elseif(APPLE)
+    list(APPEND THIRD_PARTY_SOURCES src/third_party/nfd/nfd_cocoa.m)
+    list(APPEND THIRD_PARTY_HEADERS src/third_party/nfd/nfd.h)
+endif()
 
 # ImGui - UI 库
 set(IMGUI_DIR src/third_party/imgui)
@@ -484,6 +521,7 @@ set(ALL_SOURCES
     ${SCENE_SOURCES}
     ${NANITE_SOURCES}
     ${IMGUI_SOURCES}
+    ${THIRD_PARTY_SOURCES}
     ${UI_SOURCES}
 )
 
@@ -520,7 +558,9 @@ source_group("Source Files/Renderer/Passes" FILES ${PASSES_SOURCES})
 source_group("Source Files/World" FILES ${WORLD_SOURCES})
 source_group("Source Files/Resources" FILES ${RESOURCES_SOURCES})
 source_group("Source Files/Scene" FILES ${SCENE_SOURCES})
+source_group("Header Files/Nanite" FILES ${NANITE_HEADERS})
 source_group("Source Files/Nanite" FILES ${NANITE_SOURCES})
+source_group("Source Files/Third Party" FILES ${THIRD_PARTY_SOURCES})
 source_group("Source Files/ImGui" FILES ${IMGUI_SOURCES})
 source_group("Source Files/UI" FILES ${UI_SOURCES})
 
@@ -553,6 +593,16 @@ endif()
 if(glm_FOUND)
     target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
 endif()
+
+if(nlohmann_json_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
+endif()
+
+# tinygltf: 引擎只提取贴图 URI 路径, 不解码像素 (stb_image 由 TextureManager 单独使用)
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    TINYGLTF_NO_STB_IMAGE
+    TINYGLTF_NO_STB_IMAGE_WRITE
+)
 
 # ============================================================
 # Engine RHI backend compile definition
@@ -620,6 +670,7 @@ elseif(APPLE)
         "-framework CoreFoundation"
         "-framework QuartzCore"
         "-framework Metal"
+        "-framework AppKit"
     )
     
 elseif(UNIX)
@@ -734,6 +785,9 @@ if(WIN32)
         set(DX12_ENGINE_SHADERS
             pbr.vert|vs|2|pbr_vert.dxil|0
             pbr.frag|ps|2|pbr_frag.dxil|0
+            transparent.frag|ps|2|transparent_frag.dxil|0
+            fxaa.vert|vs|1|fxaa_vert.dxil|1
+            fxaa.frag|ps|1|fxaa_frag.dxil|0
             gbuffer.vert|vs|2|gbuffer_vert.dxil|0
             gbuffer.frag|ps|2|gbuffer_frag.dxil|0
             deferred_lighting.vert|vs|1|deferred_lighting_vert.dxil|1
@@ -750,6 +804,7 @@ if(WIN32)
             ssao/ssao_reinterleave.comp|cs|1|ssao/ssao_reinterleave_comp.dxil|0
             culling/frustum_culling.comp|cs|1|culling/frustum_culling.comp.dxil|0
             nanite/cluster_culling.comp|cs|1|nanite/cluster_culling.comp.dxil|0
+            nanite/build_visible_geometry.comp|cs|1|nanite/build_visible_geometry.comp.dxil|0
             nanite/cluster_debug.vert|vs|1|nanite/cluster_debug_vert.dxil|0
             nanite/cluster_debug.frag|ps|1|nanite/cluster_debug_frag.dxil|0
         )
@@ -858,6 +913,9 @@ if(GLSLC)
         mesh.frag
         pbr.vert
         pbr.frag
+        transparent.frag
+        fxaa.vert
+        fxaa.frag
         simple_mesh.vert
         simple_mesh.frag
         gbuffer.vert
@@ -884,6 +942,7 @@ if(GLSLC)
     set(COMPUTE_SHADER_SOURCES
         culling/frustum_culling.comp
         nanite/cluster_culling.comp
+        nanite/build_visible_geometry.comp
     )
     
     # 编译主目录着色器

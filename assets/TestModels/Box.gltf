@@ -1,0 +1,29 @@
+{
+  "asset": { "version": "2.0", "generator": "VEngine-TestGen" },
+  "scene": 0,
+  "scenes": [ { "nodes": [0] } ],
+  "nodes": [
+    { "name": "BoxRoot", "translation": [0.0, 0.5, 0.0],
+      "rotation": [0.0, 0.707106781186548, 0.0, 0.707106781186548], "children": [1] },
+    { "name": "BoxMesh", "mesh": 0 }
+  ],
+  "meshes": [
+    { "name": "Box", "primitives": [ { "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 }, "indices": 3, "material": 0, "mode": 4 } ] }
+  ],
+  "materials": [
+    { "name": "BoxBlue", "pbrMetallicRoughness": { "baseColorFactor": [0.2, 0.35, 0.9, 1.0], "metallicFactor": 0.1, "roughnessFactor": 0.45 } }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 24, "type": "VEC3", "max": [0.5, 0.5, 0.5], "min": [-0.5, -0.5, -0.5] },
+    { "bufferView": 1, "componentType": 5126, "count": 24, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5126, "count": 24, "type": "VEC2" },
+    { "bufferView": 3, "componentType": 5123, "count": 36, "type": "SCALAR", "max": [23], "min": [0] }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 360, "target": 34962 },
+    { "buffer": 0, "byteOffset": 360, "byteLength": 360, "target": 34962 },
+    { "buffer": 0, "byteOffset": 720,  "byteLength": 192,  "target": 34962 },
+    { "buffer": 0, "byteOffset": 912, "byteLength": 72, "target": 34963 }
+  ],
+  "buffers": [ { "byteLength": 984, "uri": "Box.bin" } ]
+}

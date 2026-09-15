@@ -194,6 +194,30 @@ inline D3D12_BLEND_OP toD3D12BlendOp(RHIBlendOp op) {
     }
 }
 
+// ---- Stencil Op ----
+inline D3D12_STENCIL_OP toD3D12StencilOp(RHIStencilOp op) {
+    switch (op) {
+        case RHIStencilOp::Keep:      return D3D12_STENCIL_OP_KEEP;
+        case RHIStencilOp::Zero:      return D3D12_STENCIL_OP_ZERO;
+        case RHIStencilOp::Replace:   return D3D12_STENCIL_OP_REPLACE;
+        case RHIStencilOp::IncrClamp: return D3D12_STENCIL_OP_INCR_SAT;
+        case RHIStencilOp::DecrClamp: return D3D12_STENCIL_OP_DECR_SAT;
+        case RHIStencilOp::IncrWrap:  return D3D12_STENCIL_OP_INCR;
+        case RHIStencilOp::DecrWrap:  return D3D12_STENCIL_OP_DECR;
+        case RHIStencilOp::Invert:    return D3D12_STENCIL_OP_INVERT;
+        default: return D3D12_STENCIL_OP_KEEP;
+    }
+}
+
+inline D3D12_DEPTH_STENCILOP_DESC toD3D12StencilOpState(const RHIStencilOpState& s) {
+    D3D12_DEPTH_STENCILOP_DESC out = {};
+    out.StencilFailOp   = toD3D12StencilOp(s.failOp);
+    out.StencilDepthFailOp = toD3D12StencilOp(s.depthFailOp);
+    out.StencilPassOp   = toD3D12StencilOp(s.passOp);
+    out.StencilFunc     = toD3D12CompareFunc(s.compareOp);
+    return out;
+}
+
 // ---- Depth-format helpers ----
 inline bool isDepthFormat(RHIFormat format) {
     return format == RHIFormat::D16_UNORM ||

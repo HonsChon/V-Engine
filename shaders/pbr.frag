@@ -7,6 +7,7 @@ layout(location = 3) in vec3 fragTangent;
 layout(location = 4) in vec3 fragBitangent;
 layout(location = 5) in vec3 fragViewPos;
 layout(location = 6) in vec3 fragLightPos;
+layout(location = 7) in vec4 fragMaterialParams;  // x=opacity y=alphaMode z=alphaCutoff
 
 layout(location = 0) out vec4 outColor;
 
@@ -74,8 +75,9 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 void main() {
-    // 从纹理采样材质参数
-    vec3 albedo = pow(texture(albedoMap, fragTexCoord).rgb, vec3(2.2));  // sRGB 到线性空间
+    // 从纹理采样材质参数（RGB + alpha 一次采样）
+    vec4 albedoRGBA = texture(albedoMap, fragTexCoord);
+    vec3 albedo = pow(albedoRGBA.rgb, vec3(2.2));  // sRGB 到线性空间
     
     // 从高光贴图获取金属度和粗糙度
     // Spec Mask: 白色 = 高光/金属, 黑色 = 非高光/粗糙
@@ -93,6 +95,9 @@ void main() {
     
     // 从法线贴图获取法线
     vec3 N = getNormalFromMap();
+    // 双面渲染（透明管线 cull None）：背面（内表面）法线翻转让其正确受光，
+    // 否则 NdotL=0 → 内表面只剩环境光 ≈ 纯黑，透出"黑壳"
+    if (!gl_FrontFacing) N = -N;
     vec3 V = normalize(fragViewPos - fragWorldPos);
     
     // Calculate reflectance at normal incidence
@@ -133,9 +138,23 @@ void main() {
     
     // HDR tonemapping (Reinhard)
     color = color / (color + vec3(1.0));
-    
+
     // Gamma correction
     color = pow(color, vec3(1.0/2.2));
-    
-    outColor = vec4(color, 1.0);
+
+    // Alpha 模式（由管线 + RenderSystem 分桶配合）：
+    //   0 = Opaque: alpha 恒为 1（不透明管线绘制）
+    //   1 = Mask:   alpha < cutoff 的片元 discard（植被 alpha test，不透明管线绘制）
+    //   2 = Blend:  半透明混合管线绘制（SrcAlpha/OneMinusSrcAlpha，深度写关）
+    float alpha = 1.0;
+    if (fragMaterialParams.y < 0.5) {
+        alpha = 1.0;
+    } else if (fragMaterialParams.y < 1.5) {
+        if (albedoRGBA.a * fragMaterialParams.x < fragMaterialParams.z) discard;
+        alpha = 1.0;
+    } else {
+        alpha = clamp(albedoRGBA.a * fragMaterialParams.x, 0.0, 1.0);
+    }
+
+    outColor = vec4(color, alpha);
 }

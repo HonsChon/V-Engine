@@ -34,6 +34,17 @@ struct EngineConfig {
     uint32_t height = 720;
     bool enableValidation = true;
     bool enableUI = true;
+
+    // Automation (--autotest): 按键序列(GLFW 键码,每 interval 秒注入一个,
+    // 走与真实键盘回调相同的 handleKey 路径);序列发完后运行 seconds 秒退出。
+    // 0 = 不退出。
+    // Automation (--autotest): key sequence (GLFW key codes) injected one per
+    // `interval` seconds through the same handleKey path as real keyboard
+    // input; after the sequence drains, run for `seconds` more and exit
+    // (0 = never auto-exit). Consumed by Engine::pumpAutotest, parsed in main().
+    std::vector<int> autotestKeys;
+    double autotestInterval = 3.0;
+    double autotestSeconds = 0.0;
 };
 
 class Engine {
@@ -57,6 +68,11 @@ public:
     VEngine::Scene* getScene() const { return m_scene.get(); }
     Camera* getCamera() const { return m_camera.get(); }
 
+    // 场景操作（main.cpp 启动参数 / UI 菜单共用）
+    void importModelFile(const std::string& filePath);   // 导入 .obj/.gltf/.glb
+    bool openSceneFromFile(const std::string& filePath); // 打开 .vscene（成功返回 true）
+    void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
+
     float getDeltaTime() const { return m_deltaTime; }
     float getFPS() const { return m_fps; }
 
@@ -79,6 +95,17 @@ private:
     // Input (direct GLFW callbacks via Window)
     void processKeyboardInput(float dt);
     void handleMousePicking();
+    void handleKey(int key);           // shared by GLFW callback + autotest
+    void pumpAutotest();               // per-frame autotest driver: timed key
+                                       // injection + timed exit (see Engine.cpp)
+
+    // Scene file & model import (File 菜单 / 拖拽 / 资源浏览器双击)
+    void setupUICallbacks();           // 注入 UIManager 的场景动作回调
+    void newScene();
+    void openSceneDialog();            // NFD 选择文件
+    void saveScene();                  // 无当前路径时弹另存为
+    void saveSceneAs();                // NFD 选择保存位置
+    void updateSceneTitle();           // 菜单栏显示 场景名*
 
     // Config
     Config m_config;
@@ -113,6 +140,9 @@ private:
     bool m_firstMouse = true;
     bool m_mouseEnabled = false;
 
+    // 当前场景文件路径（空 = 未保存过；Ctrl+S 直接保存于此）
+    std::string m_currentScenePath;
+
     // Frame stats
     float m_deltaTime = 0.0f;
     float m_lastFrameTime = 0.0f;
@@ -120,6 +150,11 @@ private:
     float m_fps = 0.0f;
     float m_fpsUpdateTimer = 0.0f;
     int m_fpsFrameCount = 0;
+
+    // Autotest state (see EngineConfig)
+    size_t m_autotestIndex = 0;
+    double m_autotestStart = 0.0;
+    double m_autotestNextAt = 0.0;
 
     static const int MAX_FRAMES_IN_FLIGHT = 2;
 };

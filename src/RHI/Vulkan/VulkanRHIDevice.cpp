@@ -94,7 +94,9 @@ std::shared_ptr<RHIBuffer> VulkanRHIDevice::createBuffer(const RHIBufferDesc& de
 }
 
 std::shared_ptr<RHITexture> VulkanRHIDevice::createTexture(const RHITextureDesc& desc) {
-    return std::make_shared<VulkanRHITexture>(this, desc);
+    RHITextureDesc resolved = desc;
+    resolveMipLevels(resolved);
+    return std::make_shared<VulkanRHITexture>(this, resolved);
 }
 
 std::shared_ptr<RHISampler> VulkanRHIDevice::createSampler(const RHISamplerDesc& desc) {
@@ -749,14 +751,45 @@ void VulkanRHIDevice::createLogicalDevice() {
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
     deviceFeatures.fillModeNonSolid = supportedFeatures.fillModeNonSolid;
+    // Indirect draws with drawCount > 1 (and the count-buffer variant) need
+    // multiDrawIndirect; enable when the hardware exposes it.
+    deviceFeatures.multiDrawIndirect = supportedFeatures.multiDrawIndirect;
+
+    // Optional extension: VK_KHR_draw_indirect_count (core in 1.2). Enables
+    // the RHI drawIndexedIndirectCount variant.
+    std::vector<const char*> enabledExtensions(deviceExtensions_);
+    {
+        uint32_t count = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevice_, nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available(count);
+        vkEnumerateDeviceExtensionProperties(physicalDevice_, nullptr, &count, available.data());
+        for (const auto& ext : available) {
+            if (strcmp(ext.extensionName, kDrawIndirectCountExtension_) == 0) {
+                drawIndirectCountSupported_ = true;
+                enabledExtensions.push_back(kDrawIndirectCountExtension_);
+                break;
+            }
+        }
+        if (drawIndirectCountSupported_) {
+            vkCmdDrawIndexedIndirectCount_ = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                vkGetDeviceProcAddr(device_, "vkCmdDrawIndexedIndirectCount"));
+            if (!vkCmdDrawIndexedIndirectCount_) {
+                drawIndirectCountSupported_ = false;
+                enabledExtensions.pop_back();
+            }
+        }
+        std::cout << "[VulkanRHIDevice] " << kDrawIndirectCountExtension_
+                  << (drawIndirectCountSupported_ ? ": supported" : ": NOT supported "
+                     "(drawIndexedIndirectCount disabled)") << std::endl;
+    }
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions_.size());
-    createInfo.ppEnabledExtensionNames = deviceExtensions_.data();
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
+    createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
     if (enableValidationLayers_) {
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers_.size());

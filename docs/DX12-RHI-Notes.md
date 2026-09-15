@@ -626,7 +626,7 @@ Debug 构建下回绕会打一行 `[DX12RHIDevice] descriptor ring wrap (heap=..
 | 顶点缓冲绑定 | `vkCmdBindVertexBuffers`(stride 来自绑定) | `IASetVertexBuffers`(stride 来自 PSO 的 input layout,`bindVertexBuffer` 查 pipeline 缓存的 stride) |
 | 描述符绑定 | `vkCmdBindDescriptorSets` | `SetGraphics/ComputeRootDescriptorTable`(pipeline 缓存 `layout → rootParam` 映射) |
 | Push constant | `vkCmdPushConstants` | `SetGraphics/ComputeRoot32BitConstants`(单 root 参数,offset 必须 0/4 对齐) |
-| 间接绘制 | `vkCmdDrawIndexedIndirect` | **未实现**:显式抛错(需要 command signature,Phase 5 backlog);引擎当前零调用 |
+| 间接绘制 | `vkCmdDraw*Indirect[Count]` | `ExecuteIndirect` + 懒创建缓存的 command signature(§十四);count 变体需 Vulkan 扩展 `VK_KHR_draw_indirect_count`(DX12 原生支持) |
 
 ### 13.6 Shader 内容管线对应
 
@@ -667,4 +667,87 @@ Debug 构建下回绕会打一行 `[DX12RHIDevice] descriptor ring wrap (heap=..
   `ID3D12Device` 与全部资源才能恢复(本轮只做了重试保护,不崩溃但不自动恢复)。
 - **present/acquire 模型**:FLIP 模式 `GetCurrentBackBufferIndex` + per-image fence,与
   `vkAcquireNextImageKHR` 的信号量模型不对等(见 §13.4)。
+
+## 十四、GPU-driven 间接绘制(Phase 5 实现)
+
+### 14.1 command signature 约定
+
+`DX12RHIDevice` 懒创建并缓存三个 `ID3D12CommandSignature`(无 root 参数,
+`pRootSignature=nullptr`),每命令字节数与 Vulkan 间接命令结构**二进制一致**:
+
+| signature | 每命令布局 | 字节数 | Vulkan 等价 |
+|---|---|---|---|
+| Draw | `{vertexCount, instanceCount, firstVertex, firstInstance}` | 16B | `VkDrawIndirectCommand` |
+| DrawIndexed | `{indexCount, instanceCount, firstIndex, vertexOffset, firstInstance}` | 20B | `VkDrawIndexedIndirectCommand` |
+| Dispatch | `{x, y, z}` | 12B | `VkDispatchIndirectCommand` |
+
+- `drawIndirect / drawIndexedIndirect / dispatchIndirect`:CPU 已知 drawCount →
+  `ExecuteIndirect(sig, drawCount, buffer, offset, /*pCountBuffer=*/nullptr, 0)`。
+- `drawIndexedIndirectCount`:GPU 决定命令数 → `pCountBuffer/countOffset` 传 count 缓冲
+  (DX12 原生);Vulkan 侧需 `VK_KHR_draw_indirect_count` 扩展 + `multiDrawIndirect` feature
+  (设备创建时查询启用;不支持则 throw——macOS MoltenVK 不支持也不影响引擎,引擎不消费该变体)。
+- args 缓冲使用 `Storage | Indirect` usage;barrier 目标 access 为
+  `IndirectCommandRead → D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT`
+  (`bufferBarrier.stateFor` 已有该映射;`RHIPipelineStage::DrawIndirect` → `VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT`)。
+
+### 14.2 为什么是"GPU 展开 + 单 draw"而不是每 cluster 一条命令
+
+D3D12 **无法让 shader 感知"本批 ExecuteIndirect 中的第几个 draw"**:
+
+| 手段 | Vulkan | D3D12 |
+|---|---|---|
+| `gl_DrawID` | 有(需 `shaderDrawParameters` 特性,1.0) | **无系统值等价物**(spirv-cross 无法翻译) |
+| `firstInstance=slot` 编码 | `gl_InstanceIndex` 含 firstInstance | `SV_InstanceID` **不含** StartInstanceLocation,shader 读不到 |
+| 命令签名嵌 root constants(GPU 写每 draw 常量) | 无等价物 | D3D12 独有 |
+
+三条路无双后端同时可行 → per-cluster 多 draw 无法携带 per-cluster 数据(model 矩阵/LOD 分色)。
+**标准可移植方案**(本仓库采用):compute shader(`nanite/build_visible_geometry.comp`)把可见
+cluster 的三角形**去索引展开**成紧凑顶点流(44B 顶点数据 + 4B clusterIndex 属性 = 48B/corner),
+`atomicMax` 写 draw args 的 vertexCount(每 cluster 目标区间由静态前缀和表分配,写入无竞争且
+跨运行确定);渲染端**一次 `drawIndirect`**(drawCount=1 恒定,vertexCount 由 GPU 写)。
+clusterIndex 走顶点属性 + `flat` 插值,cluster/LOD 分色边界精确;model/LOD 在 VS 里按
+clusterIndex 查 SSBO(静态几何表 + TransformBuffer)。附带收益:数百次 drawIndexed → 1 次 draw,
+且首帧起零 CPU 依赖(readback 仅用于统计显示)。
+
+### 14.3 GPU-driven 数据流(Nanite debug 链)
+
+```
+culling dispatch(写 visibleIndices/counter)
+  → [已有 barrier + readback copy(统计用)]
+  → NaniteDebugPass::prepareIndirectDraw(render pass 之外!Vulkan 禁止 pass 内 dispatch):
+      fillBuffer(drawArgs.vertexCount=0) → barrier(args→UAV)
+      → 展开 dispatch(写 expVB + atomicMax(drawArgs))
+      → barrier expVB→VertexAttributeRead / drawArgs→IndirectCommandRead
+  → render pass 内:bindPipeline + bindVertexBuffer(expVB) + drawIndirect(args,0,1,16)
+```
+
+- 静态几何表(每 cluster 32B:`srcIndexOffset/indexCount/dstCornerOffset/meshIndex` +
+  `lodLevel/isRoot/clusterIndex/0`)由 `NaniteDebugPass::buildRenderData` 一次上传 ——
+  `GPUClusterData.indexOffset` 从未被赋值(恒 0),与合并 IB 不同源,不能用作展开输入。
+- forceLOD 诊断改为 GPU 侧过滤(展开 shader 的 push constant)。
+- stats(Visible/Drawn/tris/LOD 分布)从上一帧 readback 的可见列表 + CPU cluster 表计算,
+  绘制本身零回读。
+
+### 14.4 mip 生成(Phase 5)
+
+- `RHITextureDesc.mipLevels = 0` → 自动全链(`resolveMipLevels`);`uploadPixels` 上传 mip 0 后
+  自动生成整链,结束态 `ShaderReadOnly`(合同不变)。
+- Vulkan:内部 single-time + 经典 `vkCmdBlitImage` 逐级链(每级 per-level barrier;
+  多 mip 自动补 `TRANSFER_SRC|DST` usage)。
+- DX12:**绘制式**(无 ResolveSubresource 可用于非 MSAA):复用内部 blit pipeline 逐级下采样,
+  per-mip RTV(`MipSlice=i`)+ per-mip SRV(`MostDetailedMip=i-1, MipLevels=1`),逐 subresource
+  barrier;多 mip 自动补 `ALLOW_RENDER_TARGET`。限制:仅 2D 非深度纹理(SSAO 16 层数组 mip=1 不受影响)。
+- 引擎接入:`TextureManager::createFromPixels` mipLevels=0(albedo/normal 全链);
+  gbuffer/SSR/sceneColor 三处 `maxLod=1` 是**离屏 RT 采样的正确配置**(单 mip),保留。
+
+### 14.5 stencil(Phase 5)
+
+- `RHIStencilOpState{failOp,passOp,depthFailOp,compareOp,compareMask,writeMask,reference}`,
+  `setStencilTest(enable, front, back)`;front/back 分开配置。
+- Vulkan:整状态(含静态 reference)进 `VkStencilOpState`(替换原零初始化)。
+- DX12:op/mask 进 PSO(`FrontFace/BackFace` 分开,替换原硬编码 ALWAYS/KEEP);**reference
+  不在 PSO** —— `bindPipelineInternal` 时 `OMSetStencilRef(pipeline->getStencilReference())`。
+- 注意:D3D12 的 `StencilReadMask/WriteMask` 是 front/back 共享一个(Vulkan per-face),
+  本仓库取 front 的 mask。
+- 验证:smoke 离屏两步绘制(A:Always/Replace 写 1;B:NotEqual 才画)+ 像素级 readback 断言。
 

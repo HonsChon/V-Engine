@@ -58,6 +58,10 @@ Window::~Window() {
     std::cout << "[Window] Destroyed" << std::endl;
 }
 
+void Window::setTitle(const std::string& title) {
+    if (m_window) glfwSetWindowTitle(m_window, title.c_str());
+}
+
 void Window::pollEvents() {
     glfwPollEvents();
 }

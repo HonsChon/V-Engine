@@ -103,8 +103,12 @@ RHIGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setDepthTest(
     return *this;
 }
 
-RHIGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setStencilTest(bool enable) {
+RHIGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setStencilTest(bool enable,
+                                                                             const RHIStencilOpState& front,
+                                                                             const RHIStencilOpState& back) {
     stencilTestEnable_ = enable;
+    stencilFront_ = front;
+    stencilBack_  = back;
     return *this;
 }
 
@@ -242,6 +246,8 @@ std::shared_ptr<RHIPipeline> VulkanGraphicsPipelineBuilder::build() {
     depthStencil.depthCompareOp = depthCompareOp_;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = stencilTestEnable_ ? VK_TRUE : VK_FALSE;
+    depthStencil.front = toVkStencilOpState(stencilFront_);
+    depthStencil.back  = toVkStencilOpState(stencilBack_);
 
     // ---- Color blending ----
     // If user didn't add any, provide a default (no blend, write all)

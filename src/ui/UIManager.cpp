@@ -17,6 +17,9 @@ UIManager::UIManager() {
 UIManager::~UIManager() = default;
 
 void UIManager::render() {
+    // 全局快捷键（Ctrl+N/O/S）
+    handleGlobalShortcuts();
+
     // 渲染主菜单栏
     renderMainMenuBar();
 
@@ -43,21 +46,36 @@ void UIManager::render() {
     }
 }
 
+void UIManager::handleGlobalShortcuts() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (!io.KeyCtrl) return;
+    if (io.WantTextInput) return;   // 文本框内编辑时不触发
+
+    if (ImGui::IsKeyPressed(ImGuiKey_S, false) && onSaveScene) onSaveScene();
+    if (ImGui::IsKeyPressed(ImGuiKey_O, false) && onOpenScene) onOpenScene();
+    if (ImGui::IsKeyPressed(ImGuiKey_N, false) && onNewScene) onNewScene();
+}
+
 void UIManager::renderMainMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New Scene", "Ctrl+N")) {
-                // TODO: 新建场景
+                if (onNewScene) onNewScene();
             }
-            if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {
-                // TODO: 打开场景
+            ImGui::Separator();
+            if (ImGui::MenuItem("Open Scene...", "Ctrl+O")) {
+                if (onOpenScene) onOpenScene();
             }
+            ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
-                // TODO: 保存场景
+                if (onSaveScene) onSaveScene();
+            }
+            if (ImGui::MenuItem("Save Scene As...")) {
+                if (onSaveSceneAs) onSaveSceneAs();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
-                // TODO: 退出程度
+                if (onExit) onExit();
             }
             ImGui::EndMenu();
         }
@@ -87,6 +105,19 @@ void UIManager::renderMainMenuBar() {
                 // TODO: 显示关于对话框
             }
             ImGui::EndMenu();
+        }
+
+        // 右侧显示当前场景标题
+        {
+            float spacing = ImGui::GetStyle().ItemSpacing.x;
+            float textWidth = ImGui::CalcTextSize(m_sceneTitle.c_str()).x;
+            float avail = ImGui::GetContentRegionAvail().x;
+            if (avail > textWidth + spacing * 2) {
+                ImGui::SameLine(0.0f, avail - textWidth - spacing);
+            } else {
+                ImGui::SameLine();
+            }
+            ImGui::TextDisabled("%s", m_sceneTitle.c_str());
         }
 
         ImGui::EndMainMenuBar();

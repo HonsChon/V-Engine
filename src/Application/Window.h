@@ -73,6 +73,11 @@ public:
     bool wasResized() const { return m_framebufferResized; }
     void resetResizedFlag() { m_framebufferResized = false; }
 
+    /**
+     * @brief 设置窗口标题（如显示当前场景文件名）
+     */
+    void setTitle(const std::string& title);
+
     // ========== 输入状态查询 ==========
 
     bool isKeyPressed(int key) const;

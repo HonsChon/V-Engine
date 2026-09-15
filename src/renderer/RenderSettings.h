@@ -28,6 +28,7 @@ struct RenderSettings {
     bool enableWater = false;
     bool enableNanite = true;
     bool enableGPUCulling = true;
+    bool enableFXAA = true;      // FXAA 后处理抗锯齿（关闭时直通）
 
     // Debug options
     bool showClusterVisualization = false;

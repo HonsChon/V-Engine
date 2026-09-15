@@ -1,11 +1,12 @@
 #pragma once
 
 /**
- * NaniteDebugPass.h - Nanite Cluster 调试可视化渲染通道 (RHI)
- * 
+ * NaniteDebugPass.h - Nanite Cluster 调试可视化渲染通道 (GPU-driven, Phase 5)
+ *
  * 功能：
- * - 使用不同颜色渲染每个 Cluster，便于可视化分割结果
- * - 支持多种调试模式：Cluster 颜色、法线、LOD 等
+ * - GPU 展开可见 cluster 几何(build_visible_geometry.comp)后,
+ *   单次 drawIndirect 绘制全部可见 cluster —— 无 CPU 回读绘制循环
+ * - 支持多种调试模式：Cluster 颜色、法线、LOD、哈希色
  */
 
 #include "RenderPassBase.h"
@@ -34,15 +35,13 @@ class RHICommandBuffer;
 class RHIRenderPass;
 
 /**
- * Cluster 调试信息 Push Constants
+ * Cluster 调试 Push Constants(GPU-driven 版:per-cluster 数据已移入 SSBO)
  */
 struct ClusterDebugPushConstants {
-    glm::mat4 model;
-    glm::mat4 normalMatrix;
-    uint32_t clusterIndex;
     uint32_t totalClusters;
     uint32_t debugMode;
-    uint32_t lodLevel;
+    uint32_t pad0;
+    uint32_t pad1;
 };
 
 /**
@@ -65,7 +64,7 @@ struct NaniteDebugUBO {
 };
 
 /**
- * NaniteDebugPass - Nanite 调试渲染通道 (RHI)
+ * NaniteDebugPass - Nanite 调试渲染通道 (GPU-driven indirect)
  */
 class NaniteDebugPass : public RenderPassBase {
 public:
@@ -77,19 +76,18 @@ public:
     
     /**
      * 初始化渲染通道
-     * @param renderPass Vulkan 渲染通道句柄 (external, NOT owned)
+     * @param renderPass 外部渲染通道 (external, NOT owned)
      */
     void initialize(RHIRenderPass* externalRenderPass);
     
     void cleanup();
     
-    void recordCommands(RHICommandBuffer* cmd, 
-                       uint32_t frameIndex,
-                       const glm::mat4& modelMatrix);
-    
-    void recordCommandsMultiMesh(RHICommandBuffer* cmd,
-                                 uint32_t frameIndex,
-                                 const std::unordered_map<std::string, glm::mat4>& meshMatrices);
+    /**
+     * GPU-driven 间接绘制准备(render pass 之外调用):
+     * drawArgs 重置 → 几何展开 compute dispatch → expVB/drawArgs 屏障。
+     * 必须在 cluster culling dispatch 之后、绘制之前调用。
+     */
+    void prepareIndirectDraw(RHICommandBuffer* cmd);
     
     void recordCommandsWithLOD(RHICommandBuffer* cmd,
                                uint32_t frameIndex,
@@ -110,10 +108,10 @@ public:
     void cycleDebugMode();
     const char* getDebugModeName() const;
     
-    // 诊断: 强制只绘制指定 LOD（-1 = 关闭, 0..7 = 层级）
+    // 诊断: 强制只绘制指定 LOD（-1 = 关闭, 0..7 = 层级;GPU 侧过滤）
     void setForceLOD(int level) { m_forceLOD = level; }
 
-    // 每帧实际绘制的统计（供 DebugPanel / Inspector 显示）
+    // 每帧实际绘制的统计(基于上一帧 readback 的可见列表;绘制本身完全 GPU 驱动)
     struct DrawnStats {
         uint32_t totalClusters = 0;
         uint32_t visibleClusters = 0;
@@ -147,10 +145,12 @@ public:
 
 private:
     void createBindingLayout();
+    void createCompactionPipeline();
     void createPipeline();
     void createUniformBuffers();
     void createDescriptorSets();
     void buildRenderData();
+    void updateCompactionBindings(RHIBuffer* transformBuffer);
 
     // RHI device & swap chain
     RHIDevice* rhiDevice_ = nullptr;
@@ -160,17 +160,25 @@ private:
     // Nanite manager
     std::shared_ptr<Nanite::NaniteManager> m_naniteManager;
     
-    // RHI resources
+    // ---- 绘制管线(单 drawIndirect) ----
     std::shared_ptr<RHIPipeline>       m_pipeline_;
     std::shared_ptr<RHIBindingLayout>  m_bindingLayout_;
-
+    
+    // ---- 几何展开 compute 管线 ----
+    std::shared_ptr<RHIPipeline>       m_compactionPipeline_;
+    std::shared_ptr<RHIBindingLayout>  m_compactionLayout_;
+    std::shared_ptr<RHIBindingGroup>   m_compactionGroup_;
+    bool m_compactionBindingsDirty = true;
+    RHIBuffer* m_boundTransformBuffer_ = nullptr;      // tracked for dirty
+    std::shared_ptr<RHIBuffer> m_dummyTransformBuffer_; // mesh 变换未上传时兜底
+    
     // Per-frame UBOs (RHI)
     std::vector<std::shared_ptr<RHIBuffer>> m_uniformBuffers_;
 
     // Binding groups (Pure RHI)
     std::vector<std::shared_ptr<RHIBindingGroup>> m_bindingGroups_;
     
-    // 渲染数据结构
+    // 渲染数据结构(stats / 几何表构建)
     struct ClusterRenderData {
         uint32_t vertexOffset;
         uint32_t indexOffset;
@@ -189,9 +197,14 @@ private:
     std::vector<ClusterRenderData> m_clusterRenderData;
     std::vector<MeshRenderInfo> m_meshRenderInfos;
     
-    // Vertex/Index buffers (RHI)
-    std::shared_ptr<RHIBuffer> m_vertexBuffer_;
-    std::shared_ptr<RHIBuffer> m_indexBuffer_;
+    // 源几何(合并大缓冲,SSBO 只读;GPU 展开的输入)
+    std::shared_ptr<RHIBuffer> m_vertexBuffer_;   // 44B interleaved, Storage
+    std::shared_ptr<RHIBuffer> m_indexBuffer_;    // uint32 全局重定位, Storage
+    std::shared_ptr<RHIBuffer> m_geomTableBuffer_;// 每 cluster 32B 静态表
+    
+    // GPU-driven 输出
+    std::shared_ptr<RHIBuffer> m_expVertexBuffer_; // 48B/corner, Storage|Vertex
+    std::shared_ptr<RHIBuffer> m_drawArgsBuffer_;  // 16B VkDrawIndirectCommand, Storage|Indirect
     
     uint32_t m_totalVertexCount = 0;
     uint32_t m_totalIndexCount = 0;

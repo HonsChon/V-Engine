@@ -91,6 +91,12 @@ public:
     // 模型变换（居中和缩放到单位大小）
     void centerAndNormalize();
 
+    // 几何后处理（ModelImporter 构建 glTF 网格时使用）
+    // 如果 OBJ/glTF 没有法线，计算顶点法线
+    void calculateNormals();
+    // 计算切线空间（用于法线贴图）
+    void calculateTangents();
+
 private:
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -102,10 +108,4 @@ private:
     
     // 计算包围盒
     void calculateBounds();
-    
-    // 计算切线空间（用于法线贴图）
-    void calculateTangents();
-    
-    // 如果 OBJ 没有法线，计算顶点法线
-    void calculateNormals();
 };

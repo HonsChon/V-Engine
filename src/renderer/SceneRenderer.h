@@ -22,6 +22,7 @@
 class RHIDevice;
 class RHISwapChain;
 class RHIRenderPass;
+class RHIFramebuffer;
 class RHICommandBuffer;
 class RHITexture;
 class RHISampler;
@@ -33,6 +34,8 @@ class Camera;
 class GBufferPass;
 class LightingPass;
 class ForwardPass;
+class TransparentPass;
+class FXAAPass;
 class SSRPass;
 class WaterPass;
 class SSAOPass;
@@ -181,6 +184,10 @@ private:
     void createSceneColorImage();
     void cleanupSceneColorImage();
 
+    // ========== FXAA 离屏场景目标 ==========
+    void createOffscreenTarget();
+    void cleanupOffscreenTarget();
+
     // ========== 引用（不拥有）==========
     RHIDevice* m_rhiDevice = nullptr;
     RHISwapChain* m_swapChain = nullptr;
@@ -194,12 +201,21 @@ private:
     std::unique_ptr<ForwardPass> m_forwardPass;
     std::unique_ptr<GBufferPass> m_gbuffer;
     std::unique_ptr<LightingPass> m_lightingPass;
+    std::unique_ptr<TransparentPass> m_transparentPass;
+    std::unique_ptr<FXAAPass> m_fxaaPass;
     std::unique_ptr<SSAOPass> m_ssaoPass;
     std::unique_ptr<SSRPass> m_ssrPass;
     std::unique_ptr<WaterPass> m_waterPass;
     std::unique_ptr<GPUDrivenRenderer> m_gpuDrivenRenderer;
     std::unique_ptr<NaniteDebugPass> m_naniteDebugPass;
     std::unique_ptr<Nanite::NaniteManager> m_naniteManager;
+
+    // ========== FXAA 离屏场景目标（场景渲染到此处 → FXAA 合成到 swapchain）==========
+    std::shared_ptr<RHITexture> m_offscreenColor;
+    std::shared_ptr<RHITexture> m_offscreenDepth;
+    std::shared_ptr<RHISampler> m_offscreenSampler;
+    std::shared_ptr<RHIRenderPass> m_offscreenRenderPass;
+    std::shared_ptr<RHIFramebuffer> m_offscreenFramebuffer;
 
     // ========== 场景颜色纹理（SSR 采样）==========
     std::shared_ptr<RHITexture> m_sceneColorTexture;

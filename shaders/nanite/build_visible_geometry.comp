@@ -1,0 +1,105 @@
+#version 450
+
+/**
+ * Build Visible Geometry — GPU-driven 间接绘制几何展开 (Phase 5)
+ *
+ * 读取 cluster_culling.comp 的输出(可见列表 + 计数),把每个可见 cluster 的
+ * 三角形"去索引展开"成紧凑顶点流(DstVertexBuffer),每个 corner 追加一个
+ * clusterIndex 属性(location 4,flat 插值保证 cluster/LOD 分色边界精确)。
+ *
+ * 为什么展开而不是多 draw 间接命令(D3D12 的可移植性硬约束):
+ *   D3D12 没有 gl_DrawID 等价物,SV_InstanceID 也不含 StartInstanceLocation,
+ *   一批 ExecuteIndirect 中的每个 draw 无法在 shader 里区分 → per-cluster
+ *   数据(变换/LOD/分色)无法随多 draw 携带。把数据"烤进"顶点流后,单个
+ *   drawIndirect(GPU 写 vertexCount)即可,且绘制调用从 N 次降到 1 次。
+ *
+ * 写入 DrawArgs = VkDrawIndirectCommand 布局 {vertexCount, instanceCount,
+ * firstVertex, firstInstance};vertexCount 用 atomicMax(每 cluster 的展开
+ * 区间按静态前缀表分配,写入无竞争且跨运行确定)。
+ *
+ * forceLOD 诊断模式:GPU 侧过滤(lovel == forced || isRoot && lod <= forced),
+ * 与旧 CPU 过滤语义一致。
+ */
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uint forceLOD;      // 0xFFFFFFFF = 关闭;否则强制显示的 LOD 层级
+    uint pad0;
+    uint pad1;
+    uint pad2;
+} push;
+
+// 静态几何表(每 cluster 2×uvec4 = 32B,由 CPU buildRenderData 上传一次):
+//   a = (srcIndexOffset, indexCount, dstCornerOffset, meshIndex)   [索引单位]
+//   b = (lodLevel, flags(bit0=isRoot), clusterIndex, 0)
+// 注意:GPUClusterData.indexOffset 从未被赋值(恒 0),与合并 IB 不同源,
+// 因此展开用这张表而不是 GPUClusterData。
+layout(set = 0, binding = 0) buffer GeomTableBuffer {
+    uvec4 geomTable[];
+};
+
+layout(set = 0, binding = 1) buffer VisibleBuffer {
+    uint visibleClusterIndices[];
+};
+
+layout(set = 0, binding = 2) buffer CounterBuffer {
+    uint visibleClusterCount;
+};
+
+// 合并后的源索引/顶点缓冲(NaniteDebugPass 上传;索引已全局重定位)
+layout(set = 0, binding = 3) buffer SrcIndexBuffer {
+    uint srcIndices[];
+};
+
+// 11 floats (44B) interleaved: pos3 normal3 uv2 tangent3
+layout(set = 0, binding = 4) buffer SrcVertexBuffer {
+    uint srcVerts[];
+};
+
+// 展开 destination:12 uints (48B)/corner = 11 uint 顶点数据 + clusterIndex
+layout(set = 0, binding = 5) writeonly buffer DstVertexBuffer {
+    uint dstVerts[];
+};
+
+// {vertexCount, instanceCount=1, firstVertex=0, firstInstance=0}
+// vertexCount 每帧被 fillBuffer(0) 重置后由 atomicMax 重建
+layout(set = 0, binding = 6) buffer DrawArgsBuffer {
+    uint drawArgs[4];
+};
+
+void main() {
+    uint slot = gl_GlobalInvocationID.x;
+    uint count = visibleClusterCount;
+    if (slot >= count) {
+        return;
+    }
+
+    uint clusterIdx = visibleClusterIndices[slot];
+    uvec4 a = geomTable[clusterIdx * 2u];
+    uvec4 b = geomTable[clusterIdx * 2u + 1u];
+
+    if (push.forceLOD != 0xFFFFFFFFu) {
+        uint lod = b.x;
+        bool isRoot = (b.y & 1u) != 0u;
+        if (!(lod == push.forceLOD || (isRoot && lod <= push.forceLOD))) {
+            return;
+        }
+    }
+
+    uint srcIndexOffset = a.x;
+    uint indexCount     = a.y;
+    uint dstCornerBase  = a.z;
+
+    for (uint k = 0; k < indexCount; ++k) {
+        uint vertexIndex = srcIndices[srcIndexOffset + k];
+        uint dst = (dstCornerBase + k) * 12u;
+        uint src = vertexIndex * 11u;
+        for (uint c = 0; c < 11u; ++c) {
+            dstVerts[dst + c] = srcVerts[src + c];
+        }
+        dstVerts[dst + 11u] = clusterIdx;
+    }
+
+    atomicMax(drawArgs[0], dstCornerBase + indexCount);
+}

@@ -13,12 +13,27 @@ struct RHITextureDesc {
     uint32_t        width       = 1;
     uint32_t        height      = 1;
     uint32_t        depth       = 1;
+    /// 0 = 自动完整 mip 链(floor(log2(max(w,h))) + 1,createTexture 时解析);
+    /// 1 = 单层;>1 = 显式层数。uploadPixels 上传 mip 0 后,若 mipLevels > 1
+    /// 自动生成整个链(双后端实现,纹理最终处于 ShaderReadOnly)。
     uint32_t        mipLevels   = 1;
     uint32_t        arrayLayers = 1;
     RHIFormat       format      = RHIFormat::R8G8B8A8_UNORM;
     RHITextureUsage usage       = RHITextureUsage::Sampled;
     RHISampleCount  samples     = RHISampleCount::Count1;
 };
+
+/// 解析 desc.mipLevels == 0 → 完整 mip 链(device::createTexture 入口调用)。
+inline void resolveMipLevels(RHITextureDesc& desc) {
+    if (desc.mipLevels != 0) return;
+    uint32_t largest = (desc.width > desc.height) ? desc.width : desc.height;
+    uint32_t levels = 1;
+    while (largest > 1) {
+        largest >>= 1;
+        ++levels;
+    }
+    desc.mipLevels = levels;
+}
 
 // =============================================================================
 // RHI Texture — Abstract Interface

@@ -586,8 +586,12 @@ RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setDepthTest(
     depthCompareOp_ = compareOp;
     return *this;
 }
-RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setStencilTest(bool enable) {
-    stencilTestEnable_ = enable; return *this;
+RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setStencilTest(
+    bool enable, const RHIStencilOpState& front, const RHIStencilOpState& back) {
+    stencilTestEnable_ = enable;
+    stencilFront_ = front;
+    stencilBack_  = back;
+    return *this;
 }
 
 RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setSampleCount(RHISampleCount count) {
@@ -687,13 +691,10 @@ void DX12GraphicsPipelineBuilder::buildGraphicsPipelineState(
                                                     : D3D12_DEPTH_WRITE_MASK_ZERO;
     depthStencil.DepthFunc = toD3D12CompareFunc(depthCompareOp_);
     depthStencil.StencilEnable = stencilTestEnable_ ? TRUE : FALSE;
-    depthStencil.StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK;
-    depthStencil.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
-    depthStencil.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-    depthStencil.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-    depthStencil.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencil.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencil.BackFace = depthStencil.FrontFace;
+    depthStencil.StencilReadMask = static_cast<UINT8>(stencilFront_.compareMask);
+    depthStencil.StencilWriteMask = static_cast<UINT8>(stencilFront_.writeMask);
+    depthStencil.FrontFace = toD3D12StencilOpState(stencilFront_);
+    depthStencil.BackFace  = toD3D12StencilOpState(stencilBack_);
 
     // Render targets: formats must be known up-front; pad the blend state with
     // the engine-visible number of color attachments.
@@ -766,12 +767,14 @@ std::shared_ptr<RHIPipeline> DX12GraphicsPipelineBuilder::build() {
         strides.emplace_back(vb.binding, vb.stride);
     }
 
-    return std::make_shared<DX12RHIPipeline>(device_, pso, rootResult.rootSig,
-                                             RHIPipelineType::Graphics,
-                                             std::move(rootResult.layoutTables),
-                                             rootResult.pushConstantRootParam,
-                                             std::move(strides),
-                                             topology_);
+    auto pipeline = std::make_shared<DX12RHIPipeline>(device_, pso, rootResult.rootSig,
+                                                      RHIPipelineType::Graphics,
+                                                      std::move(rootResult.layoutTables),
+                                                      rootResult.pushConstantRootParam,
+                                                      std::move(strides),
+                                                      topology_);
+    pipeline->setStencilRuntimeState(stencilTestEnable_, stencilFront_.reference);
+    return pipeline;
 }
 
 // =============================================================================

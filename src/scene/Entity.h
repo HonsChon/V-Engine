@@ -162,6 +162,14 @@ public:
     }
 
     /**
+     * @brief 获取世界变换矩阵（沿父链累乘，用于渲染与拾取）
+     */
+    glm::mat4 getWorldTransform() const {
+        if (!m_scene) return glm::mat4(1.0f);
+        return computeWorldMatrix(m_scene->getRegistry(), m_entityHandle);
+    }
+
+    /**
      * @brief 获取 UUID
      */
     uint64_t getUUID() const {

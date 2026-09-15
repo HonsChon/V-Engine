@@ -86,6 +86,15 @@ public:
      */
     std::vector<Entity> getRootEntities();
 
+    /**
+     * @brief 清空场景的全部实体与状态
+     *
+     * 用于 New Scene / 反序列化（SceneSerializer）。
+     * 复用同一个 Scene 对象、只清空 registry，
+     * 这样 Engine/各面板/SelectionManager 持有的指针无需重挂。
+     */
+    void clear();
+
     // ============================================================
     // 场景生命周期
     // ============================================================

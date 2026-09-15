@@ -105,6 +105,11 @@ void DX12RHICommandBuffer::bindPipelineInternal(DX12RHIPipeline* pipeline, bool 
         cmdList_->SetPipelineState(pipeline->getD3D12PipelineState());
         cmdList_->SetGraphicsRootSignature(pipeline->getD3D12RootSignature());
         cmdList_->IASetPrimitiveTopology(toD3DPrimitiveTopology(pipeline->getPrimitiveTopology()));
+        // The stencil reference lives outside the PSO in D3D12: apply the
+        // pipeline-static reference here (Vulkan stores it in the pipeline).
+        if (pipeline->isStencilEnabled()) {
+            cmdList_->OMSetStencilRef(pipeline->getStencilReference());
+        }
     }
     currentPipeline_ = pipeline;
     isCompute_ = isCompute;
@@ -315,10 +320,37 @@ void DX12RHICommandBuffer::drawIndexed(uint32_t indexCount, uint32_t instanceCou
     cmdList_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
-void DX12RHICommandBuffer::drawIndexedIndirect(RHIBuffer* /*buffer*/, uint64_t /*offset*/,
-                                               uint32_t /*drawCount*/, uint32_t /*stride*/) {
-    throw std::runtime_error("[DX12RHICommandBuffer] drawIndexedIndirect needs a command signature "
-                             "(ExecuteIndirect): not implemented (Phase 5 backlog)");
+void DX12RHICommandBuffer::drawIndirect(RHIBuffer* buffer, uint64_t offset,
+                                        uint32_t drawCount, uint32_t stride) {
+    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
+    if (stride != sizeof(D3D12_DRAW_ARGUMENTS)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] drawIndirect stride must be 16 bytes");
+    }
+    cmdList_->ExecuteIndirect(device_->getDrawCommandSignature(), drawCount,
+                              dxBuf->getD3D12Resource(), offset, nullptr, 0);
+}
+
+void DX12RHICommandBuffer::drawIndexedIndirect(RHIBuffer* buffer, uint64_t offset,
+                                               uint32_t drawCount, uint32_t stride) {
+    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
+    if (stride != sizeof(D3D12_DRAW_INDEXED_ARGUMENTS)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] drawIndexedIndirect stride must be 20 bytes");
+    }
+    cmdList_->ExecuteIndirect(device_->getDrawIndexedCommandSignature(), drawCount,
+                              dxBuf->getD3D12Resource(), offset, nullptr, 0);
+}
+
+void DX12RHICommandBuffer::drawIndexedIndirectCount(RHIBuffer* buffer, uint64_t offset,
+                                                     RHIBuffer* countBuffer, uint64_t countOffset,
+                                                     uint32_t maxDrawCount, uint32_t stride) {
+    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
+    auto* dxCount = static_cast<DX12RHIBuffer*>(countBuffer);
+    if (stride != sizeof(D3D12_DRAW_INDEXED_ARGUMENTS)) {
+        throw std::runtime_error("[DX12RHICommandBuffer] drawIndexedIndirectCount stride must be 20 bytes");
+    }
+    cmdList_->ExecuteIndirect(device_->getDrawIndexedCommandSignature(), maxDrawCount,
+                              dxBuf->getD3D12Resource(), offset,
+                              dxCount->getD3D12Resource(), countOffset);
 }
 
 // ---- Compute commands ----
@@ -328,9 +360,10 @@ void DX12RHICommandBuffer::dispatch(uint32_t groupCountX, uint32_t groupCountY,
     cmdList_->Dispatch(groupCountX, groupCountY, groupCountZ);
 }
 
-void DX12RHICommandBuffer::dispatchIndirect(RHIBuffer* /*buffer*/, uint64_t /*offset*/) {
-    throw std::runtime_error("[DX12RHICommandBuffer] dispatchIndirect needs a command signature "
-                             "(ExecuteIndirect): not implemented (Phase 5 backlog)");
+void DX12RHICommandBuffer::dispatchIndirect(RHIBuffer* buffer, uint64_t offset) {
+    auto* dxBuf = static_cast<DX12RHIBuffer*>(buffer);
+    cmdList_->ExecuteIndirect(device_->getDispatchCommandSignature(), 1,
+                              dxBuf->getD3D12Resource(), offset, nullptr, 0);
 }
 
 // ---- Push constants ----
@@ -560,6 +593,9 @@ void DX12RHICommandBuffer::bufferBarrier(RHIBuffer* buffer, uint64_t /*size*/,
         }
         if (a & static_cast<uint32_t>(RHIAccessFlags::TransferRead)) {
             return D3D12_RESOURCE_STATE_COPY_SOURCE;
+        }
+        if (a & static_cast<uint32_t>(RHIAccessFlags::IndirectCommandRead)) {
+            return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
         }
         if (a & static_cast<uint32_t>(RHIAccessFlags::VertexAttributeRead)) {
             return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;

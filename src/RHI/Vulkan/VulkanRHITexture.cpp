@@ -22,6 +22,13 @@ VulkanRHITexture::~VulkanRHITexture() {
 void VulkanRHITexture::createImage() {
     VkDevice vkDev = device_->getVkDevice();
 
+    // Mip generation (uploadPixels blit chain) needs transfer usage on both
+    // sides; auto-enable for multi-mip textures (mirrors the buffer TRANSFER_DST
+    // auto-enable for GPUOnly uploads).
+    if (desc_.mipLevels > 1) {
+        desc_.usage |= RHITextureUsage::TransferSrc | RHITextureUsage::TransferDst;
+    }
+
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -145,15 +152,86 @@ void VulkanRHITexture::uploadPixels(const void* data, uint64_t dataSize) {
     vkCmdCopyBufferToImage(cmd, stagingBuffer, image_,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // 5. Transition image: TRANSFER_DST → SHADER_READ_ONLY
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    // 5. Mip 链生成(mip 0 已上传,整链处于 TRANSFER_DST;经典 blit 链:
+    //    每级从上一级 blit 下采样,结束后整链 → SHADER_READ_ONLY)
+    {
+        // 单 mip 层 barrier helper(同 image 不同 subresource 可处于不同 layout)
+        auto mipBarrier = [&](uint32_t mip, VkImageLayout oldLayout, VkImageLayout newLayout,
+                              VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                              VkAccessFlags srcAccess, VkAccessFlags dstAccess) {
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = oldLayout;
+            b.newLayout = newLayout;
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = image_;
+            b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            b.subresourceRange.baseMipLevel = mip;
+            b.subresourceRange.levelCount = 1;
+            b.subresourceRange.baseArrayLayer = 0;
+            b.subresourceRange.layerCount = desc_.arrayLayers;
+            b.srcAccessMask = srcAccess;
+            b.dstAccessMask = dstAccess;
+            vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
+        };
 
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+        if (desc_.mipLevels > 1) {
+            mipBarrier(0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+
+            int32_t mipW = static_cast<int32_t>(desc_.width);
+            int32_t mipH = static_cast<int32_t>(desc_.height);
+            for (uint32_t i = 1; i < desc_.mipLevels; ++i) {
+                mipBarrier(i, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           0, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+                const int32_t halfW = (mipW > 1) ? mipW / 2 : 1;
+                const int32_t halfH = (mipH > 1) ? mipH / 2 : 1;
+
+                VkImageBlit blit{};
+                blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, desc_.arrayLayers };
+                blit.srcOffsets[0] = { 0, 0, 0 };
+                blit.srcOffsets[1] = { mipW, mipH, 1 };
+                blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, desc_.arrayLayers };
+                blit.dstOffsets[0] = { 0, 0, 0 };
+                blit.dstOffsets[1] = { halfW, halfH, 1 };
+                vkCmdBlitImage(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1, &blit, VK_FILTER_LINEAR);
+
+                mipBarrier(i, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+
+                mipW = halfW;
+                mipH = halfH;
+            }
+
+            // 整链 TRANSFER_SRC → SHADER_READ_ONLY(替换原单级路径)
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.levelCount = desc_.mipLevels;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+        } else {
+            // Transition image: TRANSFER_DST → SHADER_READ_ONLY
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+    }
 
     device_->endSingleTimeCommandsVk(cmd);
 

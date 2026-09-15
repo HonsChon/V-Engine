@@ -19,6 +19,10 @@
 #include "RayPicker.h"
 #include "RenderSettings.h"
 #include "nanite/NaniteManager.h"
+#include "SceneSerializer.h"
+#include "ModelImporter.h"
+
+#include "nfd/nfd.h"
 
 #include "RHI.h"
 #include "RHIDevice.h"
@@ -32,15 +36,41 @@
 
 #include <imgui.h>
 #include <GLFW/glfw3.h>
+#include <nlohmann/json.hpp>
 #include <iostream>
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 
 // ============================================================
 // 构造 & 析构
 // ============================================================
+
+namespace {
+
+// 编辑器状态持久化：CWD 下的小 JSON（与 imgui.ini 同位置约定，不进 git）
+constexpr const char* kEditorSettingsFile = "editor_settings.json";
+
+void saveLastScene(const std::string& scenePath) {
+    nlohmann::json j{{"lastScene", scenePath}};
+    std::ofstream ofs(kEditorSettingsFile, std::ios::binary);
+    if (ofs.is_open()) ofs << j.dump(2) << std::endl;
+}
+
+std::string loadLastScene() {
+    std::ifstream ifs(kEditorSettingsFile, std::ios::binary);
+    if (!ifs.is_open()) return {};
+    try {
+        auto j = nlohmann::json::parse(ifs);
+        return j.value("lastScene", std::string());
+    } catch (const nlohmann::json::parse_error&) {
+        return {};
+    }
+}
+
+} // anonymous namespace
 
 Engine::Engine(const Config& config) : m_config(config) {
     std::cout << "========================================\n";
@@ -117,8 +147,19 @@ void Engine::initializeSubsystems() {
     m_renderer->setRenderSystem(m_renderSystem.get());
     std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
 
-    // 10. Default Scene
-    createDefaultScene();
+    // 10. Scene: 恢复上次打开的场景（editor_settings.json），无记录则用演示场景
+    {
+        std::string lastScene = loadLastScene();
+        if (!lastScene.empty()) {
+            std::cout << "[Engine] Restoring last scene: " << lastScene << "\n";
+            if (!openSceneFromFile(lastScene)) {
+                std::cout << "[Engine] Last scene unavailable, using default scene\n";
+                createDefaultScene();
+            }
+        } else {
+            createDefaultScene();
+        }
+    }
 
     // 11. SelectionManager
     VEngine::SelectionManager::getInstance().setScene(m_scene.get());
@@ -141,6 +182,9 @@ void Engine::initializeSubsystems() {
             m_uiManager->getSceneHierarchyPanel()->setScene(m_scene.get());
 
         m_uiManager->setRenderSettings(&m_renderer->getSettings());
+
+        // File 菜单 / 快捷键 / 资源浏览器动作回调
+        setupUICallbacks();
 
         // Pass UI refs to SceneRenderer so it can render UI inside command recording
         m_renderer->setImGuiLayer(m_imguiLayer.get());
@@ -233,76 +277,19 @@ void Engine::setupInputCallbacks() {
         }
     });
 
-    // Key (feature toggles)
+    // Key (feature toggles) — GLFW callback; logic lives in handleKey so the
+    // autotest path exercises the identical code.
     m_window->setKeyCallback([this](int key, int scancode, int action, int mods) {
         if (action != GLFW_PRESS) return;
-        auto& settings = m_renderer->getSettings();
-
-        switch (key) {
-        case GLFW_KEY_ESCAPE:
-            requestExit(); break;
-        case GLFW_KEY_F1:
-            settings.showUI = !settings.showUI;
-            std::cout << "[Engine] UI " << (settings.showUI ? "ON" : "OFF") << "\n"; break;
-        case GLFW_KEY_5:
-            if (settings.renderMode == RenderMode::Normal) {
-                settings.renderMode = RenderMode::WaterScene;
-                std::cout << "[Engine] → Water Scene (Deferred)\n";
-                if (!m_renderer->isDeferredInitialized())
-                    m_renderer->initDeferredShading();
-            } else {
-                settings.renderMode = RenderMode::Normal;
-                std::cout << "[Engine] → Normal (Forward)\n";
-            }
-            break;
-        case GLFW_KEY_6:
-            settings.enableGPUCulling = !settings.enableGPUCulling;
-            std::cout << "[Engine] GPU Culling " << (settings.enableGPUCulling ? "ON" : "OFF") << "\n";
-            if (settings.enableGPUCulling) m_renderer->initGPUDrivenRendering();
-            break;
-        case GLFW_KEY_7:
-            settings.enableNanite = !settings.enableNanite;
-            std::cout << "[Engine] Nanite " << (settings.enableNanite ? "ON" : "OFF") << "\n";
-            if (settings.enableNanite) m_renderer->initNanite();
-            break;
-        case GLFW_KEY_8:
-            m_renderer->initNanite();
-            m_renderer->testNaniteClustering();
-            break;
-        case GLFW_KEY_9:
-            settings.showClusterVisualization = !settings.showClusterVisualization;
-            std::cout << "[Engine] Cluster Vis " << (settings.showClusterVisualization ? "ON" : "OFF") << "\n";
-            if (settings.showClusterVisualization) m_renderer->initNaniteDebugPass();
-            break;
-        case GLFW_KEY_0:
-            m_renderer->cycleNaniteDebugMode();
-            break;
-        case GLFW_KEY_Z:
-            settings.naniteFrustumCulling = !settings.naniteFrustumCulling;
-            std::cout << "[Engine] Nanite Frustum Culling " << (settings.naniteFrustumCulling ? "ON" : "OFF") << "\n";
-            break;
-        case GLFW_KEY_X:
-            settings.naniteConeCulling = !settings.naniteConeCulling;
-            std::cout << "[Engine] Nanite Cone Culling " << (settings.naniteConeCulling ? "ON" : "OFF") << "\n";
-            break;
-        case GLFW_KEY_B:
-            settings.naniteForceLOD = (settings.naniteForceLOD >= 7) ? -1 : settings.naniteForceLOD + 1;
-            std::cout << "[Engine] Nanite Force LOD "
-                      << (settings.naniteForceLOD < 0 ? "OFF" : std::to_string(settings.naniteForceLOD)) << "\n";
-            break;
-        }
+        (void)scancode; (void)mods;
+        handleKey(key);
     });
 
     // Drag & drop
     m_window->setDropCallback([this](int count, const char** paths) {
         if (count == 0 || !m_scene) return;
-        std::string filePath = paths[0];
-        std::string ext = std::filesystem::path(filePath).extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".obj") {
-            auto e = m_scene->createEntity("Dropped Model");
-            e.addComponent<VEngine::MeshRendererComponent>(filePath, "default_material");
-            std::cout << "[Engine] Loaded: " << filePath << "\n";
+        for (int i = 0; i < count; ++i) {
+            importModelFile(paths[i]);
         }
     });
 
@@ -335,6 +322,103 @@ void Engine::createCommandBuffers() {
 }
 
 // ============================================================
+// Key handling (shared by GLFW callback and autotest)
+// ============================================================
+
+void Engine::handleKey(int key) {
+    auto& settings = m_renderer->getSettings();
+
+    switch (key) {
+    case GLFW_KEY_ESCAPE:
+        requestExit(); break;
+    case GLFW_KEY_F1:
+        settings.showUI = !settings.showUI;
+        std::cout << "[Engine] UI " << (settings.showUI ? "ON" : "OFF") << "\n"; break;
+    case GLFW_KEY_5:
+        if (settings.renderMode == RenderMode::Normal) {
+            settings.renderMode = RenderMode::WaterScene;
+            std::cout << "[Engine] → Water Scene (Deferred)\n";
+            if (!m_renderer->isDeferredInitialized())
+                m_renderer->initDeferredShading();
+        } else {
+            settings.renderMode = RenderMode::Normal;
+            std::cout << "[Engine] → Normal (Forward)\n";
+        }
+        break;
+    case GLFW_KEY_6:
+        settings.enableGPUCulling = !settings.enableGPUCulling;
+        std::cout << "[Engine] GPU Culling " << (settings.enableGPUCulling ? "ON" : "OFF") << "\n";
+        if (settings.enableGPUCulling) m_renderer->initGPUDrivenRendering();
+        break;
+    case GLFW_KEY_7:
+        settings.enableNanite = !settings.enableNanite;
+        std::cout << "[Engine] Nanite " << (settings.enableNanite ? "ON" : "OFF") << "\n";
+        if (settings.enableNanite) m_renderer->initNanite();
+        break;
+    case GLFW_KEY_8:
+        m_renderer->initNanite();
+        m_renderer->testNaniteClustering();
+        break;
+    case GLFW_KEY_9:
+        settings.showClusterVisualization = !settings.showClusterVisualization;
+        std::cout << "[Engine] Cluster Vis " << (settings.showClusterVisualization ? "ON" : "OFF") << "\n";
+        if (settings.showClusterVisualization) m_renderer->initNaniteDebugPass();
+        break;
+    case GLFW_KEY_0:
+        m_renderer->cycleNaniteDebugMode();
+        break;
+    case GLFW_KEY_Z:
+        settings.naniteFrustumCulling = !settings.naniteFrustumCulling;
+        std::cout << "[Engine] Nanite Frustum Culling " << (settings.naniteFrustumCulling ? "ON" : "OFF") << "\n";
+        break;
+    case GLFW_KEY_X:
+        settings.naniteConeCulling = !settings.naniteConeCulling;
+        std::cout << "[Engine] Nanite Cone Culling " << (settings.naniteConeCulling ? "ON" : "OFF") << "\n";
+        break;
+    case GLFW_KEY_B:
+        settings.naniteForceLOD = (settings.naniteForceLOD >= 7) ? -1 : settings.naniteForceLOD + 1;
+        std::cout << "[Engine] Nanite Force LOD "
+                  << (settings.naniteForceLOD < 0 ? "OFF" : std::to_string(settings.naniteForceLOD)) << "\n";
+        break;
+    }
+}
+
+// ============================================================
+// Autotest pump (called once per frame from mainLoop)
+//
+// Drives unattended regression soaks for both backends:
+//  1. Key injection: drains the --autotest key sequence on a timer
+//     (one key every --interval seconds) through handleKey() — the
+//     exact same path the real GLFW keyboard callback takes.
+//  2. Timed exit: once the sequence is fully injected AND the
+//     --seconds budget (measured from main-loop start) is reached,
+//     exits through the normal requestExit() teardown path.
+// No-op when no autotest options were given.
+// Example: VulkanPBR --autotest 8900 --interval 4 --seconds 15
+// presses 8 (cluster) -> 9 (viz on) -> 0 -> 0 (cycle debug mode),
+// soaks ~15 s, then exits cleanly.
+// ============================================================
+void Engine::pumpAutotest() {
+    if (m_config.autotestKeys.empty() && m_config.autotestSeconds <= 0.0) return;
+    const double now = glfwGetTime();
+
+    if (m_autotestIndex < m_config.autotestKeys.size()) {
+        if (now >= m_autotestNextAt) {
+            const int key = m_config.autotestKeys[m_autotestIndex++];
+            std::cout << "[autotest] inject key " << key << "\n";
+            handleKey(key);
+            m_autotestNextAt = now + m_config.autotestInterval;
+        }
+        return;   // 序列发完前不退出计时 / exit timer is only evaluated after the sequence drains
+    }
+    if (m_config.autotestSeconds > 0.0 &&
+        now - m_autotestStart >= m_config.autotestSeconds) {
+        std::cout << "[autotest] time budget reached, exiting\n";
+        requestExit();
+    }
+}
+
+// ============================================================
 // Main Loop
 // ============================================================
 
@@ -353,6 +437,8 @@ void Engine::run() {
     std::cout << "  ESC - Exit\n";
 
     m_lastFrameTime = static_cast<float>(glfwGetTime());
+    m_autotestStart = glfwGetTime();
+    m_autotestNextAt = m_autotestStart + m_config.autotestInterval;
 
     while (m_running && !m_window->shouldClose()) {
         mainLoop();
@@ -374,6 +460,7 @@ void Engine::mainLoop() {
 
     // Poll events
     m_window->pollEvents();
+    pumpAutotest();
 
     // Keyboard input
     processKeyboardInput(m_deltaTime);
@@ -418,7 +505,8 @@ void Engine::drawFrame() {
         if (fp) passes.push_back(fp);
         if (settings.renderMode == RenderMode::WaterScene && m_renderer->getGBufferPass())
             passes.push_back(m_renderer->getGBufferPass());
-        m_renderSystem->updateRenderables(m_scene.get(), passes);
+        m_renderSystem->updateRenderables(m_scene.get(), passes,
+                                          m_camera ? m_camera->getPosition() : glm::vec3(0.0f));
     }
 
     // GPU culling data
@@ -537,14 +625,13 @@ void Engine::handleMousePicking() {
     auto* meshMgr = m_renderSystem->getMeshManager();
 
     for (auto entity : ecsView) {
-        auto& tx = ecsView.get<VEngine::TransformComponent>(entity);
         auto& mr = ecsView.get<VEngine::MeshRendererComponent>(entity);
 
         VEngine::AABB aabb;
         if (meshMgr) aabb = meshMgr->getMeshAABB(mr.meshPath);
         else { aabb.min = glm::vec3(-1); aabb.max = glm::vec3(1); }
 
-        VEngine::AABB world = aabb.transform(tx.getTransform());
+        VEngine::AABB world = aabb.transform(VEngine::computeWorldMatrix(registry, entity));
         float tMin, tMax;
         if (VEngine::RayPicker::rayIntersectsAABB(ray, world, tMin, tMax)) {
             if (tMin >= 0 && tMin < closestT) { closestT = tMin; hitEntity = entity; }
@@ -620,4 +707,152 @@ void Engine::updateFrameStats() {
 void Engine::requestExit() {
     std::cout << "[Engine] Exit requested\n";
     m_running = false;
+}
+
+// ============================================================
+// Scene file & model import
+// ============================================================
+
+void Engine::setupUICallbacks() {
+    if (!m_uiManager) return;
+
+    m_uiManager->setOnNewScene([this]() { newScene(); });
+    m_uiManager->setOnOpenScene([this]() { openSceneDialog(); });
+    m_uiManager->setOnSaveScene([this]() { saveScene(); });
+    m_uiManager->setOnSaveSceneAs([this]() { saveSceneAs(); });
+    m_uiManager->setOnExit([this]() { requestExit(); });
+
+    // 资源浏览器：双击模型 → 导入；双击场景文件 → 打开
+    if (auto* browser = m_uiManager->getAssetBrowserPanel()) {
+        browser->setOnAssetDoubleClicked([this](const std::string& path, AssetBrowserPanel::AssetType type) {
+            if (type == AssetBrowserPanel::AssetType::Model) {
+                importModelFile(path);
+            } else if (type == AssetBrowserPanel::AssetType::Scene) {
+                openSceneFromFile(path);
+            }
+        });
+    }
+    updateSceneTitle();
+}
+
+void Engine::importModelFile(const std::string& filePath) {
+    if (!m_scene) return;
+    if (!VEngine::ModelImporter::isSupported(filePath)) {
+        std::cout << "[Engine] Unsupported model file (expect .obj/.gltf/.glb): " << filePath << "\n";
+        return;
+    }
+    auto root = VEngine::ModelImporter::importModel(m_scene.get(), filePath);
+    if (root) {
+        VEngine::SelectionManager::getInstance().select(root.getHandle());
+        if (m_uiManager) {
+            if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(root.getHandle());
+            if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(root.getHandle());
+        }
+    }
+}
+
+void Engine::newScene() {
+    if (!m_scene) return;
+    m_scene->clear();
+    VEngine::SelectionManager::getInstance().clearSelection();
+    if (m_uiManager) {
+        if (auto* h = m_uiManager->getSceneHierarchyPanel()) h->setSelectedEntity(entt::null);
+        if (auto* i = m_uiManager->getInspectorPanel()) i->setSelectedEntity(entt::null);
+    }
+    m_currentScenePath.clear();
+    saveLastScene("");   // 清除记忆 → 下次启动回演示场景
+    updateSceneTitle();
+    std::cout << "[Engine] New scene\n";
+}
+
+void Engine::openSceneDialog() {
+    nfdchar_t* outPath = nullptr;
+    nfdfilteritem_t filterItems[2] = {
+        { "V-Engine Scene", "vscene,json" },
+        { "All Files", "*" }
+    };
+    nfdresult_t result = NFD_OpenDialog(&outPath, filterItems, 2, nullptr);
+    if (result == NFD_OKAY && outPath) {
+        openSceneFromFile(outPath);
+        NFD_FreePath(outPath);
+    } else if (result == NFD_ERROR) {
+        std::cout << "[Engine] Open dialog error: " << NFD_GetError() << "\n";
+    }
+}
+
+bool Engine::openSceneFromFile(const std::string& filePath) {
+    if (!m_scene) return false;
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.deserialize(filePath)) {
+        m_currentScenePath = filePath;
+        saveLastScene(filePath);   // 记住最近场景（下次启动恢复）
+        updateSceneTitle();
+        if (m_window) {
+            // 窗口标题反映当前场景（失败则忽略——纯显示用途）
+            std::string title = m_config.title + " - " +
+                std::filesystem::path(filePath).filename().string();
+            m_window->setTitle(title);
+        }
+        return true;
+    }
+    return false;
+}
+
+void Engine::saveSceneToPath(const std::string& filePath) {
+    if (!m_scene || filePath.empty()) return;
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.serialize(filePath)) {
+        m_currentScenePath = filePath;
+        saveLastScene(filePath);   // 记住最近场景
+        updateSceneTitle();
+    }
+}
+
+void Engine::saveScene() {
+    if (!m_scene) return;
+    if (m_currentScenePath.empty()) {
+        saveSceneAs();
+        return;
+    }
+    VEngine::SceneSerializer serializer(m_scene.get());
+    if (serializer.serialize(m_currentScenePath)) {
+        updateSceneTitle();
+    }
+}
+
+void Engine::saveSceneAs() {
+    if (!m_scene) return;
+    nfdchar_t* outPath = nullptr;
+    nfdfilteritem_t filterItems[1] = { "V-Engine Scene", "vscene" };
+    nfdresult_t result = NFD_SaveDialog(&outPath, filterItems, 1, nullptr, "scene.vscene");
+    if (result == NFD_OKAY && outPath) {
+        std::string path = outPath;
+        NFD_FreePath(outPath);
+
+        // 未带扩展名时补默认后缀
+        if (!std::filesystem::path(path).has_extension()) {
+            path += ".vscene";
+        }
+
+        VEngine::SceneSerializer serializer(m_scene.get());
+        if (serializer.serialize(path)) {
+            m_currentScenePath = path;
+            updateSceneTitle();
+            if (m_window) {
+                std::string title = m_config.title + " - " +
+                    std::filesystem::path(path).filename().string();
+                m_window->setTitle(title);
+            }
+        }
+    } else if (result == NFD_ERROR) {
+        std::cout << "[Engine] Save dialog error: " << NFD_GetError() << "\n";
+    }
+}
+
+void Engine::updateSceneTitle() {
+    if (!m_uiManager) return;
+    std::string title = m_currentScenePath.empty()
+        ? std::string("Untitled")
+        : std::filesystem::path(m_currentScenePath).filename().string();
+    m_uiManager->setSceneTitle("Scene: " + title);
 }

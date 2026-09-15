@@ -1,5 +1,6 @@
 #include "DX12RHITexture.h"
 #include "DX12RHIDevice.h"
+#include "DX12RHIPipeline.h"
 #include "DX12TypeConversions.h"
 
 #include <stdexcept>
@@ -46,6 +47,13 @@ DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc
     // share the resource with the depth/stencil view.
     depthTypeless_ = isDepthFormat(format_)
         && (hasFlag(usage_, RHITextureUsage::Sampled) || hasFlag(usage_, RHITextureUsage::Storage));
+
+    // Mip generation (uploadPixels) is draw-based on D3D12: every level is
+    // rendered into via the internal blit pipeline, so multi-mip textures need
+    // the render-target flag.
+    if (mipLevels_ > 1 && !isDepthFormat(format_)) {
+        usage_ |= RHITextureUsage::ColorAttachment;
+    }
 
     DXGI_FORMAT resourceFormat = depthTypeless_ ? toDXGIResourceFormat(format_) : toDXGIFormat(format_);
 
@@ -115,8 +123,10 @@ void DX12RHITexture::uploadPixels(const void* data, uint64_t dataSize) {
     if (!hasFlag(usage_, RHITextureUsage::TransferDst)) {
         throw std::runtime_error("[DX12RHITexture] uploadPixels requires TransferDst usage");
     }
-    if (mipLevels_ != 1) {
-        throw std::runtime_error("[DX12RHITexture] uploadPixels: only single-mip textures are supported");
+    if (mipLevels_ > 1 && (isDepthFormat(format_) || arrayLayers_ > 1)) {
+        // Draw-based mipgen renders into per-mip RTVs: depth formats and array
+        // textures with mips are not covered (engine consumers are 2D color).
+        throw std::runtime_error("[DX12RHITexture] uploadPixels: mip generation supports 2D color textures only");
     }
 
     const uint32_t bpp = bytesPerPixel(format_);
@@ -202,7 +212,96 @@ void DX12RHITexture::uploadPixels(const void* data, uint64_t dataSize) {
         // Contract: after upload the texture is in ShaderReadOnly.
         const D3D12_RESOURCE_STATES shaderRead =
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-        if (currentState_ != shaderRead) {
+
+        auto transitionSub = [&](UINT subresource, D3D12_RESOURCE_STATES before,
+                                 D3D12_RESOURCE_STATES after) {
+            if (before == after) return;
+            D3D12_RESOURCE_BARRIER b = {};
+            b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b.Transition.pResource = resource_.Get();
+            b.Transition.StateBefore = before;
+            b.Transition.StateAfter = after;
+            b.Transition.Subresource = subresource;
+            cmd->ResourceBarrier(1, &b);
+        };
+
+        if (mipLevels_ > 1) {
+            // ---- Mip 链生成(绘制式:内部 blit 管线逐级下采样) ----
+            // mip i 的内容来自 mip i-1 的线性采样;单层 2D(前置检查)。
+            transitionSub(0, D3D12_RESOURCE_STATE_COPY_DEST, shaderRead);
+
+            auto blitPipeline = device_->getOrCreateBlitPipeline(format_);
+            ID3D12Device* d3d = device_->getDevice();
+
+            ID3D12DescriptorHeap* heaps[] = {
+                device_->getShaderVisibleResourceHeap(),
+                device_->getShaderVisibleSamplerHeap(),
+            };
+            cmd->SetDescriptorHeaps(2, heaps);
+            cmd->SetPipelineState(blitPipeline->getD3D12PipelineState());
+            cmd->SetGraphicsRootSignature(blitPipeline->getD3D12RootSignature());
+            cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            D3D12_SAMPLER_DESC samplerDesc = {};
+            samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+            samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            samplerDesc.MinLOD = 0;
+            samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+
+            UINT mipW = width_, mipH = height_;
+            for (uint32_t i = 1; i < mipLevels_; ++i) {
+                const UINT halfW = (mipW > 1) ? mipW / 2 : 1;
+                const UINT halfH = (mipH > 1) ? mipH / 2 : 1;
+
+                D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = {}, samCpu = {}, rtvCpu = {};
+                D3D12_GPU_DESCRIPTOR_HANDLE srvGpu = {}, samGpu = {};
+                if (!device_->allocateResourceDescriptors(1, &srvCpu, &srvGpu) ||
+                    !device_->allocateSamplerDescriptors(1, &samCpu, &samGpu) ||
+                    !device_->allocateRTVDescriptors(1, &rtvCpu)) {
+                    throw std::runtime_error("[DX12RHITexture] descriptor rings exhausted (mipgen)");
+                }
+
+                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                srvDesc.Format = toDXGIFormat(format_);
+                srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                srvDesc.Texture2D.MostDetailedMip = i - 1;
+                srvDesc.Texture2D.MipLevels = 1;
+                d3d->CreateShaderResourceView(resource_.Get(), &srvDesc, srvCpu);
+                d3d->CreateSampler(&samplerDesc, samCpu);
+
+                D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+                rtvDesc.Format = toDXGIFormat(format_);
+                rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+                rtvDesc.Texture2D.MipSlice = i;
+                d3d->CreateRenderTargetView(resource_.Get(), &rtvDesc, rtvCpu);
+
+                // 开头的 ALL_SUBRESOURCES barrier 已把整链转入 COPY_DEST
+                transitionSub(i, D3D12_RESOURCE_STATE_COPY_DEST,
+                              D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+                cmd->SetGraphicsRootDescriptorTable(0, srvGpu);
+                cmd->SetGraphicsRootDescriptorTable(1, samGpu);
+
+                D3D12_VIEWPORT viewport = {};
+                viewport.Width = static_cast<float>(halfW);
+                viewport.Height = static_cast<float>(halfH);
+                viewport.MaxDepth = 1.0f;
+                cmd->RSSetViewports(1, &viewport);
+                D3D12_RECT scissor = { 0, 0, static_cast<LONG>(halfW), static_cast<LONG>(halfH) };
+                cmd->RSSetScissorRects(1, &scissor);
+                cmd->OMSetRenderTargets(1, &rtvCpu, FALSE, nullptr);
+                cmd->DrawInstanced(3, 1, 0, 0);
+
+                transitionSub(i, D3D12_RESOURCE_STATE_RENDER_TARGET, shaderRead);
+
+                mipW = halfW;
+                mipH = halfH;
+            }
+            currentState_ = shaderRead;   // 所有子资源最终都在 SRV 状态
+        } else if (currentState_ != shaderRead) {
             D3D12_RESOURCE_BARRIER barrier = {};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             barrier.Transition.pResource = resource_.Get();

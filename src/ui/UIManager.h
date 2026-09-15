@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <functional>
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
 
@@ -134,13 +135,39 @@ public:
      */
     entt::entity getSelectedEntity() const;
 
+    // ============================================================
+    // 场景文件动作（File 菜单 / 快捷键 → 回调由 Engine 注入）
+    // ============================================================
+
+    using ActionCallback = std::function<void()>;
+
+    void setOnNewScene(ActionCallback cb)     { onNewScene = std::move(cb); }
+    void setOnOpenScene(ActionCallback cb)    { onOpenScene = std::move(cb); }
+    void setOnSaveScene(ActionCallback cb)    { onSaveScene = std::move(cb); }
+    void setOnSaveSceneAs(ActionCallback cb)  { onSaveSceneAs = std::move(cb); }
+    void setOnExit(ActionCallback cb)         { onExit = std::move(cb); }
+
+    /**
+     * @brief 设置菜单栏显示的场景标题（文件名 + 修改标记）
+     */
+    void setSceneTitle(const std::string& title) { m_sceneTitle = title; }
+
 private:
     void renderMainMenuBar();
+    void handleGlobalShortcuts();   // Ctrl+N/O/S（ImGui 键盘路由）
 
     std::unique_ptr<DebugPanel> debugPanel;
     std::unique_ptr<SceneHierarchyPanel> sceneHierarchyPanel;
     std::unique_ptr<InspectorPanel> inspectorPanel;
     std::unique_ptr<AssetBrowserPanel> assetBrowserPanel;
+
+    // 场景动作回调（Engine 注入）
+    ActionCallback onNewScene;
+    ActionCallback onOpenScene;
+    ActionCallback onSaveScene;
+    ActionCallback onSaveSceneAs;
+    ActionCallback onExit;
+    std::string m_sceneTitle = "Untitled";
 
     // 面板可见态
     bool showDebugPanel = true;

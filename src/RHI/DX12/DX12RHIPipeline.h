@@ -58,6 +58,16 @@ public:
     int  getPushConstantRootParam() const { return pushConstantRootParam_; }
     bool hasPushConstants() const { return pushConstantRootParam_ >= 0; }
 
+    /// Stencil reference (pipeline-static, applied by the command buffer via
+    /// OMSetStencilRef when this graphics pipeline is bound — D3D12 keeps the
+    /// reference outside the PSO, unlike Vulkan).
+    bool     isStencilEnabled() const { return stencilEnabled_; }
+    uint32_t getStencilReference() const { return stencilReference_; }
+    void     setStencilRuntimeState(bool enabled, uint32_t reference) {
+        stencilEnabled_ = enabled;
+        stencilReference_ = reference;
+    }
+
     /// Stride of a vertex input slot (from the input layout); -1 if unknown.
     int  getVertexBindingStride(uint32_t binding) const;
     const std::vector<std::pair<uint32_t, uint32_t>>& getVertexBindingStrides() const {
@@ -76,6 +86,9 @@ private:
     int                       pushConstantRootParam_ = -1;
     std::vector<std::pair<uint32_t, uint32_t>> vertexBindingStrides_;
     RHIPrimitiveTopology topology_ = RHIPrimitiveTopology::TriangleList;
+
+    bool     stencilEnabled_  = false;
+    uint32_t stencilReference_ = 0;
 };
 
 // =============================================================================
@@ -146,7 +159,9 @@ public:
 
     RHIGraphicsPipelineBuilder& setDepthTest(bool enable, bool writeEnable,
                                               RHICompareOp compareOp) override;
-    RHIGraphicsPipelineBuilder& setStencilTest(bool enable) override;
+    RHIGraphicsPipelineBuilder& setStencilTest(bool enable,
+                                                const RHIStencilOpState& front = {},
+                                                const RHIStencilOpState& back = {}) override;
 
     RHIGraphicsPipelineBuilder& setSampleCount(RHISampleCount count) override;
     RHIGraphicsPipelineBuilder& addColorBlendAttachment(const RHIColorBlendAttachment& attachment) override;
@@ -197,6 +212,8 @@ private:
     bool         depthWriteEnable_ = true;
     RHICompareOp depthCompareOp_   = RHICompareOp::Less;
     bool         stencilTestEnable_ = false;
+    RHIStencilOpState stencilFront_{};
+    RHIStencilOpState stencilBack_{};
 
     RHISampleCount sampleCount_ = RHISampleCount::Count1;
 

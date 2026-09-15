@@ -132,6 +132,12 @@ public:
     VkSurfaceKHR     getSurface() const { return surface_; }
     uint32_t         getGraphicsQueueFamily() const { return graphicsQueueFamily_; }
 
+    // ---- Indirect-count (VK_KHR_draw_indirect_count, optional) ----
+    bool isDrawIndirectCountSupported() const { return drawIndirectCountSupported_; }
+    PFN_vkCmdDrawIndexedIndirectCount getVkCmdDrawIndexedIndirectCount() const {
+        return vkCmdDrawIndexedIndirectCount_;
+    }
+
     // ---- Internal Vulkan helpers ----
     VkCommandBuffer beginSingleTimeCommandsVk();
     void endSingleTimeCommandsVk(VkCommandBuffer cmd);
@@ -182,6 +188,13 @@ private:
         , "VK_KHR_portability_subset"
 #endif
     };
+
+    // Optional device extension: enables vkCmdDrawIndexedIndirectCount (the
+    // RHI drawIndexedIndirectCount variant). Queried at logical-device
+    // creation; when unsupported the RHI call throws.
+    static constexpr const char* kDrawIndirectCountExtension_ = "VK_KHR_draw_indirect_count";
+    bool drawIndirectCountSupported_ = false;
+    PFN_vkCmdDrawIndexedIndirectCount vkCmdDrawIndexedIndirectCount_ = nullptr;
 
 #ifdef NDEBUG
     static constexpr bool enableValidationLayers_ = false;

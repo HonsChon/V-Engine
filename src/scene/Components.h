@@ -89,6 +89,37 @@ struct RelationshipComponent {
     size_t childrenCount = 0;
 };
 
+/**
+ * @brief 计算实体的世界变换矩阵（沿父链累乘局部矩阵）
+ * 
+ * TransformComponent::getTransform() 只返回局部矩阵，
+ * 渲染与拾取必须使用本函数以正确处理父子层级。
+ * 逐帧重算（父链通常很浅），不做脏标记缓存。
+ * 
+ * @param registry 场景注册表
+ * @param entity 目标实体
+ * @return 世界空间 Model Matrix
+ */
+inline glm::mat4 computeWorldMatrix(entt::registry& registry, entt::entity entity) {
+    // 收集从当前实体到根的链
+    entt::entity chain[64];
+    int depth = 0;
+    entt::entity current = entity;
+    while (current != entt::null && depth < 64) {
+        chain[depth++] = current;
+        auto* rel = registry.try_get<RelationshipComponent>(current);
+        current = (rel && rel->parent != entt::null) ? rel->parent : entt::null;
+    }
+    // 从根到叶累乘
+    glm::mat4 world(1.0f);
+    for (int i = depth - 1; i >= 0; --i) {
+        if (auto* tx = registry.try_get<TransformComponent>(chain[i])) {
+            world *= tx->getTransform();
+        }
+    }
+    return world;
+}
+
 // ============================================================
 // 渲染组件 (Rendering Components)
 // ============================================================
@@ -109,6 +140,15 @@ struct MeshRendererComponent {
 };
 
 /**
+ * @brief Alpha 混合模式
+ */
+enum class AlphaMode {
+    Opaque = 0,   // 不透明（默认）
+    Mask = 1,     // alpha 测试：alpha < cutoff 的片元 discard（植被叶子）
+    Blend = 2     // alpha 混合：半透明，进入透明渲染队列（back-to-front 排序）
+};
+
+/**
  * @brief PBR 材质组件 - 物理材质属性
  */
 struct PBRMaterialComponent {
@@ -118,7 +158,12 @@ struct PBRMaterialComponent {
     float ao = 1.0f;
     glm::vec3 emissive = { 0.0f, 0.0f, 0.0f };
     float emissiveStrength = 0.0f;
-    
+
+    // 透明度（glTF: baseColorFactor.a / OBJ mtl: d dissolve）
+    float opacity = 1.0f;
+    AlphaMode alphaMode = AlphaMode::Opaque;
+    float alphaCutoff = 0.5f;   // 仅 Mask 模式使用
+
     // 纹理路径
     std::string albedoMap;
     std::string normalMap;
@@ -126,6 +171,9 @@ struct PBRMaterialComponent {
     std::string roughnessMap;
     std::string aoMap;
     std::string emissiveMap;
+
+    /// 是否进入透明渲染队列
+    bool isTransparent() const { return alphaMode == AlphaMode::Blend && opacity < 1.0f; }
 };
 
 // ============================================================

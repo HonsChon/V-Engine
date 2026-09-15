@@ -22,6 +22,14 @@
   - 内置 SSR 反射（高效的逐水面像素计算）
   - 智能深度遮挡（结合世界高度 + 深度比较）
   - Fresnel 效应 + 边缘软化
+- **半透明渲染** - 三模式 alpha（Opaque / Mask alpha-test / Blend 混合）
+  - 透明物体按相机距离 back-to-front 排序
+  - **两遍绘制**（背面 → 正面）保证凸网格正确的混合顺序
+  - 延迟模式下 TransparentPass 采样 GBuffer 深度做手动剔除
+  - 双面光照（`gl_FrontFacing` 法线翻转）
+- **FXAA 抗锯齿** - 后处理抗锯齿，前向/延迟双模式
+  - 场景渲染到离屏目标 → FXAA 全屏合成 → UI（界面文字保持锐利）
+  - DebugPanel 实时开关对比
 - **Push Constants** - 高频数据传输，支持每实体独立变换矩阵
 
 ### 🚀 GPU-Driven / Nanite 系统
@@ -37,7 +45,8 @@
   - 屏幕空间误差计算
   - DAG 层级遍历（父子 Cluster 关系）
   - 互斥渲染（避免 Z-Fighting）
-- **间接绘制** - `vkCmdDrawIndexedIndirect` 减少 CPU-GPU 通信
+- **GPU-driven 间接绘制** - RHI `drawIndirect`（Vulkan/DX12 双后端）：
+  GPU 展开可见 cluster 几何后单次 draw call，绘制路径零 CPU 回读
 
 ### 🏗️ 引擎架构 (v1.0 新架构)
 - **模块化设计** - 参考 Unreal Engine 架构，职责清晰分离
@@ -45,15 +54,27 @@
 - **RHI 抽象层** - Vulkan 资源管理与同步抽象
 - **SceneRenderer** - 渲染通道调度器，管理多 Pass 渲染流程
 - **射线拾取** - 基于 AABB 包围盒的鼠标点击选择
-- **场景层级** - 带变换继承的场景图系统
+- **场景层级** - 带变换继承的场景图系统（父子链世界矩阵）
 - **相机系统** - FPS 风格的第一人称相机控制
+
+### 📦 资产与场景工作流
+- **模型导入** - OBJ（含 .mtl 材质）+ glTF/glTF-Binary（保留节点层级）
+  - glTF 场景图 → ECS 父子实体树，逐 primitive 材质映射
+  - meshId 惰性加载（`path#mesh_prim`），场景重开无需重新导入
+  - 内置 Sponza（Khronos 官方 glTF 版）等测试资产
+- **场景序列化** - JSON 格式 `.vscene` 场景保存/加载
+  - 父子关系用 UUID 引用，按 Hierarchy 顺序确定性保存
+  - 序列化组件：Tag/Transform/MeshRenderer/PBRMaterial/Light/Camera
+- **启动恢复** - 记住上次打开的场景（`editor_settings.json`）
+- **命令行工具** - `--scene`/`--import`/`--save` 启动参数，支持自动化验证
 
 ### 🖥️ 编辑器功能
 - **ImGui 集成** - 现代化编辑器 UI
-- **实时调试面板** - FPS、顶点数、三角形数统计
-- **场景层级面板** - 可视化场景结构，支持选择和展开
-- **属性检查器** - 实时编辑实体的变换、材质等属性
-- **资源浏览器** - 文件系统浏览，支持资源预览
+- **实时调试面板** - FPS、顶点数、三角形数统计、FXAA 开关
+- **场景层级面板** - 可视化场景结构，支持选择/展开/拖拽改父级/复制
+- **属性检查器** - 实时编辑变换、网格、PBR 材质（含透明度/alpha 模式）
+- **资源浏览器** - 文件系统浏览，双击导入模型/打开场景
+- **File 菜单** - New/Open/Save/Save As + 原生文件对话框（Ctrl+N/O/S）
 
 ### 🔧 开发特性
 - **热重载** - 支持拖拽加载 OBJ 模型
@@ -93,11 +114,12 @@ VEngine/
 │   │   │   └── NaniteManager.*       # 全局管理器 (GPU 缓冲)
 │   │   └── passes/               # 渲染通道 (模块化)
 │   │       ├── RenderPassBase.h      # 渲染通道基类
-│   │       ├── RenderContext.h       # 渲染上下文 (矩阵、时间等)
 │   │       ├── ComputePassBase.*     # 计算通道基类
-│   │       ├── ForwardPass.*         # 前向渲染通道
+│   │       ├── ForwardPass.*         # 前向渲染通道 (opaque + 透明两遍)
 │   │       ├── GBufferPass.*         # G-Buffer 通道 (延迟渲染)
-│   │       ├── LightingPass.*        # �光照通道
+│   │       ├── LightingPass.*        # 光照通道
+│   │       ├── TransparentPass.*     # 半透明前向通道 (延迟模式)
+│   │       ├── FXAAPass.*            # FXAA 后处理抗锯齿
 │   │       ├── SSRPass.*             # 屏幕空间反射通道
 │   │       ├── WaterPass.*           # 水面渲染通道
 │   │       ├── ClusterCullingPass.*  # Nanite Cluster 剔除
@@ -108,17 +130,19 @@ VEngine/
 │   ├── scene/                    # ECS 场景管理
 │   │   ├── Scene.*               # 场景容器 (管理 EnTT Registry)
 │   │   ├── Entity.*              # 实体封装 (EnTT 友好接口)
-│   │   ├── Components.h          # ECS 组件定义
+│   │   ├── Components.h          # ECS 组件定义 (含 alpha 模式/世界矩阵)
+│   │   ├── SceneSerializer.*     # JSON 场景序列化 (.vscene)
 │   │   ├── SceneManager.*        # 场景生命周期管理
 │   │   ├── RayPicker.*           # 射线拾取 (3D 物体选择)
 │   │   └── SelectionManager.*    # 选择状态管理
 │   │
 │   ├── resources/                # 资源管理
 │   │   ├── Mesh.*                # 网格几何体
-│   │   ├── Material.*            # 材质资源
-│   │   ├── MeshManager.h         # 网格缓存管理器
-│   │   ├── TextureManager.h      # 纹理缓存管理器
-│   │   └── RenderSystem.h        # ECS 渲染系统组件
+│   │   ├── MeshManager.*         # 网格缓存管理器 (glTF 惰性加载)
+│   │   ├── ModelImporter.*       # 模型导入 (OBJ .mtl + glTF 层级)
+│   │   ├── AssetPath.h           # 资源路径兜底解析
+│   │   ├── TextureManager.*      # 纹理缓存管理器
+│   │   └── RenderSystem.h        # ECS 渲染系统 (透明分桶排序)
 │   │
 │   ├── World/                    # 世界系统
 │   │   └── Camera.*              # 相机系统
@@ -135,28 +159,39 @@ VEngine/
 │   ├── Core/                     # 核心工具
 │   │   └── Utils.*               # 通用工具函数
 │   │
-│   └── main.cpp                  # 程序入口
+│   ├── third_party/              # 第三方库 (内嵌源码)
+│   │   ├── imgui/                # ImGui (Vulkan/DX12/GLFW 后端)
+│   │   ├── tiny_gltf.h           # glTF 解析 (单头文件)
+│   │   ├── tiny_obj_loader.h     # OBJ 解析 (单头文件)
+│   │   ├── stb_image.h           # 图像加载 (单头文件)
+│   │   └── nfd/                  # 原生文件对话框 (NFD-extended)
+│   │
+│   └── main.cpp                  # 程序入口 (--scene/--import/--save)
 │
 ├── shaders/                      # GLSL 着色器
-│   ├── pbr.vert/frag             # PBR 前向渲染
+│   ├── pbr.vert/frag             # PBR 前向渲染 (含三模式 alpha)
+│   ├── transparent.frag          # 延迟模式半透明 (GBuffer 深度剔除)
+│   ├── fxaa.vert/frag            # FXAA 抗锯齿
 │   ├── gbuffer.vert/frag         # G-Buffer 几何通道
 │   ├── deferred_lighting.vert/frag  # 延迟光照通道
 │   ├── ssr.vert/frag             # 屏幕空间反射
 │   ├── water.vert/frag           # 水面着色器
 │   └── nanite/                   # Nanite 专用着色器
-│       ├── cluster_culling.comp  # Cluster 剔除计算着色器
-│       └── cluster_debug.*       # 调试可视化着色器
+│       ├── cluster_culling.comp         # Cluster 剔除计算着色器
+│       ├── build_visible_geometry.comp  # 可见几何 GPU 展开 (间接绘制)
+│       └── cluster_debug.*              # 调试可视化着色器
 │
 ├── docs/                         # 项目文档
 │   ├── README.md                 # 文档索引
-│   ├── architecture/             # 架构设计文档
-│   ├── core/                     # 核心系统文档
-│   ├── gpu-driven-rendering/     # GPU 驱动渲染文档
-│   └── nanite/                   # Nanite 系统文档
+│   ├── Scene-Management-System.md # 场景系统 (含序列化)
+│   └── ...                       # 架构/DX12/Nanite 文档
 │
 ├── assets/                       # 资源文件
 │   ├── Earth/                    # 地球模型和纹理
-│   └── UFO/                      # UFO 模型和纹理
+│   ├── UFO/                      # UFO 模型和纹理
+│   ├── Sponza/                   # Sponza 中庭 (Khronos glTF)
+│   ├── TestModels/               # glTF 层级测试模型
+│   └── scenes/                   # 示例 .vscene 场景
 │
 └── build/                        # 构建输出
     └── bin/                      # 可执行文件
@@ -451,6 +486,9 @@ private:
 | ImGui | 编辑器 UI |
 | stb_image | 图像加载 |
 | tinyobjloader | OBJ 模型加载 |
+| tinygltf | glTF 模型加载 (含 .glb) |
+| nlohmann-json | 场景序列化 (vcpkg) |
+| nativefiledialog-extended | 原生文件对话框 |
 
 ### Windows 构建
 
@@ -521,19 +559,29 @@ make -j$(sysctl -n hw.ncpu)
 - [x] **GPU-Driven / Nanite** - GPU 视锥剔除、Mesh Clustering、动态 LOD
 - [x] **编辑器 UI** - ImGui 集成，多面板布局
 
+### ✅ 已完成 (v1.2.0) - 资产工作流 + 半透明渲染
+- [x] **模型导入** - OBJ(.mtl) + glTF(.glb) 节点层级导入，逐 primitive 材质
+- [x] **场景序列化** - JSON `.vscene` 保存/加载，UUID 层级引用
+- [x] **世界变换继承** - 父子链世界矩阵（渲染/剔除/拾取全路径）
+- [x] **编辑器工作流** - File 菜单 + 原生对话框 + Ctrl+N/O/S + 启动恢复上次场景
+- [x] **半透明渲染** - Opaque/Mask/Blend 三模式、back-to-front 排序、
+      两遍绘制（背面→正面）、延迟模式 GBuffer 深度手动剔除
+- [x] **FXAA 抗锯齿** - 离屏合成 + UI 前绘制，双渲染模式可用
+- [x] **glTF alpha 模式** - alphaMode/alphaCutoff 导入（Sponza 植被镂空）
+
 ### 🔄 进行中 (v1.1.0)
 - [ ] **网格简化算法** - 边折叠（Edge Collapse）生成多级 Cluster
 - [ ] **屏幕空间误差 LOD** - 基于投影像素误差的精确 LOD 选择
 - [ ] **Visibility Buffer** - 延迟材质着色，进一步减少 overdraw
 
-### 🚀 计划中 (v1.2.0)
-- [ ] **多光源支持** - 点光源、聚光灯、方向光数组
+### 🚀 计划中 (v1.3.0)
+- [ ] **多光源支持** - 点光源、聚光灯、方向光数组 (LightComponent 已可序列化)
 - [ ] **阴影系统** - Shadow Mapping / Cascaded Shadow Maps (CSM)
 - [ ] **环境光遮蔽** - Screen-Space Ambient Occlusion (SSAO)
-- [ ] **后处理管线** - Bloom, Tone Mapping, Anti-Aliasing (FXAA/TAA)
+- [ ] **后处理管线** - Bloom, Tone Mapping, TAA (FXAA 已完成)
 - [ ] **天空盒系统** - HDR 环境贴图 + IBL (基于图像的光照)
 - [ ] **材质编辑器** - 节点式材质编辑，实时预览
-- [ ] **场景序列化** - JSON 格式场景保存/加载
+- [ ] **OIT 透明** - Weighted Blended 顺序无关透明（当前为对象级排序近似）
 
 ### 🌟 长期规划 (v2.0+)
 - [ ] **骨骼动画** - Skinned Mesh Animation + 动画状态机

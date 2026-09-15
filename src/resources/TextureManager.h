@@ -2,6 +2,7 @@
 
 #include "RHITexture.h"
 #include "RHISampler.h"
+#include "AssetPath.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -65,18 +66,21 @@ public:
         if (texturePath.empty()) {
             return m_defaultWhiteTexture;
         }
-        
-        auto it = m_textureCache.find(texturePath);
+
+        // 路径归一化：序列化场景重开时工作目录可能变化（见 AssetPath.h）
+        std::string key = resolveAssetPath(texturePath);
+
+        auto it = m_textureCache.find(key);
         if (it != m_textureCache.end()) {
             return it->second;
         }
-        
-        auto texture = loadTexture(texturePath);
+
+        auto texture = loadTexture(key);
         if (texture) {
-            m_textureCache[texturePath] = texture;
+            m_textureCache[key] = texture;
             return texture;
         }
-        
+
         return m_defaultWhiteTexture;
     }
     

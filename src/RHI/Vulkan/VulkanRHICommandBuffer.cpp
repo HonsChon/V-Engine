@@ -145,6 +145,26 @@ void VulkanRHICommandBuffer::drawIndexedIndirect(RHIBuffer* buffer, uint64_t off
     vkCmdDrawIndexedIndirect(cmd_, vkBuf->getVkBuffer(), offset, drawCount, stride);
 }
 
+void VulkanRHICommandBuffer::drawIndirect(RHIBuffer* buffer, uint64_t offset,
+                                           uint32_t drawCount, uint32_t stride) {
+    auto* vkBuf = static_cast<VulkanRHIBuffer*>(buffer);
+    vkCmdDrawIndirect(cmd_, vkBuf->getVkBuffer(), offset, drawCount, stride);
+}
+
+void VulkanRHICommandBuffer::drawIndexedIndirectCount(RHIBuffer* buffer, uint64_t offset,
+                                                       RHIBuffer* countBuffer, uint64_t countOffset,
+                                                       uint32_t maxDrawCount, uint32_t stride) {
+    if (!device_->isDrawIndirectCountSupported() || !device_->getVkCmdDrawIndexedIndirectCount()) {
+        throw std::runtime_error("[VulkanRHICommandBuffer] drawIndexedIndirectCount requires "
+                                 "VK_KHR_draw_indirect_count (not supported on this device)");
+    }
+    auto* vkBuf = static_cast<VulkanRHIBuffer*>(buffer);
+    auto* vkCount = static_cast<VulkanRHIBuffer*>(countBuffer);
+    device_->getVkCmdDrawIndexedIndirectCount()(cmd_, vkBuf->getVkBuffer(), offset,
+                                                vkCount->getVkBuffer(), countOffset,
+                                                maxDrawCount, stride);
+}
+
 // ---- Compute commands ----
 
 void VulkanRHICommandBuffer::dispatch(uint32_t groupCountX, uint32_t groupCountY,
