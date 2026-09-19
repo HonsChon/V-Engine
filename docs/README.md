@@ -33,7 +33,8 @@
 
 | 文档 | 描述 |
 |------|------|
-| [SSR & Water Rendering](SSR_Water_Rendering.md) | 屏幕空间反射与水体渲染 |
+| [SSR & Water Rendering](SSR_Water_Rendering.md) | 屏幕空间反射与水体渲染（含平面反射算法） |
+| [Planar Reflection Dev Log](Planar-Reflection-Dev-Log.md) | 水面平面反射开发实录——五轮调试、三次误诊与经验教训 |
 
 ---
 
