@@ -33,9 +33,13 @@
     （区分真实穿越与从物体后方掠过轮廓的误命中）
   - 二分搜索细化命中点
   - 已知局限：无法反射被前景遮挡/屏幕外的几何，轮廓处有原理性歧义
-    （详见 [docs/SSR_Water_Rendering.md](docs/SSR_Water_Rendering.md)）
+    （水面已默认改用平面反射消除此类问题，SSR 保留为可切换回退，
+    详见 [docs/SSR_Water_Rendering.md](docs/SSR_Water_Rendering.md)）
 - **水面渲染** - 波纹动画 + 反射/折射 + 深度融合
-  - 内置 SSR 反射（高效的逐水面像素计算）
+  - **平面反射**（默认）- 镜像相机 + Lengyel 斜近裁剪投影 + 半分辨率反射 RT，
+    恒等屏幕 UV 投影采样：精确、无步进、无遮挡/屏幕外/轮廓歧义
+    （遮挡/屏幕外几何、SSR 固有伪影全部消除，业界标准做法）
+  - SSR 回退模式（逐水面像素屏幕空间步进，DebugPanel 实时切换对比）
   - 智能深度遮挡（结合世界高度 + 深度比较）
   - Fresnel 效应 + 边缘软化
 - **半透明渲染** - 三模式 alpha（Opaque / Mask alpha-test / Blend 混合）
@@ -137,6 +141,7 @@ VEngine/
 │   │       ├── GBufferPass.*         # G-Buffer 通道 (延迟渲染)
 │   │       ├── LightingPass.*        # 光照通道
 │   │       ├── TransparentPass.*     # 半透明前向通道 (延迟模式)
+│   │       ├── ReflectionPass.*      # 水面平面反射通道 (镜像相机, 半分辨率 RT)
 │   │       ├── FXAAPass.*            # FXAA 后处理抗锯齿
 │   │       ├── SSRPass.*             # 屏幕空间反射通道
 │   │       ├── WaterPass.*           # 水面渲染通道
@@ -396,6 +401,13 @@ private:
 │  └──────────────────────────────────────────────────────────┘   │
 │                              │                                   │
 │                              ▼                                   │
+│  Pass 2.5: Reflection Pass (镜像相机 → 半分辨率 RT)          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  输入: 场景几何体 (不透明+Mask)                            │   │
+│  │  输出: 反射 RT (斜近裁剪剔除水下几何)                      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
 │  Pass 3: Lighting Pass (Fullscreen Quad)                        │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  输入: G-Buffer (Position, Normal, Albedo)               │   │
@@ -407,7 +419,7 @@ private:
 │                              ▼                                   │
 │  Pass 4: Water Pass                                             │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  输入: SSR Reflection + Scene Depth + Scene Color        │   │
+│  │  输入: 反射 RT (平面反射, 恒等 UV 采样) + Scene Depth    │   │
 │  │  输出: Final Water Surface                                │   │
 │  │  特效: 波纹动画 + 反射 + 折射                             │   │
 │  └──────────────────────────────────────────────────────────┘   │
@@ -623,13 +635,26 @@ make -j$(sysctl -n hw.ncpu)
 - [x] **SSR 穿透修复** - 穿越检测 + 深度连续性守卫；确认遮挡区域反射
       （如物体背后墙面）为 SSR 固有局限，出路为平面反射（见计划）
 
+### ✅ 已完成 (v1.3.0) - 水面平面反射
+- [x] **ReflectionPass** - 镜像相机（绕 y=waterHeight 反射）将场景渲染到
+      半分辨率反射 RT（复用 pbr 着色器，零新场景 shader，双后端一致）
+- [x] **Lengyel 斜近裁剪投影** - 以水面为近裁剪面剔除水下几何（纯 CPU 矩阵技巧）
+- [x] **恒等屏幕 UV 采样** - 镜像相机与主相机共享投影 → 水面点在两幅图像中
+      屏幕位置相同，water.frag 直接投影采样 + 波纹扰动
+- [x] **绕序处理** - 镜像矩阵翻转屏幕绕序；管线保持 frontFace=CounterClockwise
+      （RenderDoc 实测验证：Clockwise 会误渲染远侧内表面，倒影内容错半球）
+- [x] **水场景展示位姿** - 进入水场景（按 5）自动设置俯视机位，物体与完整倒影同框
+      （低机位平视时倒影在 45° FOV 外属物理正确，非缺陷）
+- [x] **SSR 保留可切换** - DebugPanel「Water Reflection」开关 + 扰动滑条
+- [x] **resize 修复** - 延迟管线各 pass（GBuffer/SceneColor/Water/SSR/反射）
+      重建与纹理重挂接线
+      （v1.2 的 SSR 穿透修复记录了固有局限 → 平面反射从机制上全部消除）
+
 ### 🔄 进行中 (v1.1.0)
 - [ ] **Visibility Buffer** - 延迟材质着色，进一步减少 overdraw
       （网格简化/误差 LOD/GPU-driven 间接绘制已完成，见 v0.11-0.12）
 
-### 🚀 计划中 (v1.3.0)
-- [ ] **水面平面反射** - 镜像相机 + 半分辨率反射 RT 替代 SSR 步进，
-      平坦水面精确反射（遮挡/屏幕外/轮廓歧义全部消除，业界标准做法）
+### 🚀 计划中 (v1.3.x)
 - [ ] **多光源支持** - 点光源、聚光灯、方向光数组 (LightComponent 已可序列化)
 - [ ] **阴影系统** - Shadow Mapping / Cascaded Shadow Maps (CSM)
 - [ ] **后处理管线** - Bloom, Tone Mapping, TAA (FXAA 已完成)

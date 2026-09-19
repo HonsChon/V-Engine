@@ -45,6 +45,12 @@ struct EngineConfig {
     std::vector<int> autotestKeys;
     double autotestInterval = 3.0;
     double autotestSeconds = 0.0;
+
+    // 相机覆盖（--cam x,y,z,yaw,pitch）：自动化验证用固定初始位姿
+    bool camOverride = false;
+    float camPos[3] = {0.0f, 0.0f, 5.0f};
+    float camYaw = -90.0f;    // -90 = 面向 -Z（默认相机朝向）
+    float camPitch = 0.0f;
 };
 
 class Engine {

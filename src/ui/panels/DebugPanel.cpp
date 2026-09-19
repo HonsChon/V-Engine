@@ -119,6 +119,12 @@ void DebugPanel::render() {
             ImGui::Checkbox("Enable FXAA", &renderSettings->enableFXAA);
         }
 
+        // === 水面反射设置（WaterScene 模式）===
+        if (ImGui::CollapsingHeader("Water Reflection")) {
+            ImGui::Checkbox("Planar Reflection (off = SSR)", &renderSettings->waterPlanarReflection);
+            ImGui::SliderFloat("Distortion", &renderSettings->waterReflectionDistortion, 0.0f, 3.0f, "%.2f");
+        }
+
         // === Nanite (Cluster Vis) 设置 ===
         if (ImGui::CollapsingHeader("Nanite (Cluster Vis)")) {
             ImGui::Checkbox("GPU LOD Selection", &renderSettings->naniteLODSelection);

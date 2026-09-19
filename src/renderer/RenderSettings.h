@@ -30,6 +30,10 @@ struct RenderSettings {
     bool enableGPUCulling = true;
     bool enableFXAA = true;      // FXAA 后处理抗锯齿（关闭时直通）
 
+    // 水面反射（WaterScene 模式）
+    bool waterPlanarReflection = true;      // true=平面反射 RT / false=SSR 步进
+    float waterReflectionDistortion = 1.0f; // 平面反射波纹扰动强度
+
     // Debug options
     bool showClusterVisualization = false;
 

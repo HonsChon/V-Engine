@@ -128,6 +128,13 @@ void Engine::initializeSubsystems() {
 
     // 6. Camera
     m_camera = std::make_unique<Camera>(glm::vec3(0.0f, 0.0f, 5.0f));
+    if (m_config.camOverride) {
+        m_camera->setPosition(glm::vec3(m_config.camPos[0], m_config.camPos[1], m_config.camPos[2]));
+        m_camera->setOrientation(m_config.camYaw, m_config.camPitch);
+        std::cout << "[Engine] Camera override: pos(" << m_config.camPos[0] << "," << m_config.camPos[1]
+                  << "," << m_config.camPos[2] << ") yaw=" << m_config.camYaw
+                  << " pitch=" << m_config.camPitch << "\n";
+    }
     std::cout << "[Engine] Camera created\n";
 
     // 7. Scene
@@ -220,14 +227,10 @@ void Engine::createDefaultScene() {
     ufoMat.normalMap = "../../assets/UFO/textures/UFO_nmap.jpg";
     ufoMat.metallicMap = "../../assets/UFO/textures/UFO_metalness.jpg";
 
-    // Plane
-    auto planeEntity = m_scene->createEntity("Plane");
-    planeEntity.addComponent<VEngine::MeshRendererComponent>("plane", "plane_material");
-    auto& planeTx = planeEntity.getComponent<VEngine::TransformComponent>();
-    planeTx.position = glm::vec3(0.0f, -1.5f, 0.0f);
-    planeEntity.addComponent<VEngine::PBRMaterialComponent>();
-
-    std::cout << "[Engine] Default scene created (3 entities)\n";
+    // 注：不再创建共面地面 Plane——它 y=-1.5 与水面完全共面，作为不透明几何
+    // 写入 GBuffer 后会把水面 alpha 压到近 0（water.frag 深度遮挡的共面分支），
+    // 挡住水面反射。水面本身即承担地面职责。
+    std::cout << "[Engine] Default scene created (2 entities: Sphere + UFO)\n";
 }
 
 // ============================================================
@@ -340,6 +343,14 @@ void Engine::handleKey(int key) {
             std::cout << "[Engine] → Water Scene (Deferred)\n";
             if (!m_renderer->isDeferredInitialized())
                 m_renderer->initDeferredShading();
+            // 展示位姿：倒影俯角 ≈ atan((眼高+物高)/距离) 远大于直接视角，
+            // 低机位平视时倒影基本在 45° FOV 画框外（需俯视才可见）。
+            // 抬高机位 + 俯角让物体与完整倒影同框，开箱即见平面反射效果。
+            // --cam 覆盖时不重置（自动化验证需要固定自定义位姿）
+            if (m_camera && !m_config.camOverride) {
+                m_camera->setPosition(glm::vec3(0.0f, 3.0f, 6.0f));
+                m_camera->setOrientation(-90.0f, -25.0f);
+            }
         } else {
             settings.renderMode = RenderMode::Normal;
             std::cout << "[Engine] → Normal (Forward)\n";

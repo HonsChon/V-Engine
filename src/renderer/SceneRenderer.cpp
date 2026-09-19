@@ -16,6 +16,7 @@
 #include "GBufferPass.h"
 #include "LightingPass.h"
 #include "TransparentPass.h"
+#include "ReflectionPass.h"
 #include "FXAAPass.h"
 #include "SSRPass.h"
 #include "WaterPass.h"
@@ -46,6 +47,7 @@
 #include <iostream>
 #include <array>
 #include <algorithm>
+#include <glm/gtc/matrix_transform.hpp>
 
 // ============================================================
 // 构造 & 析构
@@ -133,6 +135,13 @@ void SceneRenderer::initDeferredShading() {
         m_waterPass->setWaterColor(glm::vec3(0.0f, 0.4f, 0.6f), 0.7f);
         std::cout << "  Water Pass created\n";
 
+        // 3.2 平面反射（镜像相机 → 半分辨率 RT；复用 ForwardPass 材质布局）
+        if (m_forwardPass) {
+            m_reflectionPass = std::make_unique<ReflectionPass>(
+                m_rhiDevice, w, h, m_forwardPass->getMaterialLayout(), MAX_FRAMES_IN_FLIGHT);
+            std::cout << "  Reflection Pass created (planar, half-res RT)\n";
+        }
+
         // 3.5 Transparent（延迟模式半透明前向绘制，复用 ForwardPass 材质布局）
         if (m_forwardPass) {
             m_transparentPass = std::make_unique<TransparentPass>(
@@ -190,6 +199,14 @@ void SceneRenderer::initDeferredShading() {
             std::cout << "  Water Pass descriptors bound (Pure RHI)\n";
         }
 
+        // 11. Bind reflection RT to WaterPass (binding 5)
+        if (m_waterPass && m_reflectionPass) {
+            m_waterPass->setReflectionTexture(
+                m_reflectionPass->getReflectionTexture(),
+                m_reflectionPass->getReflectionSampler());
+            std::cout << "  Water Pass reflection RT bound (Pure RHI)\n";
+        }
+
         m_deferredInitialized = true;
         std::cout << "[SceneRenderer] Deferred shading initialized!\n";
 
@@ -205,6 +222,7 @@ void SceneRenderer::cleanupDeferredShading() {
 
     cleanupSceneColorImage();
     m_waterPass.reset();
+    m_reflectionPass.reset();
     m_ssrPass.reset();
     m_ssaoPass.reset();
     m_transparentPass.reset();
@@ -322,6 +340,57 @@ glm::mat4 SceneRenderer::applyApiYFlip(const glm::mat4& proj) const {
     return proj;
 }
 
+glm::mat4 SceneRenderer::makeObliqueProjection(const glm::mat4& proj, const glm::vec4& clipPlane) const {
+    // 斜近裁剪投影 —— [0,1] 深度约定版（适配本引擎实际生效的 API 裁剪区间）
+    //
+    // ⚠ 根因背景（RenderDoc + 数值分析定位，2026/09/17）：
+    //   引擎未定义 GLM_FORCE_DEPTH_ZERO_TO_ONE，投影矩阵产出 GL 约定
+    //   z_ndc ∈ [-1,1]，而 Vulkan/DX12 均按 [0,1] 裁剪。普通渲染该错配
+    //   只影响距相机 <0.2 单位的区域（无感）；但 Lengyel 原式把裁剪平面
+    //   映射到 z_ndc = -1（GL 近平面），平面正侧一大段带落入 [-1,0) 被
+    //   API 硬裁——平面反射中表现为"贴水带整段消失，只剩远水一半"。
+    //   Vulkan 上投影 Y 翻转还使原式 D=dot(C,q)<0，方向再反转。
+    //
+    // [0,1] 约定推导（列向量，clip = P·v）：
+    //   近测试为 z_clip ≥ 0 → 直接令第三行 r = k·C（平面自然映射到
+    //   z_clip = 0，正侧 C·p>0 得正 z ✓ 无 GL 式的 +1 偏移）。
+    //   比例 k 由远角钉扎确定：取远平面角落 Q = P⁻¹·(±sgnCx,±sgnCy,1,1)
+    //   （该点 z_clip 旧值 = 1，w_clip = 1），令 k·(C·Q) = 1 → k = 1/dot(C,Q)。
+    //   角点符号选使 dot(C,Q) > 0 的角——自动兼容 Vulkan Y 翻转与 DX12
+    //   （翻转使 D 变号时取对侧角，两后端数值一致）。
+    //   相机空间约定：C 正侧为可见侧（水上），相机须在负侧（水下镜像机位）。
+    //
+    // 数值自检（Vulkan 翻转矩阵，C=(0,-1,0,-1.52)，相机(0,0,8)）：
+    //   球底 cam(0,-2,-8,1) → z_clip=+1.20, w=8, z_ndc=0.15 ∈[0,1] ✓
+    //   球顶 cam(0,-4,-8,1) → z_ndc=0.78 ✓   水下点 → z_clip<0 被裁 ✓
+    auto sgn = [](float v) { return v > 0.0f ? 1.0f : (v < 0.0f ? -1.0f : 0.0f); };
+
+    glm::mat4 m = proj;
+    glm::mat4 invP = glm::inverse(proj);
+
+    glm::vec4 Q = invP * glm::vec4(sgn(clipPlane.x), sgn(clipPlane.y), 1.0f, 1.0f);
+    float D = glm::dot(clipPlane, Q);
+    if (D < 0.0f) {
+        // Vulkan Y 翻转会变号 → 取对侧远角（该角 dot>0 且同样是远平面角落）
+        Q = invP * glm::vec4(-sgn(clipPlane.x), -sgn(clipPlane.y), 1.0f, 1.0f);
+        D = glm::dot(clipPlane, Q);
+    }
+    if (std::abs(D) < 1e-8f) return proj;   // 退化保护：平面穿过远角落
+
+    // k = 1/D。钳制上限：角仰角趋近水平（相机接近水面出画的仰角）时 D→0、
+    // k→∞，倾斜远平面压垮一切反射内容（表现为转动相机时倒影突然消失/闪烁）。
+    // row = k·C 对任意 k>0 都精确映射水面到 z=0（水下剔除不受影响），k 只
+    // 决定远平面倾斜度；水面入画时反射内容的 C·p/w 理论极限 ≈ tan45° = 1，
+    // kmax = 1.5（约束 0.67）覆盖全部可见内容，RT 深度无后续消费，安全。
+    float k = glm::min(1.0f / D, 1.5f);
+    glm::vec4 r = clipPlane * k;             // 新第三行 = k·C
+    m[0][2] = r.x;
+    m[1][2] = r.y;
+    m[2][2] = r.z;
+    m[3][2] = r.w;
+    return m;
+}
+
 void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     if (!m_camera) return;
 
@@ -379,8 +448,55 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
             m_transparentPass->updateUniformBuffer(frameIndex, tUbo);
         }
 
+        // 平面反射：镜像相机 + 斜近裁剪投影
+        if (m_reflectionPass) {
+            float waterHeight = m_waterPass ? m_waterPass->getWaterHeight() : 0.0f;
+            ReflectionPass::UniformBufferObject reflUBO{};
+            reflUBO.lightPos = glm::vec4(lightPos, 1.0f);
+            reflUBO.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
+
+            if (camPos.y > waterHeight + 0.05f) {
+                m_cameraAboveWater = true;
+                // 绕 y=waterHeight 的镜像矩阵：p.y' = 2h - p.y
+                glm::mat4 mirror =
+                    glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f * waterHeight, 0.0f)) *
+                    glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, -1.0f, 1.0f));
+                glm::mat4 reflView = view * mirror;
+                glm::vec3 reflCamPos(camPos.x, 2.0f * waterHeight - camPos.y, camPos.z);
+                // 世界空间水面平面 (0,1,0,-h)（正侧=水上）→ 镜像相机空间。
+                // +0.02 偏置：与水面共面的几何（如默认场景的地面 Plane）恰好
+                // 落在裁剪边界上会逐像素随机裁剪 → 反射中出现闪烁条纹；
+                // 抬高裁剪面使其稳定落在被裁侧
+                glm::vec4 clipPlane = glm::transpose(glm::inverse(reflView)) *
+                                      glm::vec4(0.0f, 1.0f, 0.0f, -(waterHeight + 0.02f));
+                reflUBO.view = reflView;
+                // 反射专用基础投影：远平面加长到 1000。斜裁剪会使远平面绕
+                // 「水面∩远平面」交线倾斜，倾斜程度 ∝ h/far —— far=100 时
+                // 崩溃带约 h/far 弧度宽（水面尚未转出画框，倒影先消失/被裁）；
+                // far=1000 将其压缩到 ~0.26°，恰好贴合水面物理出画的位置。
+                // 主画面各 pass 的 far=100 不受影响。
+                auto reflExtent = m_swapChain->getExtent();
+                float reflAspect = reflExtent.width / (float)reflExtent.height;
+                glm::mat4 reflProjBase = applyApiYFlip(glm::perspective(
+                    fov, reflAspect, 0.1f, 1000.0f));
+                reflUBO.proj = makeObliqueProjection(reflProjBase, clipPlane);
+                reflUBO.viewPos = glm::vec4(reflCamPos, 1.0f);
+            } else {
+                // 相机在水下：镜像相机无效（斜近裁剪要求相机在平面负侧），
+                // 本帧只清屏，水面采样到天空色回退
+                m_cameraAboveWater = false;
+                reflUBO.view = view;
+                reflUBO.proj = proj;
+                reflUBO.viewPos = glm::vec4(camPos, 1.0f);
+            }
+            m_reflectionPass->updateUniformBuffer(frameIndex, reflUBO);
+        }
+
         // Water & SSR
         if (m_waterPass) {
+            m_waterPass->setReflectionParams(
+                m_settings.waterPlanarReflection ? 1.0f : 0.0f,
+                m_settings.waterReflectionDistortion);
             m_waterPass->updateUniforms(view, proj, camPos, m_totalTime, frameIndex);
         }
         if (m_ssrPass) {
@@ -619,6 +735,13 @@ void SceneRenderer::recordDeferredCommands(RHICommandBuffer* cmd, uint32_t image
     }
     m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
+    // === Pass 2.5: 平面反射（镜像相机 → 半分辨率 RT，WaterPass 采样）===
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Planar Reflection", 0.8f, 0.5f, 0.2f, 1.0f);
+    if (m_reflectionPass && m_renderSystem && m_settings.waterPlanarReflection) {
+        m_reflectionPass->render(cmd, m_renderSystem, frameIndex, m_cameraAboveWater);
+    }
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+
     // === Pass 3: Final Composition (Swapchain RenderPass) ===
     m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Final Composition", 0.9f, 0.4f, 0.1f, 1.0f);
     {
@@ -746,10 +869,43 @@ void SceneRenderer::onResize(uint32_t width, uint32_t height) {
     // Vulkan RP 兼容性下管线仍有效（与既有 resize 行为一致）
     if (m_ssaoPass) {
         m_ssaoPass->resize(width, height);
-        // SSAO re-binding deferred until SSAOPass is fully migrated to RHI
-        // if (m_lightingPass) {
-        //     m_lightingPass->setSSAOTexture(...);
-        // }
+    }
+
+    // 延迟管线的 RT（GBuffer/SceneColor/Water/SSR/Reflection）统一重建并重绑。
+    // 修复：此前这些 pass 的 resize 未接线，窗口缩放后延迟管线保持旧尺寸
+    // （blit 尺寸不匹配 / 采样错位）。
+    if (m_deferredInitialized) {
+        if (m_gbuffer) {
+            m_gbuffer->resize(width, height);
+        }
+        cleanupSceneColorImage();
+        createSceneColorImage();
+        if (m_waterPass)  m_waterPass->resize(width, height);
+        if (m_ssrPass)    m_ssrPass->resize(width, height);
+        if (m_reflectionPass) m_reflectionPass->resize(width, height);
+
+        // 纹理对象全部更新 → 消费方描述符重绑（与 initDeferredShading 一致）
+        if (m_lightingPass && m_gbuffer) {
+            m_lightingPass->setGBufferInputs(
+                m_gbuffer->getPositionTexture(),
+                m_gbuffer->getNormalTexture(),
+                m_gbuffer->getAlbedoTexture(),
+                m_gbuffer->getRHISampler());
+        }
+        if (m_lightingPass && m_ssaoPass) {
+            m_lightingPass->setSSAOTexture(
+                m_ssaoPass->getOutputAOTexture(),
+                m_ssaoPass->getOutputAOSampler());
+        }
+        if (m_waterPass && m_gbuffer && m_sceneColorTexture) {
+            m_waterPass->setGBufferInputs(m_gbuffer.get(),
+                m_sceneColorTexture.get(), m_sceneColorSampler.get());
+        }
+        if (m_waterPass && m_reflectionPass) {
+            m_waterPass->setReflectionTexture(
+                m_reflectionPass->getReflectionTexture(),
+                m_reflectionPass->getReflectionSampler());
+        }
     }
 }
 

@@ -115,7 +115,8 @@ void WaterPass::createBindingLayout() {
     RHIBindingLayoutDesc desc;
     desc.entries.push_back({0, RHIDescriptorType::UniformBuffer,
                             RHIShaderStage::Vertex | RHIShaderStage::Fragment, 1});
-    for (uint32_t i = 1; i <= 4; ++i)
+    // 1-4: gPosition/gNormal/gDepth/sceneColor；5: 平面反射 RT
+    for (uint32_t i = 1; i <= 5; ++i)
         desc.entries.push_back({i, RHIDescriptorType::CombinedImageSampler, RHIShaderStage::Fragment, 1});
     bindingLayout_ = rhiDevice_->createBindingLayout(desc);
 }
@@ -184,6 +185,7 @@ void WaterPass::updateUniforms(const glm::mat4& view, const glm::mat4& projectio
     ubo.waterParams = glm::vec4(waveSpeed, waveStrength, time, refractionStrength);
     ubo.screenSize = glm::vec4(width_, height_, 0.1f, 100.0f);
     ubo.ssrParams = glm::vec4(ssrMaxDistance, ssrMaxSteps, ssrThickness, 0);
+    ubo.reflectionParams = glm::vec4(reflectionMode, reflectionDistortion, 0, 0);
 
     void* ptr = uniformBuffers_[frameIndex]->map();
     memcpy(ptr, &ubo, sizeof(ubo));
@@ -196,6 +198,13 @@ void WaterPass::setGBufferInputs(GBufferPass* gbuffer, RHITexture* sceneColorTex
         bindingGroups_[i]->updateTexture(2, gbuffer->getNormalTexture(), sampler);
         bindingGroups_[i]->updateTexture(3, gbuffer->getDepthTexture(), sampler);
         bindingGroups_[i]->updateTexture(4, sceneColorTexture, sampler);
+    }
+}
+
+void WaterPass::setReflectionTexture(RHITexture* reflectionTexture, RHISampler* sampler) {
+    if (!reflectionTexture) return;
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        bindingGroups_[i]->updateTexture(5, reflectionTexture, sampler);
     }
 }
 

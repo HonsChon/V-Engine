@@ -342,6 +342,7 @@ set(PASSES_SOURCES
     src/renderer/passes/ForwardPass.cpp
     src/renderer/passes/LightingPass.cpp
     src/renderer/passes/TransparentPass.cpp
+    src/renderer/passes/ReflectionPass.cpp
     src/renderer/passes/FXAAPass.cpp
     src/renderer/passes/ComputePassBase.cpp
     src/renderer/passes/FrustumCullingPass.cpp
@@ -359,6 +360,7 @@ set(PASSES_HEADERS
     src/renderer/passes/ForwardPass.h
     src/renderer/passes/LightingPass.h
     src/renderer/passes/TransparentPass.h
+    src/renderer/passes/ReflectionPass.h
     src/renderer/passes/FXAAPass.h
     src/renderer/passes/ComputePassBase.h
     src/renderer/passes/FrustumCullingPass.h

@@ -3,24 +3,36 @@
 ## 目录
 1. [概述](#概述)
 2. [架构设计](#架构设计)
-3. [SSR 算法实现（当前版本）](#ssr-算法实现当前版本)
-4. [水面渲染](#水面渲染)
-5. [SSR 局限性（重要）](#ssr-局限性重要)
-6. [调试记录与经验教训](#调试记录与经验教训)
-7. [业界实践与后续方向](#业界实践与后续方向)
-8. [常见问题](#常见问题)
+3. [平面反射（当前默认）](#平面反射当前默认)
+4. [SSR 算法实现（回退模式）](#ssr-算法实现回退模式)
+5. [水面渲染](#水面渲染)
+6. [SSR 局限性（重要）](#ssr-局限性重要)
+7. [调试记录与经验教训](#调试记录与经验教训)
+8. [业界实践与后续方向](#业界实践与后续方向)
+9. [常见问题](#常见问题)
 
 ---
 
 ## 概述
 
-本项目实现了基于**屏幕空间反射（Screen Space Reflection, SSR）**的水面渲染。SSR 只利用当前帧的深度/颜色缓冲（屏幕上已有的信息）做反射射线求交，因此**只能反射屏幕内且未被遮挡的几何**——这一根本约束带来一系列固有局限（见[SSR 局限性](#ssr-局限性重要)），其中部分伪影无法通过算法调参消除。
+本项目水面反射经历两代方案：
 
-引擎中存在两条独立的 SSR 路径：
+| 方案 | 状态 | 原理 |
+|---|---|---|
+| **平面反射 (Planar)** | **当前默认** | 镜像相机渲染场景到半分辨率 RT，水面恒等屏幕 UV 采样 |
+| **WaterPass 内置 SSR** | 可切换回退 | `water.frag` 逐水面像素屏幕空间步进 |
+| **SSRPass 全屏反射** | 遗留 | `ssr.frag` 离屏 pass，输出纹理未被下游消费 |
+
+平面反射（v1.3.0，`ReflectionPass`）从机制上消除了 SSR 的全部固有局限
+（被遮挡/屏幕外几何不可反射、轮廓歧义）——镜像相机"亲眼看到"完整场景，
+无需步进与判据。SSR 保留用于对比与调试（DebugPanel「Water Reflection」
+开关实时切换）。
+
+引擎中两条 SSR 路径：
 
 | 路径 | 位置 | 状态 |
 |---|---|---|
-| **WaterPass 内置 SSR** | `water.frag` 逐水面像素步进 | 实际生效，本文重点 |
+| **WaterPass 内置 SSR** | `water.frag` 逐水面像素步进 | 回退模式（`reflectionParams.x=0`） |
 | **SSRPass 全屏反射** | `ssr.frag` 离屏 pass | 每帧执行，输出纹理目前未被下游消费（遗留） |
 
 两者共享同一套步进算法实现（`rayMarchScreenSpace` / `binarySearchScreen` / `processHit`）。
@@ -32,33 +44,36 @@
 ### 文件结构
 ```
 src/renderer/passes/
-├── WaterPass.h/.cpp        # 水面渲染（内置逐像素 SSR）
-├── SSRPass.h/.cpp          # 全屏 SSR pass（离屏 R16G16B16A16）
-├── GBufferPass.h/.cpp      # G-Buffer 生成（SSR 的输入）
+├── ReflectionPass.h/.cpp    # 水面平面反射（镜像相机, 半分辨率 RT）
+├── WaterPass.h/.cpp         # 水面渲染（平面反射采样 / SSR 双模式）
+├── SSRPass.h/.cpp           # 全屏 SSR pass（离屏 R16G16B16A16, 遗留）
+├── GBufferPass.h/.cpp       # G-Buffer 生成（SSR 的输入）
 └── ...
 
 shaders/
-├── water.vert/.frag        # 水面着色器（SSR 步进在 frag 内）
-├── ssr.vert/.frag          # 全屏 SSR 着色器（同款算法）
+├── water.vert/.frag         # 水面着色器（binding 5 = 反射 RT）
+├── ssr.vert/.frag           # 全屏 SSR 着色器（同款算法）
 └── ...
 ```
 
 ### 延迟模式管线位置
 
 ```
-GBuffer(不透明+Mask) → Blit Albedo→SceneColor → SSAO → SSRPass(全屏)
-→ 合成[LightingPass → TransparentPass → WaterPass(内置SSR, SrcAlpha混合)]
+GBuffer(不透明+Mask) → Blit Albedo→SceneColor → SSAO → SSRPass(全屏, 遗留)
+→ ReflectionPass(镜像相机→半分辨率 RT)
+→ 合成[LightingPass → TransparentPass → WaterPass(反射RT采样, SrcAlpha混合)]
 → 离屏目标 → FXAAPass → UI → Swapchain
 ```
 
 ### WaterPass 输入绑定（Pure RHI）
 
 ```
-Binding 0: WaterUBO            # 变换矩阵/水色/波浪/屏幕/SSR参数
+Binding 0: WaterUBO            # 变换矩阵/水色/波浪/屏幕/SSR参数/反射参数
 Binding 1: gPosition           # G-Buffer 世界位置
 Binding 2: gNormal             # G-Buffer 法线
 Binding 3: gDepth              # G-Buffer 深度（NDC 非线性）
 Binding 4: sceneColor          # 场景颜色（GBuffer Albedo blit，未光照）
+Binding 5: reflectionRT        # 平面反射 RT（ReflectionPass 输出）
 ```
 
 注意：水面不写深度（`depthTest(false,false)`），gDepth 在水面像素处保存的是
@@ -66,7 +81,116 @@ Binding 4: sceneColor          # 场景颜色（GBuffer Albedo blit，未光照�
 
 ---
 
-## SSR 算法实现（当前版本）
+## 平面反射（当前默认）
+
+### 原理
+
+把相机关于水面平面（y = waterHeight）镜像，用镜像相机把场景（不透明+Mask）
+渲染到**半分辨率 RT**，水面片元按屏幕坐标直接采样。
+
+**恒等 UV 性质**是本实现的简化关键：镜像相机与主相机使用**同一投影矩阵**
+（仅 view 镜像为 `view * M`）。水面上任意点 P 满足 `M·P = P`（平面不动点），
+因此其 clip 空间 xy 在主画面与反射 RT 中**完全相同**——水面片元
+`texture(reflectionRT, gl_FragCoord.xy / screenSize)` 即得正确倒影，
+零投影计算、透视天然正确。
+
+### 四个数学要素（`SceneRenderer::updateUniforms`）
+
+```
+1. 镜像矩阵        M = T(0,2h,0)·S(1,-1,1)        （p.y' = 2h - p.y）
+   镜像 view       V' = view * M
+   镜像相机位置    eye' = (ex, 2h - ey, ez)
+
+2. 斜近裁剪投影    （SceneRenderer::makeObliqueProjection，[0,1] 约定版）
+   把投影矩阵近裁剪面替换为水面平面，剔除水下几何（纯 CPU 矩阵技巧，
+   零着色器改动，双后端天然一致）
+   - 世界空间水面平面 C = (0,1,0,-h)（正侧=水上为可见侧）
+   - 相机空间平面     C' = (V'⁻¹)ᵀ · C
+   - 新第三行 r = k·C（水面精确映射到 z_clip=0），k = 1/dot(C,Q)，
+     Q = P⁻¹·(±sgn,±sgn,1,1) 取 dot>0 的远角（自动兼容 Vulkan Y 翻转）
+   - k 钳制上限 1.5：相机接近水面出画的仰角时 D→0、k→∞，倾斜远平面
+     会把反射内容整个裁掉（表现为转动相机时倒影突然消失/闪烁）；
+     水面入画时内容比理论极限 ≈1，kmax=1.5（约束 0.67）全覆盖且
+     不影响水面精确剔除
+   - 反射专用基础投影 far=1000（主画面 far=100 不变）：缩小远平面
+     倾斜的"咬合区"（∝ h/far）
+   - 约定：相机须在平面负侧（即相机在水上）；C=近平面时精确还原原矩阵
+
+3. 绕序          镜像 det = -1 → 屏幕空间绕序翻转
+   反射管线保持 setFrontFace(CounterClockwise) + setCullMode(Back)
+   （与主画面管线相同）
+   ⚠ 经验教训（RenderDoc 实测）：曾按推导设为 Clockwise "补偿"镜像翻转，
+     结果恰好反了——近侧（贴水底面）被剔除，渲染出远侧内表面（倒影内容
+     变成远水半球，pbr.frag 的 gl_FrontFacing 法线翻转掩盖了错误）。
+     网格绕序 × GLM × Vulkan Y 翻转 × 镜像 det 四层符号约定纯推导极易
+     差一个符号，**以 RenderDoc 实测为准**。判据：正确时 RT 中球只含
+     贴水半球（镜像相机在水下仰视，看到的是物体底面）
+   ⚠ Y 翻转（applyApiYFlip）与斜裁剪叠加顺序：先 flip 后 oblique
+     （推导只依赖实际矩阵的第四行，对翻转后的矩阵同样成立）
+
+4. 有效域          相机须在水面之上（camPos.y > h + ε）；水下时本帧
+   只清 RT（天空色），水面回退天空色（斜近裁剪要求相机在负侧）
+```
+
+### ReflectionPass 结构（Pure RHI，双后端）
+
+```
+- RT: 半分辨率 R8G8B8A8_UNORM（与主画面同格式，pbr.frag 已输出
+  tonemap+gamma 的 LDR）+ D32 深度，自建 RenderPass（color 终态
+  ShaderReadOnly，双后端自动迁移）+ Framebuffer + Linear/Clamp 采样器
+- 管线: 复用 pbr_vert/frag.spv（着色器对相机的全部认知来自 UBO 的
+  view/proj/viewPos，无屏幕空间假设）→ 零新场景着色器
+  UBO/Set1 布局与 ForwardPass 完全一致 → 借用 getMaterialLayout()，
+  RenderSystem 每帧分配的材质描述符直接兼容
+- 绘制: 遍历 renderables（跳过 transparent），Set0→Set1→push→draw
+- resize: RT/FB 重建（SceneRenderer::onResize 统一接线）
+```
+
+### water.frag 采样（binding 5）
+
+```glsl
+if (ubo.reflectionParams.x > 0.5) {          // 平面反射
+    vec2 distortion = perturbedNormal.xz * ubo.reflectionParams.y * 0.5;
+    vec2 reflUV = clamp(screenCoord + distortion, 0.001, 0.999);
+    reflectionColor = texture(reflectionRT, reflUV).rgb;
+    reflectionStrength = 1.0;                 // 精确命中，无衰减
+} else { ...SSR 步进（回退）... }
+```
+
+波纹扰动通过法线 xz 分量偏移采样坐标（模拟微波水面的歪曲）；
+Fresnel/高光/深度遮挡软化与 SSR 模式共享。SSR 路径的"反射增强"
+（pow 0.7、×1.5）是补偿其边缘衰减的艺术调整，平面反射路径跳过。
+
+### 平面反射的收益
+
+| SSR 固有局限 | 平面反射 |
+|---|---|
+| ⚠ 无法反射被遮挡几何 | ✅ 镜像相机视角独立，遮挡关系正确 |
+| ⚠ 无法反射屏幕外几何 | ✅ 视锥内全部可见 |
+| ⚠ 轮廓歧义（守卫的两难） | ✅ 无步进无判据，无歧义 |
+| 逐像素 jitter 点斑 | ✅ 无 jitter |
+| 半透明物体不参与 | ✅ 同样不参与（当前限制：透明不入反射，可后续加） |
+| 反射亮度用未光照 Albedo | ✅ pbr.frag 完整光照+tonemap，与主画面一致 |
+
+代价：场景几何多画一遍（半分辨率 ≈ 1/4 像素成本，仅不透明+Mask）。
+
+### 预期行为（易误判为 bug 的三点）
+
+1. **反射 RT 里物体可能只有一半** —— 镜像相机与主相机共用 45° 视锥，物体在
+   RT 中被视锥边缘裁断是**预期**的：被裁部分对应的反射光线只落在主画面
+   底边之外的虚拟水面像素上，恒等 UV 性质保证水面采样区间与 RT 内容严格
+   一一对应，缺失部分永远不会被采样（RenderDoc 验证 RT 时勿误判）。
+2. **低机位平视看不到倒影，需俯视** —— 倒影俯角 ≈ atan((眼高+物高)/距离)，
+   物体直接视角俯角 ≈ atan((眼高−物高)/距离)，物体悬于视线高度时倒影被推
+   到约 2× 俯角处，超出 45° FOV 底边（人眼 135° 视野内余光可见，相机不行）。
+   旧 SSR"平视也有倒影"是屏幕空间过度延伸伪影。进入水场景（按 5）时引擎
+   会把相机设为展示位姿 (0,3,6, 俯角-25°)，物体与倒影同框。
+3. **倒影与物体之间有天空色空档** —— 悬浮物体（不贴水）的倒影天然与物体
+   分离，中间水面反射的是天空；只有贴水物体/远距物体的倒影才与物体相接。
+
+---
+
+## SSR 算法实现（回退模式）
 
 ### 基础概念：deltaDepth 与厚度窗口（thickness）
 
@@ -354,14 +478,16 @@ GBuffer 只含不透明+Mask 几何；Blend 半透明物体（玻璃球等）不
 
 ## 业界实践与后续方向
 
-### 平面反射（Planar Reflection）——平坦水面的标准解法
+### 平面反射（Planar Reflection）——平坦水面的标准解法 ✅ 已实现（v1.3.0）
 
 把相机关于水面镜像，用镜像相机把场景渲染到一张（通常半分辨率）反射 RT，
 水面片元投影采样。**精确**：遮挡/屏幕外/薄物体全部正确，无步进无判据。
 
-实现要点：镜像 view 矩阵（`view * reflectMatrix(y=waterHeight)`）、
-翻转绕序（cull Front）、斜近裁剪面（剔除水下几何）、投影纹理采样 + 波纹扰动。
-本引擎已规划此方案（ReflectionPass + 半分辨率 RT + water.frag 投影采样）。
+实现要点（均已落地）：镜像 view 矩阵（`view * reflectMatrix(y=waterHeight)`）、
+绕序处理（保持 `frontFace=CounterClockwise`——RenderDoc 实测 Clockwise 会渲染
+出远侧内表面，见[绕序经验教训](#平面反射当前默认)）、
+斜近裁剪面（Lengyel 投影修改，剔除水下几何）、恒等 UV 采样 + 波纹扰动
+（见[平面反射章节](#平面反射当前默认)）。
 
 ### SSR + cubemap/反射探针 + TAA（通用组合）
 
@@ -378,22 +504,30 @@ SSR 有效区域用 SSR，失效处回退 cubemap（天空/环境），TAA 累�
 ## 常见问题
 
 ### Q1: 倒影出现点状蓝色回退
-先确认是否为**被遮挡几何**区域（固有局限，见局限性章节）；若是开阔区域，
-检查厚度窗口是否小于该距离的每步线性深度增量（穿越检测应已兜底）。
+平面反射为默认模式，不应出现回退（若出现，检查相机是否在水下——此时 RT
+仅清屏）。若切回 SSR 模式：先确认是否为**被遮挡几何**区域（固有局限，
+见局限性章节）；若是开阔区域，检查厚度窗口是否小于该距离的每步线性深度
+增量（穿越检测应已兜底）。
 
 ### Q2: 倒影拉长成条纹
-轮廓断层误命中——确认连续性守卫（`CROSSING_DEPTH_TOLERANCE`）未被移除，
-厚度未调得过大（>0.15 会引入擦背掠过误命中）。
+SSR 模式的轮廓断层误命中——确认连续性守卫（`CROSSING_DEPTH_TOLERANCE`）
+未被移除，厚度未调得过大（>0.15 会引入擦背掠过误命中）。平面反射无此问题。
 
 ### Q3: 反射过暗/过亮
-sceneColor 是 **Albedo blit（未光照）**——反射亮度不随场景光照变化；
-如需一致需改为采样光照后颜色（需要改合成顺序）。
+SSR 模式的 sceneColor 是 **Albedo blit（未光照）**——反射亮度不随场景光照
+变化。平面反射模式用 pbr.frag 完整光照渲染，与主画面一致。
 
 ### Q4: 性能
-WaterPass 步数上限 2048（实际≈屏幕像素距离）；降低 `setSSRMaxSteps`
-或水面网格分辨率。半分辨率 RT 是平面反射方案的标准省法。
+平面反射：场景几何多画一遍（半分辨率 ≈ 1/4 像素成本，仅不透明+Mask），
+无步进无抖动，成本稳定可预测。SSR 模式：WaterPass 步数上限 2048
+（实际≈屏幕像素距离）；降低 `setSSRMaxSteps` 或水面网格分辨率。
+
+### Q5: 如何切换 平面反射 / SSR
+DebugPanel →「Water Reflection」→ `Planar Reflection` 复选框（实时切换）+
+`Distortion` 波纹扰动滑条。对应 `RenderSettings::waterPlanarReflection` /
+`waterReflectionDistortion`。
 
 ---
 
-*文档版本：2.1*
-*最后更新：2026/09/14（v2.1 补充基础概念：deltaDepth 语义/thickness 厚度窗口原理、穿透图示、二分搜索机制详解；v2.0 记录固有局限与四轮调试教训）*
+*文档版本：3.1*
+*最后更新：2026/09/17（v3.1 绕序修正为 CounterClockwise + RenderDoc 实测教训、增补预期行为三则：RT 视锥半景/倒影视角/天空空档、水场景展示位姿；v3.0 平面反射实现；v2.1 基础概念；v2.0 固有局限与调试教训）*

@@ -35,6 +35,7 @@ class GBufferPass;
 class LightingPass;
 class ForwardPass;
 class TransparentPass;
+class ReflectionPass;
 class FXAAPass;
 class SSRPass;
 class WaterPass;
@@ -180,6 +181,11 @@ private:
     /// 翻转投影的 Y 轴才与画面一致。DX12 直接使用标准矩阵。
     glm::mat4 applyApiYFlip(const glm::mat4& proj) const;
 
+    /// Lengyel 斜近裁剪投影：把近裁剪面替换为相机空间裁剪平面
+    /// （平面反射中用于以水面为近裁剪面，剔除水下几何）。
+    /// clipPlane 须满足相机位于其负侧（C.w < 0）。
+    glm::mat4 makeObliqueProjection(const glm::mat4& proj, const glm::vec4& clipPlane) const;
+
     // ========== 资源创建 ==========
     void createSceneColorImage();
     void cleanupSceneColorImage();
@@ -202,6 +208,7 @@ private:
     std::unique_ptr<GBufferPass> m_gbuffer;
     std::unique_ptr<LightingPass> m_lightingPass;
     std::unique_ptr<TransparentPass> m_transparentPass;
+    std::unique_ptr<ReflectionPass> m_reflectionPass;
     std::unique_ptr<FXAAPass> m_fxaaPass;
     std::unique_ptr<SSAOPass> m_ssaoPass;
     std::unique_ptr<SSRPass> m_ssrPass;
@@ -226,6 +233,9 @@ private:
     RenderStats m_stats;
     bool m_initialized = false;
     bool m_deferredInitialized = false;
+
+    // 平面反射状态（相机须在水面之上，镜像相机才位于水下、斜近裁剪有效）
+    bool m_cameraAboveWater = true;
     
     // Nanite 状态
     bool m_naniteInitialized = false;

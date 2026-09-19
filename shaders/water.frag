@@ -1,8 +1,11 @@
 #version 450
 
-// 水面片段着色器 - 内置 SSR 反射
-// 只对水面像素进行光线步进，效率更高
-// 使用线性深度进行深度比较，提高远距离精度
+// 水面片段着色器 - 双模式反射
+//   1) 平面反射（默认）：直接采样 ReflectionPass 用镜像相机渲染的半分辨率 RT。
+//      镜像相机与主相机共享同一投影 → 水面点在两幅图像中屏幕位置相同（恒等 UV），
+//      精确、无步进、无遮挡/屏幕外/轮廓歧义；波纹扰动通过法线 xz 偏移采样坐标。
+//   2) SSR（回退，reflectionParams.x < 0.5）：逐水面像素屏幕空间光线步进，
+//      使用线性深度做精确相交检测。
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -22,15 +25,19 @@ layout(binding = 0) uniform WaterUBO {
     vec4 waterParams;      // x: 波浪速度, y: 波浪强度, z: 时间, w: 折射强度
     vec4 screenSize;       // xy: 屏幕尺寸, zw: nearPlane, farPlane
     vec4 ssrParams;        // x: maxDistance, y: maxSteps, z: thickness（线性深度空间）, w: reserved
+    vec4 reflectionParams; // x: 0=SSR / 1=平面反射, y: 平面反射波纹扰动强度
 } ubo;
 
-// G-Buffer 采样器（用于 SSR）
+// G-Buffer 采样器（用于 SSR 与深度遮挡）
 layout(binding = 1) uniform sampler2D gPosition;   // 世界空间位置
 layout(binding = 2) uniform sampler2D gNormal;     // 世界空间法线
 layout(binding = 3) uniform sampler2D gDepth;      // 深度（非线性）
 
 // 场景颜色（光照后）
 layout(binding = 4) uniform sampler2D sceneColor;
+
+// 平面反射 RT（镜像相机渲染，恒等屏幕 UV 采样）
+layout(binding = 5) uniform sampler2D reflectionRT;
 
 // ============================================================
 // SSR 核心函数 - 屏幕空间光线步进（使用线性深度）
@@ -289,11 +296,32 @@ void main() {
     // 使用 gl_FragCoord 来计算屏幕 UV，这比用 clipPos 更可靠
     // gl_FragCoord.xy 是像素坐标，范围 [0, screenSize)
     vec2 screenCoord = gl_FragCoord.xy / ubo.screenSize.xy;
-    
-    // ========== SSR 光线步进（屏幕空间版本，使用线性深度）==========
-    // 从水面位置沿反射方向进行光线追踪
-    // 反射方向向上，会找到水面上方的场景物体
-    vec4 reflection = rayMarchScreenSpace(fragWorldPos + reflectDir * 0.05, reflectDir);
+
+    // ========== 反射色获取（双模式）==========
+    vec3 reflectionColor;
+    float reflectionStrength;
+    if (ubo.reflectionParams.x > 0.5) {
+        // --- 平面反射 ---
+        // 恒等屏幕 UV + 波纹扰动（法线 xz 分量倾斜采样，模拟微波水面）
+        vec2 distortion = perturbedNormal.xz * ubo.reflectionParams.y * 0.5;
+        vec2 reflUV = clamp(screenCoord + distortion, vec2(0.001), vec2(0.999));
+        reflectionColor = texture(reflectionRT, reflUV).rgb;
+        reflectionStrength = 1.0;   // 精确命中，全强度（无 SSR 的边缘/距离衰减）
+    } else {
+        // --- SSR 回退路径（对比/调试）---
+        // 从水面位置沿反射方向进行屏幕空间光线追踪
+        vec4 reflection = rayMarchScreenSpace(fragWorldPos + reflectDir * 0.05, reflectDir);
+        reflectionColor = reflection.rgb;
+        reflectionStrength = reflection.a;
+        // 增强反射强度（补偿 SSR 的边缘/距离衰减）
+        reflectionStrength = pow(reflectionStrength, 0.7);
+        reflectionStrength = clamp(reflectionStrength * 1.5, 0.0, 1.0);
+        // 如果没有找到反射，使用天空色或环境色
+        if (reflectionStrength < 0.01) {
+            reflectionColor = mix(vec3(0.5, 0.7, 1.0), vec3(0.2, 0.4, 0.8), viewDir.y * 0.5 + 0.5);
+            reflectionStrength = 0.5;
+        }
+    }
     
     // 采样折射颜色（水下场景）
     float distortionStrength = ubo.waterParams.w * 0.02;
@@ -325,22 +353,8 @@ void main() {
     fresnel = clamp(fresnel + 0.15, 0.0, 1.0);  // 添加最小反射量
     
     // 根据 Fresnel 和反射强度混合
-    vec3 reflectionColor = reflection.rgb;
-    float reflectionStrength = reflection.a;
-    
-    // 增强反射强度
-    reflectionStrength = pow(reflectionStrength, 0.7);  // 使弱反射更可见
-    reflectionStrength = clamp(reflectionStrength * 1.5, 0.0, 1.0);  // 整体增强
-    
-    // 如果没有找到反射，使用天空色或环境色
-    if (reflectionStrength < 0.01) {
-        // 简单的天空色
-        reflectionColor = mix(vec3(0.5, 0.7, 1.0), vec3(0.2, 0.4, 0.8), viewDir.y * 0.5 + 0.5);
-        reflectionStrength = 0.5;  // 提高环境反射强度
-    }
-    
-    // 混合反射和折射
-    // 使用更高的混合权重让反射更明显
+    // （平面反射路径下 reflectionStrength=1，Fresnel 独自控制混合；
+    //  SSR 路径下额外受命中衰减影响）
     float reflectionFactor = fresnel * reflectionStrength;
     reflectionFactor = max(reflectionFactor, 0.2);  // 保证最小反射量
     vec3 finalColor = mix(underwaterColor, reflectionColor, reflectionFactor);
@@ -413,6 +427,9 @@ void main() {
     
     // 3. 仅显示反射结果
     // outColor = vec4(reflectionColor, 1.0);
+
+    // 3.5 直显平面反射 RT（恒等 UV）——验证 RT 上下方向/内容是否正确
+    // outColor = vec4(texture(reflectionRT, screenCoord).rgb, 1.0);
     
     // 4. 可视化命中强度（白色=找到反射，黑色=未找到）
     // outColor = vec4(vec3(reflectionStrength), 1.0);

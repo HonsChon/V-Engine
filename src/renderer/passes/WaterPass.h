@@ -39,6 +39,7 @@ public:
         alignas(16) glm::vec4 waterParams;
         alignas(16) glm::vec4 screenSize;
         alignas(16) glm::vec4 ssrParams;
+        alignas(16) glm::vec4 reflectionParams;   // x: 0=SSR / 1=平面反射, y: 反射波纹扰动强度
     };
 
     WaterPass(RHIDevice* rhiDevice,
@@ -59,11 +60,19 @@ public:
     void setSSRMaxSteps(float steps) { ssrMaxSteps = steps; }
     void setSSRThickness(float thickness) { ssrThickness = thickness; }
 
+    // 平面反射：模式（1=平面反射 RT 采样 / 0=SSR 步进）与波纹扰动强度
+    void setReflectionParams(float mode, float distortion) {
+        reflectionMode = mode; reflectionDistortion = distortion;
+    }
+
     void updateUniforms(const glm::mat4& view, const glm::mat4& projection,
                         const glm::vec3& cameraPos, float time, uint32_t frameIndex);
 
     // Set G-Buffer inputs (Pure RHI)
     void setGBufferInputs(GBufferPass* gbuffer, RHITexture* sceneColorTexture, RHISampler* sampler);
+
+    // Set planar reflection RT (binding 5, 由 ReflectionPass 提供)
+    void setReflectionTexture(RHITexture* reflectionTexture, RHISampler* sampler);
 
     // Render (Pure RHI)
     void render(RHICommandBuffer* cmd, uint32_t frameIndex);
@@ -96,6 +105,8 @@ private:
     float ssrMaxDistance = 30.0f;
     float ssrMaxSteps = 2048.0f;
     float ssrThickness = 0.05f;   // 线性深度空间厚度窗口；穿越由深度连续性守卫+二分细化兜底，小窗口可减少掠过后方的误命中
+    float reflectionMode = 1.0f;        // 1=平面反射（默认），0=SSR
+    float reflectionDistortion = 1.0f;  // 平面反射的波纹扰动强度
 
     std::unique_ptr<Mesh> waterMesh;
     std::shared_ptr<RHIBuffer> vertexBuffer_;

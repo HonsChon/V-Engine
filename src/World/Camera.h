@@ -36,6 +36,7 @@ public:
 
     // Setters
     void setPosition(const glm::vec3& pos) { position = pos; }
+    void setOrientation(float y, float p) { yaw = y; pitch = p; updateCameraVectors(); }
     void setMovementSpeed(float speed) { movementSpeed = speed; }
     void setMouseSensitivity(float sensitivity) { mouseSensitivity = sensitivity; }
 

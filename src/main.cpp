@@ -13,8 +13,10 @@
 //   --scene <path>        启动时加载场景文件(.vscene/.json)
 //   --import <path>       启动时导入模型(.obj/.gltf/.glb)到场景
 //   --save <path>         启动加载/导入完成后保存场景并继续运行(自动化测试用)
+//   --cam x,y,z,yaw,pitch 固定初始相机位姿(自动化验证用)
 // 示例: VulkanPBR --autotest 890 --seconds 20   (聚类 → viz → 换模式 → soak)
 //       VulkanPBR --scene assets/scenes/a.vscene --seconds 5
+//       VulkanPBR --autotest 5 --cam 0,6,4,-90,-55 --seconds 10  (高空俯视水场景)
 int main(int argc, char** argv) {
     try {
         Engine::Config config;
@@ -41,6 +43,13 @@ int main(int argc, char** argv) {
                 importPath = argv[++i];
             } else if (std::strcmp(argv[i], "--save") == 0 && i + 1 < argc) {
                 savePath = argv[++i];
+            } else if (std::strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
+                float v[5] = {0, 0, 5, -90, 0};
+                if (sscanf_s(argv[++i], "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) >= 3) {
+                    config.camOverride = true;
+                    for (int k = 0; k < 5; ++k) config.camPos[k] = v[k];
+                    config.camYaw = v[3]; config.camPitch = v[4];
+                }
             }
         }
 
