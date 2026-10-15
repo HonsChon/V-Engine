@@ -12,7 +12,8 @@
  */
 enum class RenderMode {
     Normal,      // 前向渲染 (Forward PBR)
-    WaterScene   // 延迟渲染 + SSR + Water
+    WaterScene,  // 延迟渲染 + SSR + Water
+    RayTrace     // CPU 软光追（Whitted / 路径追踪，渐进累积）
 };
 
 /**
@@ -21,6 +22,14 @@ enum class RenderMode {
 struct RenderSettings {
     // 渲染模式
     RenderMode renderMode = RenderMode::Normal;
+
+    // ========== CPU 软光追（RenderMode::RayTrace）==========
+    int rtAlgorithm = 0;            // 0=Whitted, 1=路径追踪
+    int rtSamplesPerFrame = 1;      // 每帧每像素样本数（相机静止时跨帧累积）
+    int rtMaxBounces = 5;           // 最大弹射次数
+    bool rtShadows = true;          // 阴影射线
+    float rtSkyIntensity = 1.0f;    // 天光强度
+    float rtResolutionScale = 0.5f; // 内部分辨率比例（1.0 = 全分辨率）
 
     // Feature toggles
     bool enableSSR = true;

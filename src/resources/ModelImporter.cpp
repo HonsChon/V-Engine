@@ -38,13 +38,18 @@ static bool isPresetId(const std::string& path) {
 std::string resolveAssetPath(const std::string& path) {
     if (path.empty() || isPresetId(path)) return path;
 
+    // 分隔符归一化：Windows 保存的场景使用 '\'，跨平台统一为 '/'
+    // （fs::exists 与下方 "assets/" 定位都依赖 '/' 形式）
+    std::string normalized = path;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
     // 拆出 glTF meshId 的 "#mesh_prim" 后缀
-    std::string base = path;
+    std::string base = normalized;
     std::string suffix;
-    auto hash = path.find('#');
+    auto hash = normalized.find('#');
     if (hash != std::string::npos) {
-        base = path.substr(0, hash);
-        suffix = path.substr(hash);
+        base = normalized.substr(0, hash);
+        suffix = normalized.substr(hash);
     }
 
     std::string resolved = base;

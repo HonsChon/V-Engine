@@ -103,6 +103,38 @@ void DebugPanel::render() {
 
     ImGui::Spacing();
 
+    // === 渲染模式 + CPU 软光追 ===
+    if (renderSettings) {
+        if (ImGui::CollapsingHeader("Render Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+            const char* modeLabels[] = { "Forward (Raster)", "Deferred + Water", "CPU Ray Trace" };
+            int mode = static_cast<int>(renderSettings->renderMode);
+            if (ImGui::Combo("Mode", &mode, modeLabels, IM_ARRAYSIZE(modeLabels))) {
+                renderSettings->renderMode = static_cast<RenderMode>(mode);
+            }
+        }
+
+        if (renderSettings->renderMode == RenderMode::RayTrace &&
+            ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            const char* algoLabels[] = { "Whitted", "Path Tracing" };
+            ImGui::Combo("Algorithm", &renderSettings->rtAlgorithm, algoLabels, IM_ARRAYSIZE(algoLabels));
+            ImGui::SliderInt("Samples/Frame", &renderSettings->rtSamplesPerFrame, 1, 16);
+            ImGui::SliderInt("Max Bounces", &renderSettings->rtMaxBounces, 1, 16);
+            ImGui::Checkbox("Shadows", &renderSettings->rtShadows);
+            ImGui::SliderFloat("Sky Intensity", &renderSettings->rtSkyIntensity, 0.0f, 3.0f, "%.2f");
+            ImGui::SliderFloat("Resolution Scale", &renderSettings->rtResolutionScale, 0.1f, 1.0f, "%.2f");
+
+            ImGui::Separator();
+            ImGui::Text("Accumulated: %u spp", rtAccumulatedSpp);
+            ImGui::Text("RT Frame: %.1f ms", rtFrameMs);
+            ImGui::Text("Tris: %u   BVH nodes: %u", rtTriangles, rtBvhNodes);
+            ImGui::Text("Instances: %u   Threads: %u", rtInstances, rtThreads);
+            ImGui::TextDisabled("Camera/scene change resets accumulation");
+        }
+    }
+
+    ImGui::Spacing();
+
     // === SSAO / FXAA 设置 ===
     if (renderSettings) {
         if (ImGui::CollapsingHeader("SSAO", ImGuiTreeNodeFlags_DefaultOpen)) {

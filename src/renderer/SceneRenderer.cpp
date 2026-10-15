@@ -28,6 +28,9 @@
 #include "nanite/Nanite.h"
 #include "nanite/NaniteManager.h"
 
+// CPU 软光追
+#include "SoftwareRaytracer.h"
+
 // RHI
 #include "RHIDevice.h"
 #include "RHISwapChain.h"
@@ -47,6 +50,7 @@
 #include <iostream>
 #include <array>
 #include <algorithm>
+#include <thread>
 #include <glm/gtc/matrix_transform.hpp>
 
 // ============================================================
@@ -99,6 +103,7 @@ void SceneRenderer::cleanup() {
     cleanupNanite();
     cleanupGPUDrivenRendering();
     cleanupDeferredShading();
+    cleanupRayTrace();
     m_fxaaPass.reset();
     m_forwardPass.reset();
     cleanupOffscreenTarget();
@@ -510,7 +515,9 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
 // ============================================================
 
 void SceneRenderer::recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
-    if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
+    if (m_settings.renderMode == RenderMode::RayTrace) {
+        recordRayTraceCommands(cmd, imageIndex, frameIndex);
+    } else if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
         recordDeferredCommands(cmd, imageIndex, frameIndex);
     } else {
         recordForwardCommands(cmd, imageIndex, frameIndex);
@@ -643,6 +650,189 @@ void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageI
     m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
 
     cmd->endRenderPass();
+}
+
+// ============================================================
+// 命令录制 — CPU 软光追
+// ============================================================
+
+void SceneRenderer::recordRayTraceCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "CPU Raytrace", 0.9f, 0.6f, 0.2f, 1.0f);
+
+    // CPU 渲染 + 结果上传（同步，帧率受分辨率/采样数影响；相机静止时渐进收敛）
+    updateRayTrace();
+
+    // === swapchain：软光追结果 blit + UI ===
+    {
+        std::vector<RHIClearValue> clears = {
+            RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
+            RHIClearValue::DepthStencil(1.0f, 0)
+        };
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
+    }
+
+    // 全屏直通 blit（复用 FXAA 管线 passthrough 分支；软光追图像已由累积抗锯齿）
+    if (m_fxaaPass && m_raytraceColor) {
+        m_fxaaPass->setSourceTexture(m_raytraceColor.get(), m_offscreenSampler.get());
+        m_fxaaPass->render(cmd, frameIndex, false);
+    }
+
+    // UI
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+    updateUI();
+    renderUI(cmd);
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+
+    cmd->endRenderPass();
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+}
+
+void SceneRenderer::initRayTrace() {
+    if (m_raytraceInitialized) return;
+
+    m_raytracer = std::make_unique<VEngine::RT::SoftwareRaytracer>();
+    m_raytraceInitialized = true;
+    m_rtSceneHash = 0;          // 强制首帧重建场景
+    m_rtLastView = glm::mat4(0.0f);
+    m_rtLastProj = glm::mat4(0.0f);
+    m_rtWidth = 0;
+    m_rtHeight = 0;
+    std::cout << "[SceneRenderer] CPU raytracer created ("
+              << "threads = hardware)" << std::endl;
+}
+
+void SceneRenderer::cleanupRayTrace() {
+    if (!m_raytraceInitialized) return;
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
+    m_raytraceColor.reset();
+    m_raytracer.reset();
+    m_raytraceInitialized = false;
+    std::cout << "[SceneRenderer] CPU raytracer cleaned up\n";
+}
+
+void SceneRenderer::updateRayTrace() {
+    if (!m_camera || !m_scene || !m_rhiDevice) return;
+    if (!m_raytraceInitialized) initRayTrace();
+
+    auto& rt = *m_raytracer;
+    const auto& s = m_settings;
+
+    // ---- 1. 场景变化 → 重建（BVH/实例/光源）----
+    size_t sceneHash = computeSceneHash();
+    if (sceneHash != m_rtSceneHash) {
+        m_rtSceneHash = sceneHash;
+        rt.buildFromScene(m_scene);
+    }
+
+    // ---- 2. 设置变化 → 应用 + 重置累积 ----
+    if (s.rtAlgorithm != m_rtLastAlgorithm || s.rtMaxBounces != m_rtLastBounces ||
+        s.rtShadows != m_rtLastShadows ||
+        std::abs(s.rtSkyIntensity - m_rtLastSkyIntensity) > 1e-6f)
+    {
+        using VEngine::RT::Algorithm;
+        rt.settings.algorithm = (s.rtAlgorithm == 1) ? Algorithm::PathTracing
+                                                     : Algorithm::Whitted;
+        rt.settings.samplesPerPixel = std::max(1, s.rtSamplesPerFrame);
+        rt.settings.maxBounces = std::max(1, s.rtMaxBounces);
+        rt.settings.shadows = s.rtShadows;
+        rt.settings.skyIntensity = s.rtSkyIntensity;
+        rt.resetAccumulation();
+
+        m_rtLastAlgorithm = s.rtAlgorithm;
+        m_rtLastBounces = s.rtMaxBounces;
+        m_rtLastShadows = s.rtShadows;
+        m_rtLastSkyIntensity = s.rtSkyIntensity;
+    }
+
+    // ---- 3. 相机 / 分辨率变化 → 重建相机与显示纹理 + 重置累积 ----
+    auto extent = m_swapChain->getExtent();
+    uint32_t rtW = std::max(1u, static_cast<uint32_t>(extent.width * s.rtResolutionScale));
+    uint32_t rtH = std::max(1u, static_cast<uint32_t>(extent.height * s.rtResolutionScale));
+
+    glm::mat4 view = m_camera->getViewMatrix();
+    // CPU 光追用 GL 惯例投影（Y 朝上），不套用 Vulkan Y 翻转
+    glm::mat4 proj = glm::perspective(glm::radians(m_camera->getZoom()),
+                                      rtW / static_cast<float>(rtH), 0.1f, 1000.0f);
+
+    if (view != m_rtLastView || proj != m_rtLastProj || rtW != m_rtWidth || rtH != m_rtHeight) {
+        m_rtLastView = view;
+        m_rtLastProj = proj;
+        m_rtWidth = rtW;
+        m_rtHeight = rtH;
+
+        rt.setCamera(view, proj, rtW, rtH);
+        rt.resetAccumulation();
+
+        // 显示纹理按内部分辨率重建（单 mip，blit 时线性放大）
+        RHITextureDesc desc{};
+        desc.width = rtW;
+        desc.height = rtH;
+        desc.format = RHIFormat::R8G8B8A8_UNORM;
+        desc.usage = RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+        desc.mipLevels = 1;
+        m_raytraceColor = m_rhiDevice->createTexture(desc);
+    }
+
+    // ---- 4. CPU 渲染一帧（累积）----
+    rt.renderFrame(m_rtFrameIndex++);
+
+    // ---- 5. 结果上传显示纹理 ----
+    if (m_raytraceColor) {
+        auto rgba = rt.framebuffer().resolveRGBA8();
+        m_raytraceColor->uploadPixels(rgba.data(), rgba.size());
+    }
+}
+
+size_t SceneRenderer::computeSceneHash() const {
+    if (!m_scene) return 0;
+
+    auto& registry = m_scene->getRegistry();
+    size_t h = 1469598103934665603ull;   // FNV-1a offset basis
+
+    auto mixBytes = [&h](const void* data, size_t bytes) {
+        const auto* p = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < bytes; ++i) {
+            h ^= p[i];
+            h *= 1099511628211ull;       // FNV prime
+        }
+    };
+
+    // 可渲染实体：网格路径 + 世界矩阵 + 材质
+    auto meshView = registry.view<VEngine::TransformComponent, VEngine::MeshRendererComponent>();
+    for (auto entity : meshView) {
+        auto& mr = meshView.get<VEngine::MeshRendererComponent>(entity);
+        mixBytes(mr.meshPath.data(), mr.meshPath.size());
+        mixBytes(&mr.visible, sizeof(mr.visible));
+
+        glm::mat4 world = VEngine::computeWorldMatrix(registry, entity);
+        mixBytes(&world, sizeof(world));
+
+        if (registry.all_of<VEngine::PBRMaterialComponent>(entity)) {
+            auto& mat = registry.get<VEngine::PBRMaterialComponent>(entity);
+            mixBytes(&mat.albedo, sizeof(mat.albedo));
+            mixBytes(&mat.metallic, sizeof(mat.metallic));
+            mixBytes(&mat.roughness, sizeof(mat.roughness));
+            mixBytes(&mat.ao, sizeof(mat.ao));
+            mixBytes(&mat.emissive, sizeof(mat.emissive));
+            mixBytes(&mat.emissiveStrength, sizeof(mat.emissiveStrength));
+            mixBytes(&mat.opacity, sizeof(mat.opacity));
+            mixBytes(&mat.alphaMode, sizeof(mat.alphaMode));
+        }
+    }
+
+    // 光源
+    auto lightView = registry.view<VEngine::TransformComponent, VEngine::LightComponent>();
+    for (auto entity : lightView) {
+        auto& lc = lightView.get<VEngine::LightComponent>(entity);
+        mixBytes(&lc, sizeof(lc));
+        glm::mat4 world = VEngine::computeWorldMatrix(registry, entity);
+        mixBytes(&world, sizeof(world));
+    }
+
+    return h;
 }
 
 // ============================================================
@@ -830,6 +1020,17 @@ void SceneRenderer::updateUI() {
                 debugPanel->setDrawCalls(m_renderSystem->getDrawCallCount());
             }
             debugPanel->setNaniteStats(0, 0, 0, 0, 0, nullptr, 0);
+        }
+
+        // 软光追统计（RayTrace 模式）
+        if (m_settings.renderMode == RenderMode::RayTrace && m_raytracer) {
+            debugPanel->setRaytraceStats(
+                m_raytracer->lastFrameMs(),
+                m_raytracer->framebuffer().sampleCount(),
+                m_raytracer->totalTriangles(),
+                m_raytracer->totalNodes(),
+                m_raytracer->instanceCount(),
+                std::thread::hardware_concurrency());
         }
     }
 

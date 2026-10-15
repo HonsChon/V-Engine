@@ -49,6 +49,17 @@ public:
                         uint32_t triangles, uint32_t vertices,
                         const uint32_t* lodCounts, int lodCount);
 
+    // 设置软光追统计（RayTrace 模式，SceneRenderer 每帧更新）
+    void setRaytraceStats(float frameMs, uint32_t accumulatedSpp, uint32_t triangles,
+                          uint32_t bvhNodes, uint32_t instances, uint32_t threads) {
+        rtFrameMs = frameMs;
+        rtAccumulatedSpp = accumulatedSpp;
+        rtTriangles = triangles;
+        rtBvhNodes = bvhNodes;
+        rtInstances = instances;
+        rtThreads = threads;
+    }
+
 private:
     // 渲染统计
     float fps = 0.0f;
@@ -84,4 +95,12 @@ private:
     uint32_t naniteTriangles = 0;
     uint32_t naniteVertices = 0;
     uint32_t naniteLodCounts[NANITE_MAX_LOD] = {};
+
+    // 软光追统计
+    float rtFrameMs = 0.0f;
+    uint32_t rtAccumulatedSpp = 0;
+    uint32_t rtTriangles = 0;
+    uint32_t rtBvhNodes = 0;
+    uint32_t rtInstances = 0;
+    uint32_t rtThreads = 0;
 };

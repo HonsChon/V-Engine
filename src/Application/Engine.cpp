@@ -21,6 +21,8 @@
 #include "nanite/NaniteManager.h"
 #include "SceneSerializer.h"
 #include "ModelImporter.h"
+#include "SoftwareRaytracer.h"
+#include "ImageWriter.h"
 
 #include "nfd/nfd.h"
 
@@ -147,12 +149,16 @@ void Engine::initializeSubsystems() {
     std::cout << "[Engine] RenderSystem created\n";
 
     // 9. SceneRenderer (with ForwardPass)
-    m_renderer = std::make_unique<SceneRenderer>(m_rhiDevice.get(), m_rhiSwapChain.get());
-    m_renderer->initialize();
-    m_renderer->setScene(m_scene.get());
-    m_renderer->setCamera(m_camera.get());
-    m_renderer->setRenderSystem(m_renderSystem.get());
-    std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
+    //    离线软光追不需要 GPU 管线（部分环境 MoltenVK 管线创建可能失败，
+    //    跳过以保证 --raytrace 仅依赖 CPU 与 MeshManager）
+    if (!m_config.raytraceOffline) {
+        m_renderer = std::make_unique<SceneRenderer>(m_rhiDevice.get(), m_rhiSwapChain.get());
+        m_renderer->initialize();
+        m_renderer->setScene(m_scene.get());
+        m_renderer->setCamera(m_camera.get());
+        m_renderer->setRenderSystem(m_renderSystem.get());
+        std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
+    }
 
     // 10. Scene: 恢复上次打开的场景（editor_settings.json），无记录则用演示场景
     {
@@ -172,7 +178,7 @@ void Engine::initializeSubsystems() {
     VEngine::SelectionManager::getInstance().setScene(m_scene.get());
 
     // 12. UI (ImGui)
-    if (m_config.enableUI) {
+    if (m_config.enableUI && !m_config.raytraceOffline) {
         m_imguiLayer = std::make_unique<ImGuiLayer>(
             m_window->getNativeHandle(),
             m_rhiDevice.get(),
@@ -817,6 +823,62 @@ void Engine::saveSceneToPath(const std::string& filePath) {
         saveLastScene(filePath);   // 记住最近场景
         updateSceneTitle();
     }
+}
+
+// ============================================================
+// 离线软光追（--raytrace）
+// ============================================================
+
+bool Engine::renderOfflineRaytrace() {
+    if (!m_scene || !m_camera) {
+        std::cerr << "[Engine] Offline raytrace: scene/camera not ready" << std::endl;
+        return false;
+    }
+
+    VEngine::RT::SoftwareRaytracer rt;
+
+    std::cout << "[Engine] Offline raytrace: building scene (BVH)..." << std::endl;
+    rt.buildFromScene(m_scene.get());
+
+    // 相机（GL 惯例投影；Engine 构造已应用 --cam 覆盖）
+    glm::mat4 view = m_camera->getViewMatrix();
+    glm::mat4 proj = glm::perspective(
+        glm::radians(m_camera->getZoom()),
+        static_cast<float>(m_config.rtWidth) / static_cast<float>(m_config.rtHeight),
+        0.1f, 1000.0f);
+    rt.setCamera(view, proj, m_config.rtWidth, m_config.rtHeight);
+
+    rt.settings.algorithm = m_config.rtPathTracing
+        ? VEngine::RT::Algorithm::PathTracing : VEngine::RT::Algorithm::Whitted;
+    rt.settings.samplesPerPixel = m_config.rtSamples;
+    rt.settings.maxBounces = m_config.rtBounces;
+    rt.settings.shadows = true;
+
+    std::cout << "[Engine] Offline raytrace: rendering " << m_config.rtWidth << "x"
+              << m_config.rtHeight << " spp=" << m_config.rtSamples
+              << " bounces=" << m_config.rtBounces
+              << " algorithm=" << (m_config.rtPathTracing ? "path tracing" : "whitted")
+              << "..." << std::endl;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    rt.renderFrame(0);
+    auto endTime = std::chrono::high_resolution_clock::now();
+    float renderMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+
+    std::cout << "[Engine] Offline raytrace: done in " << renderMs << " ms ("
+              << rt.totalTriangles() << " tris, " << rt.totalNodes() << " BVH nodes, "
+              << rt.rayCount() << " rays)" << std::endl;
+
+    auto rgba = rt.framebuffer().resolveRGBA8();
+    if (!VEngine::RT::savePNG(m_config.rtOutputPath, rgba,
+                              m_config.rtWidth, m_config.rtHeight)) {
+        std::cerr << "[Engine] Offline raytrace: failed to save "
+                  << m_config.rtOutputPath << std::endl;
+        return false;
+    }
+
+    std::cout << "[Engine] Offline raytrace: saved " << m_config.rtOutputPath << std::endl;
+    return true;
 }
 
 void Engine::saveScene() {

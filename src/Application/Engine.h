@@ -51,6 +51,15 @@ struct EngineConfig {
     float camPos[3] = {0.0f, 0.0f, 5.0f};
     float camYaw = -90.0f;    // -90 = 面向 -Z（默认相机朝向）
     float camPitch = 0.0f;
+
+    // 离线软光追（--raytrace）：主循环前渲染一帧并保存，随后退出
+    bool raytraceOffline = false;
+    std::string rtOutputPath = "raytrace_output.png";
+    int rtSamples = 64;           // 每像素样本数
+    int rtBounces = 5;            // 最大弹射次数
+    int rtWidth = 1280;           // 输出分辨率
+    int rtHeight = 720;
+    bool rtPathTracing = false;   // false=Whitted, true=路径追踪
 };
 
 class Engine {
@@ -78,6 +87,9 @@ public:
     void importModelFile(const std::string& filePath);   // 导入 .obj/.gltf/.glb
     bool openSceneFromFile(const std::string& filePath); // 打开 .vscene（成功返回 true）
     void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
+
+    // 离线软光追：CPU 渲染当前场景一帧并保存 PNG（返回是否成功）
+    bool renderOfflineRaytrace();
 
     float getDeltaTime() const { return m_deltaTime; }
     float getFPS() const { return m_fps; }

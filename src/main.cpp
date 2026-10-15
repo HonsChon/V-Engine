@@ -1,6 +1,7 @@
 #include "Engine.h"
 #include <GLFW/glfw3.h>
 #include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -14,9 +15,16 @@
 //   --import <path>       启动时导入模型(.obj/.gltf/.glb)到场景
 //   --save <path>         启动加载/导入完成后保存场景并继续运行(自动化测试用)
 //   --cam x,y,z,yaw,pitch 固定初始相机位姿(自动化验证用)
+//   --raytrace            离线 CPU 软光追：渲染一帧保存 PNG 后退出（不进主循环）
+//   --output <path>       输出路径（默认 raytrace_output.png）
+//   --samples N           每像素样本数（默认 64）
+//   --bounces N           最大弹射次数（默认 5）
+//   --rt-width/--rt-height  输出分辨率（默认 1280x720）
+//   --pt                  路径追踪模式（默认 Whitted）
 // 示例: VulkanPBR --autotest 890 --seconds 20   (聚类 → viz → 换模式 → soak)
 //       VulkanPBR --scene assets/scenes/a.vscene --seconds 5
 //       VulkanPBR --autotest 5 --cam 0,6,4,-90,-55 --seconds 10  (高空俯视水场景)
+//       VulkanPBR --scene assets/scenes/sponza.vscene --raytrace --samples 128 --pt
 int main(int argc, char** argv) {
     try {
         Engine::Config config;
@@ -43,9 +51,23 @@ int main(int argc, char** argv) {
                 importPath = argv[++i];
             } else if (std::strcmp(argv[i], "--save") == 0 && i + 1 < argc) {
                 savePath = argv[++i];
+            } else if (std::strcmp(argv[i], "--raytrace") == 0) {
+                config.raytraceOffline = true;
+            } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+                config.rtOutputPath = argv[++i];
+            } else if (std::strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+                config.rtSamples = std::max(1, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--bounces") == 0 && i + 1 < argc) {
+                config.rtBounces = std::max(1, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--rt-width") == 0 && i + 1 < argc) {
+                config.rtWidth = std::max(1, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--rt-height") == 0 && i + 1 < argc) {
+                config.rtHeight = std::max(1, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--pt") == 0) {
+                config.rtPathTracing = true;
             } else if (std::strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
                 float v[5] = {0, 0, 5, -90, 0};
-                if (sscanf_s(argv[++i], "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) >= 3) {
+                if (std::sscanf(argv[++i], "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) >= 3) {
                     config.camOverride = true;
                     for (int k = 0; k < 5; ++k) config.camPos[k] = v[k];
                     config.camYaw = v[3]; config.camPitch = v[4];
@@ -59,6 +81,11 @@ int main(int argc, char** argv) {
         if (!scenePath.empty()) engine.openSceneFromFile(scenePath);
         if (!importPath.empty()) engine.importModelFile(importPath);
         if (!savePath.empty()) engine.saveSceneToPath(savePath);
+
+        // 离线软光追：渲染一帧保存后直接退出（不进主循环）
+        if (config.raytraceOffline) {
+            return engine.renderOfflineRaytrace() ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
 
         engine.run();
     }
