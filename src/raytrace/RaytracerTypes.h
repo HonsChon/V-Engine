@@ -57,7 +57,7 @@ struct RayHit {
 };
 
 // ============================================================
-// 材质 — PBRMaterialComponent 的扁平化（不做纹理采样）
+// 材质 — PBRMaterialComponent 的扁平化（支持贴图采样）
 // ============================================================
 
 struct RTMaterial {
@@ -70,19 +70,50 @@ struct RTMaterial {
     float opacity = 1.0f;
     bool transparent = false;     // 透明物体跳过求交（第一版不支持折射混合）
 
+    // 纹理索引（SoftwareRaytracer::textures_ 下标，-1 = 无）
+    int albedoTex = -1;
+    int normalTex = -1;           // tangent-space 法线贴图
+    int metallicRoughTex = -1;    // glTF 打包：G=roughness B=metallic
+    int aoTex = -1;
+    int emissiveTex = -1;
+
     /// 电介质 F0（Schlick 近似用）
     glm::vec3 f0() const {
         return glm::mix(glm::vec3(0.04f), albedo, metallic);
     }
 };
 
+/**
+ * @brief 逐命中求值后的着色参数（贴图采样 + 常量因子合并的结果）
+ * 由 intersectScene 在命中时构造，三条积分器统一使用。
+ */
+struct ShadedMaterial {
+    glm::vec3 albedo = glm::vec3(1.0f);
+    glm::vec3 normal = glm::vec3(0.0f, 1.0f, 0.0f);   // 着色法线（含法线贴图，朝向射线侧）
+    glm::vec3 emissive = glm::vec3(0.0f);             // 已含 emissiveStrength
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+    float ao = 1.0f;
+
+    glm::vec3 f0() const {
+        return glm::mix(glm::vec3(0.04f), albedo, metallic);
+    }
+    /// 有效漫反射因子：albedo × (1-metallic×gloss) × ao（粗糙金属保留漫反射）
+    glm::vec3 diffuseFactor() const {
+        float gloss = 1.0f - roughness;
+        return albedo * (1.0f - metallic * gloss) * ao;
+    }
+};
+
 // ============================================================
-// 几何 — 网格局部空间三角形（位置 + 顶点法线，插值用）
+// 几何 — 网格局部空间三角形（位置 + 顶点法线/UV/切线，插值用）
 // ============================================================
 
 struct RTTriangle {
     glm::vec3 v0, v1, v2;
     glm::vec3 n0, n1, n2;
+    glm::vec2 uv0 = glm::vec2(0.0f), uv1 = glm::vec2(0.0f), uv2 = glm::vec2(0.0f);
+    glm::vec3 t0, t1, t2;   // 顶点切线（法线贴图 TBN 用）
 
     glm::vec3 centroid() const { return (v0 + v1 + v2) * (1.0f / 3.0f); }
 };

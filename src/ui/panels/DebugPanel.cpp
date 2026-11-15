@@ -116,13 +116,25 @@ void DebugPanel::render() {
         if (renderSettings->renderMode == RenderMode::RayTrace &&
             ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            const char* algoLabels[] = { "Whitted", "Path Tracing" };
+            const char* algoLabels[] = { "Whitted", "Path Tracing", "PT + ReSTIR" };
             ImGui::Combo("Algorithm", &renderSettings->rtAlgorithm, algoLabels, IM_ARRAYSIZE(algoLabels));
             ImGui::SliderInt("Samples/Frame", &renderSettings->rtSamplesPerFrame, 1, 16);
             ImGui::SliderInt("Max Bounces", &renderSettings->rtMaxBounces, 1, 16);
             ImGui::Checkbox("Shadows", &renderSettings->rtShadows);
             ImGui::SliderFloat("Sky Intensity", &renderSettings->rtSkyIntensity, 0.0f, 3.0f, "%.2f");
             ImGui::SliderFloat("Resolution Scale", &renderSettings->rtResolutionScale, 0.1f, 1.0f, "%.2f");
+
+            if (renderSettings->rtAlgorithm == 2) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("ReSTIR (unbiased MIS)");
+                ImGui::SliderInt("Candidates M", &renderSettings->rtRestirCandidates, 4, 128);
+                ImGui::SliderInt("Spatial Neighbors K", &renderSettings->rtRestirSpatialNeighbors, 0, 8);
+                ImGui::Checkbox("Temporal Reuse", &renderSettings->rtRestirTemporal);
+                ImGui::Checkbox("Shadow In Target", &renderSettings->rtRestirShadowInTarget);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Visibility in target fn (M shadow rays/frame, more accurate)");
+                }
+            }
 
             ImGui::Separator();
             ImGui::Text("Accumulated: %u spp", rtAccumulatedSpp);

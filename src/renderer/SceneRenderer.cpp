@@ -728,23 +728,37 @@ void SceneRenderer::updateRayTrace() {
     }
 
     // ---- 2. 设置变化 → 应用 + 重置累积 ----
+    // （曝光/降噪只影响输出，不需重置累积，每帧直接读取）
     if (s.rtAlgorithm != m_rtLastAlgorithm || s.rtMaxBounces != m_rtLastBounces ||
         s.rtShadows != m_rtLastShadows ||
-        std::abs(s.rtSkyIntensity - m_rtLastSkyIntensity) > 1e-6f)
+        std::abs(s.rtSkyIntensity - m_rtLastSkyIntensity) > 1e-6f ||
+        s.rtRestirCandidates != m_rtLastRestirCandidates ||
+        s.rtRestirSpatialNeighbors != m_rtLastRestirNeighbors ||
+        s.rtRestirTemporal != m_rtLastRestirTemporal ||
+        s.rtRestirShadowInTarget != m_rtLastRestirShadowTarget)
     {
         using VEngine::RT::Algorithm;
-        rt.settings.algorithm = (s.rtAlgorithm == 1) ? Algorithm::PathTracing
-                                                     : Algorithm::Whitted;
+        rt.settings.algorithm = (s.rtAlgorithm == 2) ? Algorithm::PathTracingRestir
+                                : (s.rtAlgorithm == 1) ? Algorithm::PathTracing
+                                                       : Algorithm::Whitted;
         rt.settings.samplesPerPixel = std::max(1, s.rtSamplesPerFrame);
         rt.settings.maxBounces = std::max(1, s.rtMaxBounces);
         rt.settings.shadows = s.rtShadows;
         rt.settings.skyIntensity = s.rtSkyIntensity;
+        rt.settings.restirCandidates = std::max(1, s.rtRestirCandidates);
+        rt.settings.restirSpatialNeighbors = std::max(0, s.rtRestirSpatialNeighbors);
+        rt.settings.restirTemporal = s.rtRestirTemporal;
+        rt.settings.restirShadowInTarget = s.rtRestirShadowInTarget;
         rt.resetAccumulation();
 
         m_rtLastAlgorithm = s.rtAlgorithm;
         m_rtLastBounces = s.rtMaxBounces;
         m_rtLastShadows = s.rtShadows;
         m_rtLastSkyIntensity = s.rtSkyIntensity;
+        m_rtLastRestirCandidates = s.rtRestirCandidates;
+        m_rtLastRestirNeighbors = s.rtRestirSpatialNeighbors;
+        m_rtLastRestirTemporal = s.rtRestirTemporal;
+        m_rtLastRestirShadowTarget = s.rtRestirShadowInTarget;
     }
 
     // ---- 3. 相机 / 分辨率变化 → 重建相机与显示纹理 + 重置累积 ----

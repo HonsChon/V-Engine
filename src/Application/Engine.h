@@ -60,6 +60,10 @@ struct EngineConfig {
     int rtWidth = 1280;           // 输出分辨率
     int rtHeight = 720;
     bool rtPathTracing = false;   // false=Whitted, true=路径追踪
+    bool rtRestir = false;        // PT + ReSTIR 直接光（覆盖 rtPathTracing）
+    int rtLights = 0;             // >0: 注入 N 个网格测试点光源（多光源场景）
+    int rtFrames = 1;             // 渲染帧数（时间复用需多帧，结果取平均）
+    bool rtShadowInTarget = true; // ReSTIR 可见性计入目标函数（离线精度优先）
 };
 
 class Engine {
@@ -99,6 +103,9 @@ private:
     void createDefaultScene();
     void setupInputCallbacks();
     void shutdownSubsystems();
+
+    /// 注入 N 个网格排列点光源（--rt-lights，多光源/ReSTIR 测试用）
+    void injectTestLights(int count);
 
     // Frame sync
     void createSyncObjects();

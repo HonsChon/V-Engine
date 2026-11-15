@@ -255,6 +255,10 @@ private:
     int m_rtLastBounces = -1;
     bool m_rtLastShadows = true;
     float m_rtLastSkyIntensity = -1.0f;
+    int m_rtLastRestirCandidates = -1;
+    int m_rtLastRestirNeighbors = -1;
+    bool m_rtLastRestirTemporal = true;
+    bool m_rtLastRestirShadowTarget = false;
 
     // ========== 状态 ==========
     RenderSettings m_settings;

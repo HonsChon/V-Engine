@@ -21,6 +21,10 @@
 //   --bounces N           最大弹射次数（默认 5）
 //   --rt-width/--rt-height  输出分辨率（默认 1280x720）
 //   --pt                  路径追踪模式（默认 Whitted）
+//   --restir              PT + ReSTIR 直接光（覆盖 --pt）
+//   --rt-lights N         注入 N 个网格测试点光源（多光源/ReSTIR 测试）
+//   --rt-frames N         渲染帧数（时间复用需多帧，结果取平均；默认 1）
+//   --rt-shadow-in-target ReSTIR 可见性计入目标函数（更准，更贵）
 // 示例: VulkanPBR --autotest 890 --seconds 20   (聚类 → viz → 换模式 → soak)
 //       VulkanPBR --scene assets/scenes/a.vscene --seconds 5
 //       VulkanPBR --autotest 5 --cam 0,6,4,-90,-55 --seconds 10  (高空俯视水场景)
@@ -65,6 +69,14 @@ int main(int argc, char** argv) {
                 config.rtHeight = std::max(1, std::stoi(argv[++i]));
             } else if (std::strcmp(argv[i], "--pt") == 0) {
                 config.rtPathTracing = true;
+            } else if (std::strcmp(argv[i], "--restir") == 0) {
+                config.rtRestir = true;
+            } else if (std::strcmp(argv[i], "--rt-lights") == 0 && i + 1 < argc) {
+                config.rtLights = std::max(0, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--rt-frames") == 0 && i + 1 < argc) {
+                config.rtFrames = std::max(1, std::stoi(argv[++i]));
+            } else if (std::strcmp(argv[i], "--rt-shadow-in-target") == 0) {
+                config.rtShadowInTarget = true;
             } else if (std::strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
                 float v[5] = {0, 0, 5, -90, 0};
                 if (std::sscanf(argv[++i], "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) >= 3) {

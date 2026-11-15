@@ -829,11 +829,51 @@ void Engine::saveSceneToPath(const std::string& filePath) {
 // 离线软光追（--raytrace）
 // ============================================================
 
+void Engine::injectTestLights(int count) {
+    if (!m_scene || count <= 0) return;
+
+    auto& registry = m_scene->getRegistry();
+
+    // 覆盖 Sponza 走廊范围的网格（x∈[-8,8] z∈[-5,5]，比例 16:10）
+    int nx = std::max(1, static_cast<int>(std::sqrt(count * 16.0 / 10.0)));
+    int nz = std::max(1, (count + nx - 1) / nx);
+    float stepX = 16.0f / nx;
+    float stepZ = 10.0f / nz;
+
+    int placed = 0;
+    for (int iz = 0; iz < nz && placed < count; ++iz) {
+        for (int ix = 0; ix < nx && placed < count; ++ix) {
+            auto lightEntity = m_scene->createEntity("RT_TestLight_" + std::to_string(placed));
+            auto& transform = lightEntity.getComponent<VEngine::TransformComponent>();
+            transform.position = glm::vec3(-8.0f + (ix + 0.5f) * stepX, 3.2f,
+                                           -5.0f + (iz + 0.5f) * stepZ);
+
+            auto& light = lightEntity.addComponent<VEngine::LightComponent>(
+                VEngine::LightType::Point);
+            // 确定性色彩变化（暖-冷），物理 1/d² 衰减
+            uint32_t h = VEngine::RT::pcgHash(static_cast<uint32_t>(placed) * 2654435761u);
+            float tint = (h & 0xFF) / 255.0f;   // 0..1
+            light.color = glm::mix(glm::vec3(1.0f, 0.75f, 0.55f),
+                                   glm::vec3(0.55f, 0.75f, 1.0f), tint);
+            light.intensity = 2.0f;
+            light.constantAttenuation = 0.0f;
+            light.linearAttenuation = 0.0f;
+            light.quadraticAttenuation = 1.0f;   // 1/d²
+            light.range = 0.0f;                  // 无限
+            ++placed;
+        }
+    }
+    std::cout << "[Engine] Injected " << placed << " test point lights" << std::endl;
+}
+
 bool Engine::renderOfflineRaytrace() {
     if (!m_scene || !m_camera) {
         std::cerr << "[Engine] Offline raytrace: scene/camera not ready" << std::endl;
         return false;
     }
+
+    // 多光源注入（--rt-lights，ReSTIR 测试用）
+    if (m_config.rtLights > 0) injectTestLights(m_config.rtLights);
 
     VEngine::RT::SoftwareRaytracer rt;
 
@@ -848,26 +888,36 @@ bool Engine::renderOfflineRaytrace() {
         0.1f, 1000.0f);
     rt.setCamera(view, proj, m_config.rtWidth, m_config.rtHeight);
 
-    rt.settings.algorithm = m_config.rtPathTracing
-        ? VEngine::RT::Algorithm::PathTracing : VEngine::RT::Algorithm::Whitted;
+    rt.settings.algorithm = m_config.rtRestir
+        ? VEngine::RT::Algorithm::PathTracingRestir
+        : (m_config.rtPathTracing ? VEngine::RT::Algorithm::PathTracing
+                                  : VEngine::RT::Algorithm::Whitted);
     rt.settings.samplesPerPixel = m_config.rtSamples;
     rt.settings.maxBounces = m_config.rtBounces;
     rt.settings.shadows = true;
+    rt.settings.restirShadowInTarget = m_config.rtShadowInTarget;
 
+    const char* algoName = rt.settings.algorithm == VEngine::RT::Algorithm::PathTracingRestir
+        ? "path tracing + ReSTIR"
+        : rt.settings.algorithm == VEngine::RT::Algorithm::PathTracing
+            ? "path tracing" : "whitted";
     std::cout << "[Engine] Offline raytrace: rendering " << m_config.rtWidth << "x"
               << m_config.rtHeight << " spp=" << m_config.rtSamples
               << " bounces=" << m_config.rtBounces
-              << " algorithm=" << (m_config.rtPathTracing ? "path tracing" : "whitted")
+              << " frames=" << m_config.rtFrames
+              << " algorithm=" << algoName
               << "..." << std::endl;
 
     auto startTime = std::chrono::high_resolution_clock::now();
-    rt.renderFrame(0);
+    for (int f = 0; f < std::max(1, m_config.rtFrames); ++f) {
+        rt.renderFrame(static_cast<uint32_t>(f));
+    }
     auto endTime = std::chrono::high_resolution_clock::now();
     float renderMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
 
     std::cout << "[Engine] Offline raytrace: done in " << renderMs << " ms ("
               << rt.totalTriangles() << " tris, " << rt.totalNodes() << " BVH nodes, "
-              << rt.rayCount() << " rays)" << std::endl;
+              << rt.lightCount() << " lights, " << rt.rayCount() << " rays)" << std::endl;
 
     auto rgba = rt.framebuffer().resolveRGBA8();
     if (!VEngine::RT::savePNG(m_config.rtOutputPath, rgba,

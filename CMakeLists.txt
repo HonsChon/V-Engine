@@ -380,9 +380,10 @@ set(RENDERER_HEADERS
     src/renderer/SceneRenderer.h
 )
 
-# Raytrace - CPU 软光追（BVH / Whitted / 路径追踪）
+# Raytrace - CPU 软光追（BVH / Whitted / 路径追踪 / ReSTIR / 贴图）
 set(RAYTRACE_SOURCES
     src/raytrace/BVH.cpp
+    src/raytrace/CpuTexture.cpp
     src/raytrace/ImageWriter.cpp
     src/raytrace/SoftwareRaytracer.cpp
 )
@@ -393,6 +394,8 @@ set(RAYTRACE_HEADERS
     src/raytrace/ThreadPool.h
     src/raytrace/Framebuffer.h
     src/raytrace/ImageWriter.h
+    src/raytrace/Restir.h
+    src/raytrace/CpuTexture.h
     src/raytrace/SoftwareRaytracer.h
 )
 

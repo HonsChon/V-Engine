@@ -14,6 +14,7 @@
 #include "Scene.h"
 #include "Components.h"
 #include "MeshManager.h"
+#include "AssetPath.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <chrono>
@@ -82,7 +83,7 @@ void SoftwareRaytracer::buildFromScene(Scene* scene) {
         auto gpuMesh = MeshManager::getInstance().getMesh(meshRenderer.meshPath);
         if (!gpuMesh || !gpuMesh->mesh) continue;
 
-        // 材质（透明物体暂不支持，跳过）
+        // 材质（透明物体暂不支持，跳过）+ 贴图加载
         RTMaterial material;
         if (registry.all_of<PBRMaterialComponent>(entity)) {
             auto& src = registry.get<PBRMaterialComponent>(entity);
@@ -94,6 +95,13 @@ void SoftwareRaytracer::buildFromScene(Scene* scene) {
             material.emissiveStrength = src.emissiveStrength;
             material.opacity = src.opacity;
             material.transparent = src.isTransparent();
+
+            // 贴图（路径经 resolveAssetPath 归一化，跨平台反斜杠兼容）
+            material.albedoTex = loadTextureIndex(src.albedoMap, true);
+            material.normalTex = loadTextureIndex(src.normalMap, false);
+            material.metallicRoughTex = loadTextureIndex(src.metallicMap, false);
+            material.aoTex = loadTextureIndex(src.aoMap, false);
+            material.emissiveTex = loadTextureIndex(src.emissiveMap, true);
         }
         if (material.transparent) continue;
 
@@ -111,8 +119,12 @@ void SoftwareRaytracer::buildFromScene(Scene* scene) {
                 const Vertex& a = vertices[indices[i]];
                 const Vertex& b = vertices[indices[i + 1]];
                 const Vertex& c = vertices[indices[i + 2]];
-                meshData.triangles.push_back({ a.pos, b.pos, c.pos,
-                                               a.normal, b.normal, c.normal });
+                RTTriangle tri;
+                tri.v0 = a.pos; tri.v1 = b.pos; tri.v2 = c.pos;
+                tri.n0 = a.normal; tri.n1 = b.normal; tri.n2 = c.normal;
+                tri.uv0 = a.texCoord; tri.uv1 = b.texCoord; tri.uv2 = c.texCoord;
+                tri.t0 = a.tangent; tri.t1 = b.tangent; tri.t2 = c.tangent;
+                meshData.triangles.push_back(tri);
             }
             meshIndex = static_cast<uint32_t>(meshes_.size());
             meshData.bvh.build(meshData.triangles.data(),
@@ -187,7 +199,9 @@ void SoftwareRaytracer::buildFromScene(Scene* scene) {
     std::cout << "[SoftwareRaytracer] Scene built: " << instances_.size()
               << " instances, " << meshes_.size() << " meshes, "
               << totalTriangles() << " triangles, " << totalNodes() << " BVH nodes, "
-              << lights_.size() << " lights"
+              << lights_.size() << " lights, "
+              << textures_.size() << " textures ("
+              << (textureCache_.totalBytes() / (1024 * 1024)) << " MB)"
               << " (" << pool_->threadCount() << " threads)" << std::endl;
 }
 
@@ -206,11 +220,13 @@ void SoftwareRaytracer::setCamera(const glm::mat4& view, const glm::mat4& proj,
         width_ = width;
         height_ = height;
         fb_.resize(width, height);
+        resizeRestirBuffers();
     }
 }
 
 void SoftwareRaytracer::resetAccumulation() {
     fb_.reset();
+    restirHistoryValid_ = false;   // 相机/场景/设置变化 → 时间历史失效
 }
 
 // ============================================================
@@ -224,7 +240,17 @@ void SoftwareRaytracer::renderFrame(uint32_t frameIndex) {
 
     const int spp = std::max(1, settings.samplesPerPixel);
 
-    // 空场景：直接累积天光（保持帧同步语义，避免 sampleCount 不一致）
+    // ReSTIR 模式：多 phase 流水（无光源时退化为普通 PT）
+    if (settings.algorithm == Algorithm::PathTracingRestir
+        && !lights_.empty() && !instances_.empty()) {
+        renderFrameRestir(frameIndex, spp);
+        fb_.addSamplePass(spp);
+        auto endTime = std::chrono::high_resolution_clock::now();
+        lastFrameMs_ = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+        return;
+    }
+
+    // 空场景：直接累积天光（每像素 1 个样本，样本计数一致）
     if (instances_.empty()) {
         for (uint32_t y = 0; y < height_; ++y) {
             for (uint32_t x = 0; x < width_; ++x) {
@@ -233,10 +259,28 @@ void SoftwareRaytracer::renderFrame(uint32_t frameIndex) {
                 fb_.addSample(x, y, skyColor(dir));
             }
         }
-        fb_.addSamplePass(spp);
+        fb_.addSamplePass(1);
         return;
     }
 
+    dispatchTiles([this, frameIndex, spp](uint32_t x0, uint32_t y0,
+                                          uint32_t tw, uint32_t th) {
+        uint32_t tileSeed = pcgHash((x0 / TILE_SIZE) * 1973u
+                                    + (y0 / TILE_SIZE) * 9277u
+                                    + frameIndex * 26699u);
+        renderTile(x0, y0, tw, th, frameIndex, spp, tileSeed);
+    });
+
+    fb_.addSamplePass(spp);
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    lastFrameMs_ = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+}
+
+/// 分块派发工具：并行执行 fn(x0,y0,tw,th)，阻塞至全部完成
+void SoftwareRaytracer::dispatchTiles(
+    const std::function<void(uint32_t, uint32_t, uint32_t, uint32_t)>& fn)
+{
     uint32_t tilesX = (width_ + TILE_SIZE - 1) / TILE_SIZE;
     uint32_t tilesY = (height_ + TILE_SIZE - 1) / TILE_SIZE;
 
@@ -246,18 +290,10 @@ void SoftwareRaytracer::renderFrame(uint32_t frameIndex) {
             uint32_t y0 = ty * TILE_SIZE;
             uint32_t tw = std::min(TILE_SIZE, width_ - x0);
             uint32_t th = std::min(TILE_SIZE, height_ - y0);
-            uint32_t tileSeed = pcgHash(tx * 1973u + ty * 9277u + frameIndex * 26699u);
-            pool_->enqueue([this, x0, y0, tw, th, frameIndex, spp, tileSeed] {
-                renderTile(x0, y0, tw, th, frameIndex, spp, tileSeed);
-            });
+            pool_->enqueue([fn, x0, y0, tw, th] { fn(x0, y0, tw, th); });
         }
     }
     pool_->waitAll();
-
-    fb_.addSamplePass(spp);
-
-    auto endTime = std::chrono::high_resolution_clock::now();
-    lastFrameMs_ = std::chrono::duration<float, std::milli>(endTime - startTime).count();
 }
 
 void SoftwareRaytracer::renderTile(uint32_t x0, uint32_t y0, uint32_t tileW, uint32_t tileH,
@@ -267,7 +303,6 @@ void SoftwareRaytracer::renderTile(uint32_t x0, uint32_t y0, uint32_t tileW, uin
         for (uint32_t x = 0; x < tileW; ++x) {
             uint32_t px = x0 + x;
             uint32_t py = y0 + y;
-            glm::vec3 color(0.0f);
 
             for (int s = 0; s < spp; ++s) {
                 uint32_t rng = pcgHash(px + py * width_ + s * 8191u
@@ -276,17 +311,17 @@ void SoftwareRaytracer::renderTile(uint32_t x0, uint32_t y0, uint32_t tileW, uin
                 generateRay(invViewProj_, px, py, width_, height_,
                             rand01(rng), rand01(rng), orig, dir);
 
+                // 逐样本直接累积（addSamplePass(spp) 与样本计数严格对应）
                 switch (settings.algorithm) {
                     case Algorithm::Whitted:
-                        color += traceWhitted(orig, dir, 0, rng);
+                        fb_.addSample(px, py, traceWhitted(orig, dir, 0, rng));
                         break;
                     case Algorithm::PathTracing:
-                        color += tracePath(orig, dir, rng);
+                    case Algorithm::PathTracingRestir:   // 无 ReSTIR phase 时按 PT 处理
+                        fb_.addSample(px, py, tracePath(orig, dir, rng));
                         break;
                 }
             }
-            color /= static_cast<float>(spp);
-            fb_.addSample(px, py, color);
         }
     }
 }
@@ -338,9 +373,94 @@ bool SoftwareRaytracer::intersectScene(const glm::vec3& orig, const glm::vec3& d
 
     out.hit = best;
     out.position = orig + dir * best.t;
-    out.normal = worldN;
-    out.material = &inst.material;
+
+    // 逐命中贴图采样（albedo/法线/metallicRoughness/ao/emissive）
+    evaluateShadedMaterial(tri, inst, best.u, best.v, worldN, dir, out.shaded);
     return true;
+}
+
+// ============================================================
+// 贴图 — 加载与逐命中材质求值
+// ============================================================
+
+int SoftwareRaytracer::loadTextureIndex(const std::string& path, bool srgb) {
+    if (path.empty()) return -1;
+    std::string resolved = resolveAssetPath(path);
+    auto tex = textureCache_.load(resolved, srgb);
+    if (!tex) return -1;
+
+    // 去重下标（同一贴图可能被多材质引用）
+    auto it = textureIndexByPath_.find(resolved);
+    if (it != textureIndexByPath_.end()) return it->second;
+
+    int index = static_cast<int>(textures_.size());
+    textures_.push_back(tex);
+    textureIndexByPath_[resolved] = index;
+    return index;
+}
+
+void SoftwareRaytracer::evaluateShadedMaterial(const RTTriangle& tri, const RTInstance& inst,
+                                               float u, float v, const glm::vec3& geomNormal,
+                                               const glm::vec3& dir, ShadedMaterial& out) const
+{
+    const RTMaterial& mat = inst.material;
+    float w = 1.0f - u - v;
+
+    out.albedo = mat.albedo;
+    out.metallic = mat.metallic;
+    out.roughness = mat.roughness;
+    out.ao = mat.ao;
+    out.emissive = mat.emissive * mat.emissiveStrength;
+    out.normal = geomNormal;
+
+    bool anyTex = mat.albedoTex >= 0 || mat.normalTex >= 0 || mat.metallicRoughTex >= 0
+               || mat.aoTex >= 0 || mat.emissiveTex >= 0;
+    if (!anyTex) return;
+
+    // UV 插值（世界无关，直接用局部 UV）
+    glm::vec2 uv = tri.uv0 * w + tri.uv1 * u + tri.uv2 * v;
+
+    if (mat.albedoTex >= 0) {
+        out.albedo *= textures_[mat.albedoTex]->sampleRGB(uv.x, uv.y);
+    }
+    if (mat.metallicRoughTex >= 0) {
+        // glTF metallicRoughness 打包：G=roughness B=metallic（因子相乘）
+        const CpuTexture& tex = *textures_[mat.metallicRoughTex];
+        out.metallic *= tex.sampleChannel(uv.x, uv.y, 2);
+        out.roughness *= tex.sampleChannel(uv.x, uv.y, 1);
+    }
+    if (mat.aoTex >= 0) {
+        out.ao *= textures_[mat.aoTex]->sampleChannel(uv.x, uv.y, 0);
+    }
+    if (mat.emissiveTex >= 0) {
+        out.emissive *= textures_[mat.emissiveTex]->sampleRGB(uv.x, uv.y);
+    }
+    if (mat.normalTex >= 0) {
+        // tangent-space 法线贴图：TBN 变换（T 用顶点切线插值，Gram-Schmidt 正交化）
+        glm::vec3 localT = tri.t0 * w + tri.t1 * u + tri.t2 * v;
+        glm::vec3 T = inst.normalMatrix * localT;
+        // 与几何法线正交化（插值/法线贴图扰动后 T 可能不严格正交）
+        T = T - geomNormal * glm::dot(geomNormal, T);
+        float tLen = glm::length(T);
+        if (tLen > 1e-5f) {
+            T /= tLen;
+            glm::vec3 B = glm::cross(geomNormal, T);
+
+            glm::vec3 tn = textures_[mat.normalTex]->sampleNormal(uv.x, uv.y);
+            glm::vec3 mapped = T * tn.x + B * tn.y + geomNormal * tn.z;
+            mapped = glm::normalize(mapped);
+            if (std::isfinite(mapped.x)) {
+                // 双面一致：映射法线保持朝向射线来向一侧
+                if (glm::dot(mapped, dir) > 0.0f) mapped = -mapped;
+                out.normal = mapped;
+            }
+        }
+    }
+
+    // 参数夹取（贴图数据可能越界）
+    out.metallic = glm::clamp(out.metallic, 0.0f, 1.0f);
+    out.roughness = glm::clamp(out.roughness, 0.03f, 1.0f);
+    out.ao = glm::clamp(out.ao, 0.0f, 1.0f);
 }
 
 bool SoftwareRaytracer::occluded(const glm::vec3& orig, const glm::vec3& dir,
@@ -374,11 +494,9 @@ glm::vec3 SoftwareRaytracer::skyColor(const glm::vec3& dir) const {
 
 glm::vec3 SoftwareRaytracer::directLightingWhitted(const SceneHit& hit, uint32_t& rng) const {
     (void)rng;
-    const RTMaterial& m = *hit.material;
+    const ShadedMaterial& sm = hit.shaded;
     // 有效漫反射反照率：镜面金属无漫反射；粗糙金属（matte metal）保留 albedo 漫反射
-    // （Sponza 等资产常见 metallic=1 + roughness=1 的哑光金属，纯镜面处理会全黑）
-    float gloss = 1.0f - m.roughness;
-    glm::vec3 diffuseAlbedo = m.albedo * (1.0f - m.metallic * gloss) * m.ao;
+    glm::vec3 diffuseAlbedo = sm.diffuseFactor();
     glm::vec3 result(0.0f);
 
     for (const auto& light : lights_) {
@@ -395,13 +513,13 @@ glm::vec3 SoftwareRaytracer::directLightingWhitted(const SceneHit& hit, uint32_t
             toLight = diff / distance;
         }
 
-        float nDotL = glm::dot(hit.normal, toLight);
+        float nDotL = glm::dot(sm.normal, toLight);
         if (nDotL <= 0.0f) continue;
 
         // 阴影射线
         if (settings.shadows) {
             float shadowT = distance - 2.0f * RAY_EPSILON;
-            if (occluded(hit.position + hit.normal * RAY_EPSILON, toLight, shadowT)) {
+            if (occluded(hit.position + sm.normal * RAY_EPSILON, toLight, shadowT)) {
                 continue;
             }
         }
@@ -423,55 +541,42 @@ glm::vec3 SoftwareRaytracer::traceWhitted(const glm::vec3& orig, const glm::vec3
         return skyColor(dir);
     }
 
-    const RTMaterial& m = *hit.material;
-    float gloss = 1.0f - m.roughness;
+    const ShadedMaterial& sm = hit.shaded;
+    float gloss = 1.0f - sm.roughness;
     glm::vec3 result(0.0f);
 
-    // 自发光
-    result += m.emissive * m.emissiveStrength;
+    // 自发光（ShadedMaterial.emissive 已含贴图与强度）
+    result += sm.emissive;
 
     // 直接光（Lambert 漫反射；粗糙金属保留漫反射分量）
     result += directLightingWhitted(hit, rng);
 
     // 环境泛光（天光按法线采样 × ao，模拟天光漫射）
-    result += m.albedo * (1.0f - m.metallic * gloss) * m.ao
-            * skyColor(hit.normal) * 0.15f;
+    result += sm.albedo * (1.0f - sm.metallic * gloss) * sm.ao
+            * skyColor(sm.normal) * 0.15f;
 
     glm::vec3 viewDir = -dir;
-    float cosTheta = glm::dot(hit.normal, viewDir);
-    glm::vec3 fresnel = schlickFresnel(m.f0(), cosTheta);
+    float cosTheta = glm::dot(sm.normal, viewDir);
+    glm::vec3 fresnel = schlickFresnel(sm.f0(), cosTheta);
 
     // 镜面判定：金属且足够光滑（粗糙金属走漫反射路径）
-    if (m.metallic > 0.5f && m.roughness < 0.35f) {
+    if (sm.metallic > 0.5f && sm.roughness < 0.35f) {
         // 金属镜面：反射 + 粗糙度扰动，颜色随光泽度趋近 albedo
-        glm::vec3 reflDir = glm::reflect(dir, hit.normal);
-        float rough = m.roughness * m.roughness;
+        glm::vec3 reflDir = glm::reflect(dir, sm.normal);
+        float rough = sm.roughness * sm.roughness;
         if (rough > 1e-3f) {
             // 粗糙镜面：在反射方向附近抖动（cheap glossy）
             glm::vec3 jitter(randSym(rng), randSym(rng), randSym(rng));
             reflDir = glm::normalize(reflDir + jitter * rough * 0.5f);
-            if (glm::dot(reflDir, hit.normal) <= 0.0f) reflDir = glm::reflect(dir, hit.normal);
+            if (glm::dot(reflDir, sm.normal) <= 0.0f) reflDir = glm::reflect(dir, sm.normal);
         }
-        glm::vec3 kS = glm::mix(fresnel, m.albedo, gloss);
+        glm::vec3 kS = glm::mix(fresnel, sm.albedo, gloss);
         result += kS * traceWhitted(
-            hit.position + hit.normal * RAY_EPSILON, reflDir, depth + 1, rng);
-    } else if (m.opacity < 1.0f) {
-        // 电介质玻璃：Fresnel 分裂反射/折射两路（各按权重递归）
-        float eta = cosTheta > 0.0f ? 1.0f / 1.5f : 1.5f;   // 空气↔玻璃
-        glm::vec3 refrDir = glm::refract(dir, hit.normal, eta);
-        float kr = 0.04f + 0.96f * std::pow(1.0f - std::abs(cosTheta), 5.0f);
-        glm::vec3 tint = glm::mix(glm::vec3(1.0f), m.albedo, 0.5f);
-
-        if (glm::length(refrDir) > 0.5f) {
-            result += tint * (1.0f - kr) * traceWhitted(
-                hit.position - hit.normal * RAY_EPSILON, refrDir, depth + 1, rng);
-        }
-        glm::vec3 reflDir = glm::reflect(dir, hit.normal);
-        result += tint * kr * traceWhitted(
-            hit.position + hit.normal * RAY_EPSILON, reflDir, depth + 1, rng);
+            hit.position + sm.normal * RAY_EPSILON, reflDir, depth + 1, rng);
     } else {
         // 光滑电介质：弱 Fresnel 天光反射（近似高光），无递归
-        glm::vec3 reflDir = glm::reflect(dir, hit.normal);
+        // （玻璃分支已移除：透明实体在场景采集时即跳过）
+        glm::vec3 reflDir = glm::reflect(dir, sm.normal);
         result += fresnel * gloss * gloss * skyColor(reflDir) * 0.3f;
     }
 
@@ -485,70 +590,91 @@ glm::vec3 SoftwareRaytracer::traceWhitted(const glm::vec3& orig, const glm::vec3
 glm::vec3 SoftwareRaytracer::estimateDirectLight(const SceneHit& hit, uint32_t& rng) const {
     if (lights_.empty()) return glm::vec3(0.0f);
 
-    // 随机取一个光源（均匀，pdf = 1/N）
-    uint32_t lightIdx = static_cast<uint32_t>(rand01(rng) * lights_.size());
-    if (lightIdx >= lights_.size()) lightIdx = lights_.size() - 1;
-    const RTLight& light = lights_[lightIdx];
-    float lightPdf = 1.0f / static_cast<float>(lights_.size());
+    // 每次 NEE 采样 2 个光源取平均（方差减半，间接弹射降噪的关键）
+    constexpr int NEE_LIGHT_SAMPLES = 2;
+    glm::vec3 result(0.0f);
 
-    glm::vec3 toLight;
-    float distance;
-    if (light.type == RTLightType::Directional) {
-        toLight = -light.direction;
-        distance = std::numeric_limits<float>::max();
-    } else {
-        glm::vec3 diff = light.position - hit.position;
-        distance = glm::length(diff);
-        if (distance < 1e-6f) return glm::vec3(0.0f);
-        toLight = diff / distance;
-    }
+    for (int ls = 0; ls < NEE_LIGHT_SAMPLES; ++ls) {
+        // 随机取一个光源（均匀，pdf = 1/N）
+        uint32_t lightIdx = static_cast<uint32_t>(rand01(rng) * lights_.size());
+        if (lightIdx >= lights_.size()) lightIdx = lights_.size() - 1;
+        const RTLight& light = lights_[lightIdx];
+        float lightPdf = 1.0f / static_cast<float>(lights_.size());
 
-    float nDotL = glm::dot(hit.normal, toLight);
-    if (nDotL <= 0.0f) return glm::vec3(0.0f);
-
-    // 阴影射线
-    if (settings.shadows) {
-        float shadowT = distance - 2.0f * RAY_EPSILON;
-        if (occluded(hit.position + hit.normal * RAY_EPSILON, toLight, shadowT)) {
-            return glm::vec3(0.0f);
+        glm::vec3 toLight;
+        float distance;
+        if (light.type == RTLightType::Directional) {
+            toLight = -light.direction;
+            distance = std::numeric_limits<float>::max();
+        } else {
+            glm::vec3 diff = light.position - hit.position;
+            distance = glm::length(diff);
+            if (distance < 1e-6f) continue;
+            toLight = diff / distance;
         }
-    }
 
-    // Lambert BRDF f = albedo/π；粗糙金属保留漫反射（镜面金属无）；
-    // 解析光源（delta light）采样无需立体角 pdf，直接 f × Lo × cosθ / lightPdf
-    const RTMaterial& m = *hit.material;
-    float gloss = 1.0f - m.roughness;
-    glm::vec3 f = m.albedo * (1.0f / 3.14159265f) * (1.0f - m.metallic * gloss) * m.ao;
-    return f * light.radiance(toLight, distance) * nDotL / lightPdf;
+        float nDotL = glm::dot(hit.shaded.normal, toLight);
+        if (nDotL <= 0.0f) continue;
+
+        // 阴影射线
+        if (settings.shadows) {
+            float shadowT = distance - 2.0f * RAY_EPSILON;
+            if (occluded(hit.position + hit.shaded.normal * RAY_EPSILON, toLight, shadowT)) {
+                continue;
+            }
+        }
+
+        // Lambert BRDF f = albedo/π；粗糙金属保留漫反射（镜面金属无）；
+        // 解析光源（delta light）采样无需立体角 pdf，直接 f × Lo × cosθ / lightPdf
+        glm::vec3 f = hit.shaded.diffuseFactor() * (1.0f / 3.14159265f);
+        result += f * light.radiance(toLight, distance) * nDotL / lightPdf;
+    }
+    return result / static_cast<float>(NEE_LIGHT_SAMPLES);
 }
 
 glm::vec3 SoftwareRaytracer::tracePath(const glm::vec3& origIn, const glm::vec3& dirIn,
                                        uint32_t& rng) const
 {
+    SceneHit hit;
+    if (!intersectScene(origIn, dirIn, std::numeric_limits<float>::max(), hit)) {
+        return skyColor(dirIn);
+    }
+    return tracePathFrom(hit, dirIn, rng, nullptr);
+}
+
+/**
+ * @brief 从已求交的主命中继续路径追踪
+ *
+ * bounce0 的直接光可由 directOverride 注入（ReSTIR 蓄水池估计结果，
+ * 含可见性），后续弹射仍走 NEE；间接弹射结构不变。
+ */
+glm::vec3 SoftwareRaytracer::tracePathFrom(const SceneHit& firstHit, const glm::vec3& firstDir,
+                                           uint32_t& rng, const glm::vec3* directOverride) const
+{
     glm::vec3 throughput(1.0f);
     glm::vec3 radiance(0.0f);
-    glm::vec3 orig = origIn;
-    glm::vec3 dir = dirIn;
+    glm::vec3 dir = firstDir;
+    SceneHit hit = firstHit;
+    bool firstBounce = true;
 
     for (int bounce = 0; bounce < settings.maxBounces; ++bounce) {
-        SceneHit hit;
-        if (!intersectScene(orig, dir, std::numeric_limits<float>::max(), hit)) {
-            radiance += throughput * skyColor(dir);
-            break;
+        const ShadedMaterial& sm = hit.shaded;
+
+        // 自发光（ShadedMaterial.emissive 已含贴图与强度）
+        radiance += throughput * sm.emissive;
+
+        // 直接光：bounce0 可由 ReSTIR 注入，其余弹射走 NEE
+        if (firstBounce && directOverride) {
+            radiance += throughput * (*directOverride);
+        } else {
+            radiance += throughput * estimateDirectLight(hit, rng);
         }
-
-        const RTMaterial& m = *hit.material;
-
-        // 自发光（解析光源不对应几何，无双重计数问题）
-        radiance += throughput * m.emissive * m.emissiveStrength;
-
-        // NEE 直接光
-        radiance += throughput * estimateDirectLight(hit, rng);
+        firstBounce = false;
 
         // ---- BSDF 采样下一条光线 ----
-        float cosTheta = glm::dot(hit.normal, -dir);
-        glm::vec3 fresnel = schlickFresnel(m.f0(), cosTheta);
-        float gloss = 1.0f - m.roughness;
+        float cosTheta = glm::dot(sm.normal, -dir);
+        glm::vec3 fresnel = schlickFresnel(sm.f0(), cosTheta);
+        float gloss = 1.0f - sm.roughness;
 
         // 镜面概率 = Fresnel 亮度 × 光泽度（粗糙表面镜面瓣坍缩为漫反射），
         // clamp 防退化
@@ -560,28 +686,35 @@ glm::vec3 SoftwareRaytracer::tracePath(const glm::vec3& origIn, const glm::vec3&
         glm::vec3 newDir;
         if (rand01(rng) < specProb) {
             // 镜面瓣：反射 + 粗糙度扰动（GGX 简化）
-            newDir = glm::reflect(dir, hit.normal);
-            float rough = m.roughness * m.roughness;
+            newDir = glm::reflect(dir, sm.normal);
+            float rough = sm.roughness * sm.roughness;
             if (rough > 1e-3f) {
                 glm::vec3 jitter(randSym(rng), randSym(rng), randSym(rng));
                 newDir += jitter * rough;
             }
             newDir = glm::normalize(newDir);
-            if (glm::dot(newDir, hit.normal) <= 0.0f) {
+            if (glm::dot(newDir, sm.normal) <= 0.0f) {
                 break;   // 反射进表面 → 终止
             }
             // f × cos / pdf ≈ F / specProb（delta 镜面瓣）
             throughput *= fresnel / specProb;
         } else {
             // 漫反射瓣：余弦加权采样
-            newDir = cosineSampleHemisphere(hit.normal, rng);
+            newDir = cosineSampleHemisphere(sm.normal, rng);
             // Lambert：f × cos / pdf = albedo（(albedo/π)(cos)/(cos/π)）；
             // 粗糙金属保留 albedo 漫反射
-            throughput *= m.albedo * (1.0f - m.metallic * gloss) * m.ao / (1.0f - specProb);
+            throughput *= sm.albedo * (1.0f - sm.metallic * gloss) * sm.ao / (1.0f - specProb);
         }
 
         // 偏移起点避免自相交，继续弹射
-        orig = hit.position + hit.normal * RAY_EPSILON;
+        glm::vec3 orig = hit.position + sm.normal * RAY_EPSILON;
+
+        SceneHit next;
+        if (!intersectScene(orig, newDir, std::numeric_limits<float>::max(), next)) {
+            radiance += throughput * skyColor(newDir);
+            break;
+        }
+        hit = next;
         dir = newDir;
 
         // Russian Roulette：3 次弹射后按吞吐量概率终止
@@ -594,6 +727,394 @@ glm::vec3 SoftwareRaytracer::tracePath(const glm::vec3& origIn, const glm::vec3&
         }
     }
     return radiance;
+}
+
+// ============================================================
+// ReSTIR — 目标函数与无偏合并
+// ============================================================
+
+glm::vec3 SoftwareRaytracer::rhoLightRGB(uint32_t lightIdx, const SurfaceInfo& surf) const {
+    if (!surf.valid || lightIdx >= lights_.size()) return glm::vec3(0.0f);
+    const RTLight& light = lights_[lightIdx];
+
+    glm::vec3 toLight;
+    float distance;
+    if (light.type == RTLightType::Directional) {
+        toLight = -light.direction;
+        distance = std::numeric_limits<float>::max();
+    } else {
+        glm::vec3 diff = light.position - surf.position;
+        distance = glm::length(diff);
+        if (distance < 1e-6f) return glm::vec3(0.0f);
+        toLight = diff / distance;
+    }
+
+    float nDotL = glm::dot(surf.normal, toLight);
+    if (nDotL <= 0.0f) return glm::vec3(0.0f);
+
+    // Lambert f = diffuseFactor/π × Le × cosθ（未遮挡）
+    return surf.mat.diffuseFactor() * (1.0f / 3.14159265f)
+         * light.radiance(toLight, distance) * nDotL;
+}
+
+float SoftwareRaytracer::rhoLight(uint32_t lightIdx, const SurfaceInfo& surf) const {
+    glm::vec3 rgb = rhoLightRGB(lightIdx, surf);
+    return 0.2126f * rgb.r + 0.7152f * rgb.g + 0.0722f * rgb.b;
+}
+
+bool SoftwareRaytracer::lightShadowed(uint32_t lightIdx, const SurfaceInfo& surf) const {
+    if (lightIdx >= lights_.size()) return true;
+    const RTLight& light = lights_[lightIdx];
+
+    glm::vec3 toLight;
+    float distance;
+    if (light.type == RTLightType::Directional) {
+        toLight = -light.direction;
+        distance = std::numeric_limits<float>::max();
+    } else {
+        glm::vec3 diff = light.position - surf.position;
+        distance = glm::length(diff);
+        if (distance < 1e-6f) return false;
+        toLight = diff / distance;
+    }
+    return occluded(surf.position + surf.normal * RAY_EPSILON, toLight,
+                    distance - 2.0f * RAY_EPSILON);
+}
+
+/**
+ * @brief 蓄水池合并（shift 校正池化，无偏）
+ *
+ * 输入 count 个独立蓄水池（各建在自己的表面 surfs[r] 上，输出样本 y_r），
+ * 输出目标为 target 表面的合并蓄水池。
+ *
+ * 数学（候选池化）：蓄水池 r 的第 j 个候选权重为 ρ̂_r(x_j)/p(x_j)，
+ * 移位到目标表面后等价于 ρ̂_t(x_j)/p(x_j) —— 恰为以 target 为目标函数的
+ * 合法 RIS 权重。因此合并 = wSum 直接相加（各候选先乘 shift 因子）：
+ *   w_r = wSum_r × ρ̂_t(y_r)/ρ̂_r(y_r)
+ *   合并后 W = Σw_r / (M'·ρ̂_t(y'))，M' = ΣM_r
+ * 同表面（shift=1）时退化为朴素池化 —— 无偏且方差最小。
+ * 几何相似性拒绝在调用方完成（与样本值无关，不影响无偏性）。
+ *
+ * 注：GRIS pairwise-MIS（c_r 折扣双方 wSum）在同目标情形会使 W 减半
+ * （M 翻倍而 wSum 被 1/2 缩放），链式时间合并导致估计几何衰减 —— 已弃用。
+ */
+void SoftwareRaytracer::gatherMergeReservoirs(const Reservoir* const* reservoirs,
+                                              const SurfaceInfo* const* surfs,
+                                              int count, const SurfaceInfo& target,
+                                              Reservoir& out, uint32_t& rng) const
+{
+    if (count > 9) count = 9;
+    out.reset();
+
+    for (int r = 0; r < count; ++r) {
+        const Reservoir& R = *reservoirs[r];
+        if (!R.valid() || R.W <= 0.0f) continue;
+
+        float rhoAtTarget = rhoLight(R.sample, target);
+        if (rhoAtTarget <= 0.0f) continue;   // 目标表面无贡献 → 跳过
+        float rhoOwn = rhoLight(R.sample, *surfs[r]);
+        if (rhoOwn <= 0.0f) continue;
+
+        // 移位后的候选权重和
+        float w = R.wSum * (rhoAtTarget / rhoOwn);
+        out.M += R.M;
+        out.wSum += w;
+        if (w > 0.0f && rand01(rng) < w / out.wSum) {
+            out.sample = R.sample;
+        }
+    }
+
+    // M 跨帧累积上限（防 float 溢出，行业惯例）
+    if (out.M > 1e6f) out.M = 1e6f;
+
+    if (out.valid()) {
+        float rhoS = rhoLight(out.sample, target);
+        out.W = out.wSum / (out.M * std::max(rhoS, 1e-20f));
+    }
+}
+
+void SoftwareRaytracer::resizeRestirBuffers() {
+    size_t n = static_cast<size_t>(width_) * height_;
+    restirGBuffer_.assign(n, SurfaceInfo{});
+    restirInitial_.assign(n, Reservoir{});
+    restirSpatial_.assign(n, Reservoir{});
+    restirFinal_.assign(n, Reservoir{});
+    restirPrev_.clear();
+    restirPrevGBuffer_.clear();
+    restirHistoryValid_ = false;
+}
+
+// ============================================================
+// ReSTIR — 渲染 phases
+// ============================================================
+
+void SoftwareRaytracer::renderFrameRestir(uint32_t frameIndex, int spp) {
+    // Phase A: 主命中 GBuffer + 初始候选蓄水池
+    dispatchTiles([this, frameIndex](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
+        restirPhaseInitial(x0, y0, tw, th, frameIndex);
+    });
+
+    // Phase B: 空间复用（读 initial + GBuffer，写 spatial）
+    dispatchTiles([this, frameIndex](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
+        restirPhaseSpatial(x0, y0, tw, th, frameIndex);
+    });
+
+    // Phase C: 时间复用（读 spatial + prev，写 final）
+    dispatchTiles([this, frameIndex](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
+        restirPhaseTemporal(x0, y0, tw, th, frameIndex);
+    });
+
+    // Phase D: 着色（直接光 = 蓄水池估计；间接光走路径追踪）
+    dispatchTiles([this, frameIndex, spp](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
+        restirPhaseShade(x0, y0, tw, th, frameIndex, spp);
+    });
+
+    // Phase E: 保存历史（时间复用用）
+    restirPrev_ = restirFinal_;
+    restirPrevGBuffer_ = restirGBuffer_;
+    prevViewProj_ = glm::inverse(invViewProj_);   // invViewProj = inverse(viewProj)
+    prevCamPos_ = camPos_;
+    restirHistoryValid_ = true;
+}
+
+/// 逐像素 rng 种子（各 phase 一致）
+static inline uint32_t pixelRngSeed(uint32_t px, uint32_t py, uint32_t w,
+                                    uint32_t frameIndex) {
+    return pcgHash(px + py * w * 7919u + frameIndex * 104729u);
+}
+
+void SoftwareRaytracer::restirPhaseInitial(uint32_t x0, uint32_t y0, uint32_t tw,
+                                           uint32_t th, uint32_t frameIndex)
+{
+    const int M = std::max(1, settings.restirCandidates);
+    const uint32_t lightCount = static_cast<uint32_t>(lights_.size());
+
+    for (uint32_t y = 0; y < th; ++y) {
+        for (uint32_t x = 0; x < tw; ++x) {
+            uint32_t px = x0 + x;
+            uint32_t py = y0 + y;
+            size_t idx = static_cast<size_t>(py) * width_ + px;
+
+            uint32_t rng = pixelRngSeed(px, py, width_, frameIndex);
+            float jx = rand01(rng);
+            float jy = rand01(rng);
+
+            SurfaceInfo& surf = restirGBuffer_[idx];
+            Reservoir& res = restirInitial_[idx];
+            res.reset();
+
+            glm::vec3 orig, dir;
+            generateRay(invViewProj_, px, py, width_, height_, jx, jy, orig, dir);
+
+            SceneHit hit;
+            if (!intersectScene(orig, dir, std::numeric_limits<float>::max(), hit)) {
+                surf = SurfaceInfo{};   // valid=false → 着色 phase 出天光
+                continue;
+            }
+
+            surf.position = hit.position;
+            surf.normal = hit.shaded.normal;
+            surf.mat = hit.shaded;          // 含贴图采样结果（mat.normal == surf.normal）
+            surf.depth = glm::length(hit.position - orig);
+            surf.instanceIndex = hit.hit.instanceIndex;
+            surf.valid = true;
+
+            // 初始候选：均匀采样光源 p=1/N，w = ρ̂/p
+            for (int c = 0; c < M; ++c) {
+                uint32_t li = std::min(lightCount - 1,
+                    static_cast<uint32_t>(rand01(rng) * lightCount));
+                float w = rhoLight(li, surf) * static_cast<float>(lightCount);
+                if (w > 0.0f && settings.restirShadowInTarget && lightShadowed(li, surf)) {
+                    w = 0.0f;   // 可见性计入目标函数（贵但阴影更准）
+                }
+                res.update(li, w, rng);
+            }
+
+            if (res.valid()) {
+                float rhoS = rhoLight(res.sample, surf);
+                res.W = res.wSum / (res.M * std::max(rhoS, 1e-20f));
+            }
+        }
+    }
+}
+
+void SoftwareRaytracer::restirPhaseSpatial(uint32_t x0, uint32_t y0, uint32_t tw,
+                                           uint32_t th, uint32_t frameIndex)
+{
+    const int K = std::clamp(settings.restirSpatialNeighbors, 0, 8);
+
+    for (uint32_t y = 0; y < th; ++y) {
+        for (uint32_t x = 0; x < tw; ++x) {
+            uint32_t px = x0 + x;
+            uint32_t py = y0 + y;
+            size_t idx = static_cast<size_t>(py) * width_ + px;
+            uint32_t rng = pixelRngSeed(px, py, width_, frameIndex * 31u + 7u);
+
+            Reservoir& out = restirSpatial_[idx];
+            out.reset();
+            const SurfaceInfo& surf = restirGBuffer_[idx];
+            if (!surf.valid || !restirInitial_[idx].valid()) continue;
+
+            // 候选集合：自身 + K 个随机邻居（读相邻像素 → 需与写入分离，本 phase 只写自己）
+            const Reservoir* cands[9];
+            const SurfaceInfo* surfs[9];
+            int n = 0;
+            cands[n] = &restirInitial_[idx];
+            surfs[n] = &surf;
+            ++n;
+
+            for (int k = 0; k < K; ++k) {
+                // 偏移 ±4..±12 px（小半径提高曲面接受率）
+                int dx = static_cast<int>(rand01(rng) * 9.0f) + 4;
+                int dy = static_cast<int>(rand01(rng) * 9.0f) + 4;
+                if (rand01(rng) < 0.5f) dx = -dx;
+                if (rand01(rng) < 0.5f) dy = -dy;
+                int nx = static_cast<int>(px) + dx;
+                int ny = static_cast<int>(py) + dy;
+                if (nx < 0 || ny < 0 || nx >= static_cast<int>(width_)
+                    || ny >= static_cast<int>(height_)) continue;
+
+                size_t nidx = static_cast<size_t>(ny) * width_ + nx;
+                const Reservoir& nr = restirInitial_[nidx];
+                const SurfaceInfo& ns = restirGBuffer_[nidx];
+                if (!ns.valid || !nr.valid()) continue;
+
+                // 几何相似性拒绝（与样本值无关 → 不影响力学无偏性）
+                // 平面距离测试容忍斜面深度梯度；相对深度兜底
+                glm::vec3 dp = ns.position - surf.position;
+                float planeDist = std::abs(glm::dot(surf.normal, dp));
+                bool depthOK = (std::abs(ns.depth - surf.depth) < 0.2f * surf.depth)
+                            || (planeDist < 0.1f * surf.depth);
+                if (!depthOK) continue;
+                if (glm::dot(ns.normal, surf.normal) < 0.75f) continue;
+
+                cands[n] = &nr;
+                surfs[n] = &ns;
+                ++n;
+            }
+
+            gatherMergeReservoirs(cands, surfs, n, surf, out, rng);
+        }
+    }
+}
+
+void SoftwareRaytracer::restirPhaseTemporal(uint32_t x0, uint32_t y0, uint32_t tw,
+                                            uint32_t th, uint32_t frameIndex)
+{
+    for (uint32_t y = 0; y < th; ++y) {
+        for (uint32_t x = 0; x < tw; ++x) {
+            uint32_t px = x0 + x;
+            uint32_t py = y0 + y;
+            size_t idx = static_cast<size_t>(py) * width_ + px;
+            uint32_t rng = pixelRngSeed(px, py, width_, frameIndex * 131u + 17u);
+
+            Reservoir& out = restirFinal_[idx];
+            const Reservoir& spatial = restirSpatial_[idx];
+            if (!spatial.valid()) {
+                out.reset();
+                continue;
+            }
+
+            // 无历史 / 关闭时间复用 → 直通
+            if (!settings.restirTemporal || !restirHistoryValid_
+                || restirPrev_.empty() || restirPrevGBuffer_.empty())
+            {
+                out = spatial;
+                continue;
+            }
+
+            const SurfaceInfo& surf = restirGBuffer_[idx];
+            if (!surf.valid) {
+                out = spatial;
+                continue;
+            }
+
+            // 重投影：当前表面点 → 上一帧屏幕坐标
+            glm::vec4 clip = prevViewProj_ * glm::vec4(surf.position, 1.0f);
+            if (clip.w <= 0.0f) { out = spatial; continue; }
+            glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            if (ndc.x < -1.0f || ndc.x > 1.0f || ndc.y < -1.0f || ndc.y > 1.0f) {
+                out = spatial;
+                continue;
+            }
+            float fx = (ndc.x + 1.0f) * 0.5f * width_;
+            float fy = (1.0f - ndc.y) * 0.5f * height_;   // GL Y-up → 行序 top-down
+            int nx = std::clamp(static_cast<int>(fx), 0, static_cast<int>(width_) - 1);
+            int ny = std::clamp(static_cast<int>(fy), 0, static_cast<int>(height_) - 1);
+            size_t nidx = static_cast<size_t>(ny) * width_ + nx;
+
+            const SurfaceInfo& ps = restirPrevGBuffer_[nidx];
+            const Reservoir& pr = restirPrev_[nidx];
+            if (!ps.valid || !pr.valid()) { out = spatial; continue; }
+
+            // 深度/法线连续性验证（拒绝不连续表面，避免拖影）
+            float dPrev = glm::length(surf.position - prevCamPos_);
+            if (std::abs(dPrev - ps.depth) > 0.1f * ps.depth) { out = spatial; continue; }
+            if (glm::dot(ps.normal, surf.normal) < 0.9f) { out = spatial; continue; }
+
+            // GRIS 合并：本帧空间结果 + 上一帧蓄水池（目标 = 当前表面）
+            const Reservoir* cands[2] = { &spatial, &pr };
+            const SurfaceInfo* surfs[2] = { &surf, &ps };
+            gatherMergeReservoirs(cands, surfs, 2, surf, out, rng);
+            if (!out.valid()) out = spatial;
+        }
+    }
+}
+
+void SoftwareRaytracer::restirPhaseShade(uint32_t x0, uint32_t y0, uint32_t tw,
+                                         uint32_t th, uint32_t frameIndex, int spp)
+{
+    for (uint32_t y = 0; y < th; ++y) {
+        for (uint32_t x = 0; x < tw; ++x) {
+            uint32_t px = x0 + x;
+            uint32_t py = y0 + y;
+            size_t idx = static_cast<size_t>(py) * width_ + px;
+
+            // 复现 Phase A 的主光线（同一种子的前两次 rand01 即抖动）
+            uint32_t rng = pixelRngSeed(px, py, width_, frameIndex);
+            float jx = rand01(rng);
+            float jy = rand01(rng);
+            glm::vec3 orig, dir;
+            generateRay(invViewProj_, px, py, width_, height_, jx, jy, orig, dir);
+
+            const SurfaceInfo& surf = restirGBuffer_[idx];
+            if (!surf.valid) {
+                fb_.addSample(px, py, skyColor(dir));
+                continue;
+            }
+
+            // ---- ReSTIR 直接光：W × g(y) × V(y)（1 条阴影射线）----
+            // 贡献钳制（firefly 控制，行业惯例）：单样本直接光亮度上限
+            const Reservoir& res = restirFinal_[idx];
+            glm::vec3 direct(0.0f);
+            if (res.valid() && res.W > 0.0f) {
+                glm::vec3 rgb = rhoLightRGB(res.sample, surf);
+                if (glm::dot(rgb, rgb) > 0.0f
+                    && (!settings.shadows || !lightShadowed(res.sample, surf))) {
+                    direct = res.W * rgb;
+                    float lum = 0.2126f * direct.r + 0.7152f * direct.g + 0.0722f * direct.b;
+                    const float DIRECT_CLAMP = 8.0f;
+                    if (lum > DIRECT_CLAMP) direct *= DIRECT_CLAMP / lum;
+                }
+            }
+
+            // ---- 间接光 + 后续弹射（bounce0 直接光已注入）----
+            // spp 个间接样本，直接光随每个样本计入（相关但无偏，均值正确）
+            SceneHit hit;
+            hit.hit.instanceIndex = surf.instanceIndex;
+            hit.hit.t = surf.depth;
+            hit.position = surf.position;
+            hit.shaded = surf.mat;      // 含贴图采样结果
+            hit.shaded.normal = surf.normal;
+
+            glm::vec3 total(0.0f);
+            for (int s = 0; s < spp; ++s) {
+                uint32_t rngS = pcgHash(pixelRngSeed(px, py, width_, frameIndex)
+                                         + static_cast<uint32_t>(s) * 8191u);
+                fb_.addSample(px, py, tracePathFrom(hit, dir, rngS, &direct));
+            }
+        }
+    }
 }
 
 // ============================================================
