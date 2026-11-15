@@ -84,6 +84,17 @@ DX12RHITexture::DX12RHITexture(DX12RHIDevice* device, const RHITextureDesc& desc
         throw std::runtime_error("[DX12RHITexture] failed to create texture resource");
     }
     currentState_ = initialState;
+
+    // 资源调试名（RenderDoc/PIX 资源面板）
+    if (!desc.debugName.empty()) {
+        const int len = MultiByteToWideChar(CP_UTF8, 0, desc.debugName.c_str(), -1, nullptr, 0);
+        if (len > 1) {
+            std::wstring wide(static_cast<size_t>(len), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, desc.debugName.c_str(), -1, &wide[0], len);
+            wide.resize(static_cast<size_t>(len - 1));
+            resource_->SetName(wide.c_str());
+        }
+    }
 }
 
 DX12RHITexture::DX12RHITexture(DX12RHIDevice* device,

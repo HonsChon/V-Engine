@@ -47,6 +47,8 @@ void VulkanRHITexture::createImage() {
     if (vkCreateImage(vkDev, &imageInfo, nullptr, &image_) != VK_SUCCESS) {
         throw std::runtime_error("[VulkanRHITexture] Failed to create image!");
     }
+    setVkObjectDebugName(vkDev, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(image_),
+                         desc_.debugName);
 
     VkMemoryRequirements memReq;
     vkGetImageMemoryRequirements(vkDev, image_, &memReq);
@@ -80,6 +82,11 @@ void VulkanRHITexture::createImageView() {
 
     if (vkCreateImageView(vkDev, &viewInfo, nullptr, &imageView_) != VK_SUCCESS) {
         throw std::runtime_error("[VulkanRHITexture] Failed to create image view!");
+    }
+    if (!desc_.debugName.empty()) {
+        setVkObjectDebugName(vkDev, VK_OBJECT_TYPE_IMAGE_VIEW,
+                             reinterpret_cast<uint64_t>(imageView_),
+                             desc_.debugName + ".view");
     }
 }
 

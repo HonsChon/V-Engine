@@ -67,6 +67,7 @@ public:
     RHIGraphicsPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIGraphicsPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
     RHIGraphicsPipelineBuilder& setRenderPass(RHIRenderPass* renderPass, uint32_t subpass) override;
+    RHIGraphicsPipelineBuilder& setDebugName(const std::string& name) override;
 
     // Transitional: set native VkRenderPass directly (for compatibility during migration)
     VulkanGraphicsPipelineBuilder& setNativeRenderPass(VkRenderPass renderPass, uint32_t subpass = 0);
@@ -77,6 +78,7 @@ private:
     VulkanRHIDevice* device_;
 
     // Shader paths
+    std::string debugName_;
     std::string vertShaderPath_;
     std::string fragShaderPath_;
 
@@ -135,11 +137,13 @@ public:
     RHIComputePipelineBuilder& setComputeShader(const std::string& path) override;
     RHIComputePipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIComputePipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
+    RHIComputePipelineBuilder& setDebugName(const std::string& name) override;
 
     std::shared_ptr<RHIPipeline> build() override;
 
 private:
     VulkanRHIDevice* device_;
+    std::string debugName_;
     std::string computeShaderPath_;
     std::vector<VkDescriptorSetLayout> descriptorSetLayouts_;
     std::vector<VkPushConstantRange>   pushConstantRanges_;

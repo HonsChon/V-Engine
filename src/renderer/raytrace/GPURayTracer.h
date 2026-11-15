@@ -142,7 +142,7 @@ private:
     // ---- 初始化 ----
     void createStaticResources();     // layout0/1 + scene binding group + sampler
     void createPipelines();           // 2 RTPSO + 6 compute
-    std::shared_ptr<RHITexture> makeTexture(RHIFormat format);
+    std::shared_ptr<RHITexture> makeTexture(RHIFormat format, const char* name);
     void createPassTargets();         // GBuffer/颜色/方差/历史纹理 + pass 绑定组
     void cleanupPassTargets();
 

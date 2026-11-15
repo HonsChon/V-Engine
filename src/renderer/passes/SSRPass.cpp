@@ -95,6 +95,7 @@ void SSRPass::createOutputTexture() {
     desc.height = height_;
     desc.format = RHIFormat::R16G16B16A16_SFLOAT;
     desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+    desc.debugName = "SSR.Result";
     outputTexture_ = rhiDevice_->createTexture(desc);
 }
 

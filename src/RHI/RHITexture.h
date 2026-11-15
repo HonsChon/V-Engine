@@ -21,6 +21,11 @@ struct RHITextureDesc {
     RHIFormat       format      = RHIFormat::R8G8B8A8_UNORM;
     RHITextureUsage usage       = RHITextureUsage::Sampled;
     RHISampleCount  samples     = RHISampleCount::Count1;
+
+    /// 调试名（RenderDoc / PIX / 验证层资源面板显示）
+    std::string     debugName;
+
+    RHITextureDesc& setDebugName(const std::string& name) { debugName = name; return *this; }
 };
 
 /// 解析 desc.mipLevels == 0 → 完整 mip 链(device::createTexture 入口调用)。

@@ -255,6 +255,7 @@ void SceneRenderer::createOffscreenTarget() {
     colorDesc.height = h;
     colorDesc.format = RHIFormat::R8G8B8A8_UNORM;
     colorDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+    colorDesc.debugName = "Scene.OffscreenColor";
     m_offscreenColor = m_rhiDevice->createTexture(colorDesc);
 
     // 深度（Forward 场景深度；延迟合成阶段不使用但保持 RP 结构统一）
@@ -263,6 +264,7 @@ void SceneRenderer::createOffscreenTarget() {
     depthDesc.height = h;
     depthDesc.format = RHIFormat::D32_SFLOAT;
     depthDesc.usage = RHITextureUsage::DepthStencilAttachment;
+    depthDesc.debugName = "Scene.OffscreenDepth";
     m_offscreenDepth = m_rhiDevice->createTexture(depthDesc);
 
     // 后处理采样器（Clamp）
@@ -314,6 +316,7 @@ void SceneRenderer::createSceneColorImage() {
     texDesc.height = h;
     texDesc.format = RHIFormat::R8G8B8A8_UNORM;
     texDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+    texDesc.debugName = "SSR.SceneColor";
     m_sceneColorTexture = m_rhiDevice->createTexture(texDesc);
 
     // Create scene color sampler via RHI
@@ -537,13 +540,17 @@ void SceneRenderer::recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, u
 void SceneRenderer::recordForwardCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
     // GPU Culling (Compute, before render pass)
     if (m_settings.enableGPUCulling && m_gpuDrivenRenderer) {
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "GPU Culling", 0.5f, 0.5f, 0.9f, 1.0f);
         m_gpuDrivenRenderer->executeCulling(cmd);
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
         // Barrier already handled inside FrustumCullingPass::record()
     }
 
     // Nanite GPU Culling (Compute, before render pass)
     if (m_settings.showClusterVisualization && m_naniteManager && m_naniteDebugPass) {
+        m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "Nanite Culling", 0.9f, 0.5f, 0.5f, 1.0f);
         prepareNaniteCulling(cmd, imageIndex, frameIndex);
+        m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
     }
 
     // === Pass 1: 场景 → 离屏目标（FXAA 输入）===
@@ -797,6 +804,7 @@ void SceneRenderer::updateRayTrace() {
         desc.format = RHIFormat::R8G8B8A8_UNORM;
         desc.usage = RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
         desc.mipLevels = 1;
+        desc.debugName = "RT.CpuOutput";
         m_raytraceColor = m_rhiDevice->createTexture(desc);
     }
 

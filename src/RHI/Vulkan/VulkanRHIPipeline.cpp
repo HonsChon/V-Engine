@@ -173,6 +173,11 @@ RHIGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setRenderPass(
     return *this;
 }
 
+RHIGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setDebugName(const std::string& name) {
+    debugName_ = name;
+    return *this;
+}
+
 VulkanGraphicsPipelineBuilder& VulkanGraphicsPipelineBuilder::setNativeRenderPass(
     VkRenderPass renderPass, uint32_t subpass) {
     renderPass_ = renderPass;
@@ -315,6 +320,8 @@ std::shared_ptr<RHIPipeline> VulkanGraphicsPipelineBuilder::build() {
         vkDestroyPipelineLayout(vkDev, pipelineLayout, nullptr);
         throw std::runtime_error("[VulkanGraphicsPipelineBuilder] Failed to create graphics pipeline!");
     }
+    setVkObjectDebugName(vkDev, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(pipeline),
+                         debugName_);
 
     return std::make_shared<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
                                                RHIPipelineType::Graphics);
@@ -335,6 +342,11 @@ RHIComputePipelineBuilder& VulkanComputePipelineBuilder::setComputeShader(const 
 RHIComputePipelineBuilder& VulkanComputePipelineBuilder::addBindingLayout(RHIBindingLayout* layout) {
     auto* vkLayout = static_cast<VulkanRHIBindingLayout*>(layout);
     descriptorSetLayouts_.push_back(vkLayout->getVkDescriptorSetLayout());
+    return *this;
+}
+
+RHIComputePipelineBuilder& VulkanComputePipelineBuilder::setDebugName(const std::string& name) {
+    debugName_ = name;
     return *this;
 }
 
@@ -382,6 +394,8 @@ std::shared_ptr<RHIPipeline> VulkanComputePipelineBuilder::build() {
         vkDestroyPipelineLayout(vkDev, pipelineLayout, nullptr);
         throw std::runtime_error("[VulkanComputePipelineBuilder] Failed to create compute pipeline!");
     }
+    setVkObjectDebugName(vkDev, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(pipeline),
+                         debugName_);
 
     return std::make_shared<VulkanRHIPipeline>(device_, pipeline, pipelineLayout,
                                                RHIPipelineType::Compute);

@@ -175,6 +175,7 @@ void GPURayTracer::createPipelines() {
 
         auto b = device_->createRayTracingPipelineBuilder();
         b->addLibrary("shaders_dx12/raytrace/rt_gbuffer.dxil")
+            .setDebugName("RT.GBuffer Pipeline")
             .setRayGen("rgGBuffer")
             .addMiss("msSky", 0)
             .addHitGroup("hgGBuffer", "chGBuffer")
@@ -199,6 +200,7 @@ void GPURayTracer::createPipelines() {
 
         auto b = device_->createRayTracingPipelineBuilder();
         b->addLibrary("shaders_dx12/raytrace/rt_shade.dxil")
+            .setDebugName("RT.Shade Pipeline")
             .setRayGen("rgShade")
             .addMiss("msSkyShade", 0)
             .addHitGroup("hgShade", "chShade")
@@ -214,13 +216,14 @@ void GPURayTracer::createPipelines() {
     }
 
     // ---- [compute] 工厂 ----
-    auto makeCompute = [&](const char* path,
+    auto makeCompute = [&](const char* name, const char* path,
                            const std::vector<RHIDescriptorType>& inputs,
                            const std::vector<RHIDescriptorType>& outputs,
                            std::shared_ptr<RHIPipeline>* outPipe, PassResources* outPass) {
         auto layout = makePassLayout(inputs, outputs, kCsStage);
         auto b = device_->createComputePipelineBuilder();
-        b->setComputeShader(path)
+        b->setDebugName(name)
+            .setComputeShader(path)
             .addBindingLayout(layoutFrame_.get())
             .addBindingLayout(layoutScene_.get())
             .addBindingLayout(layout.get())
@@ -231,18 +234,18 @@ void GPURayTracer::createPipelines() {
     const auto SI = RHIDescriptorType::SampledImage;   // 输入纹理
     const auto SO = RHIDescriptorType::StorageImage;   // 输出纹理
 
-    makeCompute("shaders_dx12/raytrace/rt_restir_initial.dxil",
+    makeCompute("RT.ReSTIR.Initial Pipeline", "shaders_dx12/raytrace/rt_restir_initial.dxil",
                 { SI, SI, SI, SI }, { SO }, &restirInitPipe_, &restirInitPass_);
-    makeCompute("shaders_dx12/raytrace/rt_restir_spatial.dxil",
+    makeCompute("RT.ReSTIR.Spatial Pipeline", "shaders_dx12/raytrace/rt_restir_spatial.dxil",
                 { SI, SI, SI, SI, SI }, { SO }, &restirSpatialPipe_, &restirSpatialPass_);
-    makeCompute("shaders_dx12/raytrace/rt_restir_temporal.dxil",
+    makeCompute("RT.ReSTIR.Temporal Pipeline", "shaders_dx12/raytrace/rt_restir_temporal.dxil",
                 { SI, SI, SI, SI, SI, SI, SI, SI }, { SO, SO, SO, SO },
                 &restirTemporalPipe_, &restirTemporalPass_[0]);
-    makeCompute("shaders_dx12/raytrace/rt_svgf_variance.dxil",
+    makeCompute("RT.SVGF.Variance Pipeline", "shaders_dx12/raytrace/rt_svgf_variance.dxil",
                 { SI, SI, SI, SI }, { SO, SO }, &svgfVarPipe_, &svgfVarPass_[0]);
-    makeCompute("shaders_dx12/raytrace/rt_svgf_atrous.dxil",
+    makeCompute("RT.SVGF.Atrous Pipeline", "shaders_dx12/raytrace/rt_svgf_atrous.dxil",
                 { SI, SI, SI, SI }, { SO, SO }, &svgfAtrousPipe_, &atrousStep1_[0]);
-    makeCompute("shaders_dx12/raytrace/rt_resolve.dxil",
+    makeCompute("RT.Resolve Pipeline", "shaders_dx12/raytrace/rt_resolve.dxil",
                 { SI }, { SO }, &resolvePipe_, &resolvePass_[0]);
     // 变体组共享布局
     restirTemporalPass_[1].layout = restirTemporalPass_[0].layout;
@@ -588,36 +591,38 @@ void GPURayTracer::setCamera(const glm::mat4& view, const glm::mat4& proj,
     resetHistory();
 }
 
-std::shared_ptr<RHITexture> GPURayTracer::makeTexture(RHIFormat format) {
+std::shared_ptr<RHITexture> GPURayTracer::makeTexture(RHIFormat format, const char* name) {
     RHITextureDesc d;
     d.width = width_;
     d.height = height_;
     d.format = format;
     d.usage = RHITextureUsage::Sampled | RHITextureUsage::Storage;
     d.mipLevels = 1;
+    d.debugName = std::string("RT.") + name;
     return device_->createTexture(d);
 }
 
 void GPURayTracer::createPassTargets() {
     cleanupPassTargets();
 
-    worldPosTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    normalRoughTex_ = makeTexture(RHIFormat::R16G16B16A16_SFLOAT);
-    albedoMetalTex_ = makeTexture(RHIFormat::R8G8B8A8_UNORM);
-    emissiveAoTex_ = makeTexture(RHIFormat::R16G16B16A16_SFLOAT);
-    reservoirInitTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    reservoirSpatialTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    reservoirFinalTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    colorTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    colorFilteredTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    colorTmpTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-    varTex_ = makeTexture(RHIFormat::R32_SFLOAT);
+    worldPosTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "WorldPos");
+    normalRoughTex_ = makeTexture(RHIFormat::R16G16B16A16_SFLOAT, "NormalRough");
+    albedoMetalTex_ = makeTexture(RHIFormat::R8G8B8A8_UNORM, "AlbedoMetal");
+    emissiveAoTex_ = makeTexture(RHIFormat::R16G16B16A16_SFLOAT, "EmissiveAO");
+    reservoirInitTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "ReservoirInit");
+    reservoirSpatialTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "ReservoirSpatial");
+    reservoirFinalTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "ReservoirFinal");
+    colorTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "Color");
+    colorFilteredTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "ColorFiltered");
+    colorTmpTex_ = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, "ColorTmp");
+    varTex_ = makeTexture(RHIFormat::R32_SFLOAT, "Variance");
     for (uint32_t i = 0; i < 2; ++i) {
-        histPos_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-        histNormal_[i] = makeTexture(RHIFormat::R16G16B16A16_SFLOAT);
-        histReservoir_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-        histColor_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT);
-        histVar_[i] = makeTexture(RHIFormat::R32_SFLOAT);
+        std::string suffix = (i == 0) ? ".A" : ".B";
+        histPos_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, ("HistPos" + suffix).c_str());
+        histNormal_[i] = makeTexture(RHIFormat::R16G16B16A16_SFLOAT, ("HistNormal" + suffix).c_str());
+        histReservoir_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, ("HistReservoir" + suffix).c_str());
+        histColor_[i] = makeTexture(RHIFormat::R32G32B32A32_SFLOAT, ("HistColor" + suffix).c_str());
+        histVar_[i] = makeTexture(RHIFormat::R32_SFLOAT, ("HistVar" + suffix).c_str());
     }
     {
         RHITextureDesc d;
@@ -626,6 +631,7 @@ void GPURayTracer::createPassTargets() {
         d.format = RHIFormat::R8G8B8A8_UNORM;
         d.usage = RHITextureUsage::Sampled | RHITextureUsage::Storage;
         d.mipLevels = 1;
+        d.debugName = "RT.Output";
         outputTex_ = device_->createTexture(d);
     }
 
@@ -822,8 +828,14 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
         frameGroups_[frameSlot]->updateBuffer(0, frameUBO_[frameSlot].get());
     }
 
+    auto dbgBegin = [&](const char* n) {
+        device_->beginDebugLabel(cmd->getNativeHandle(), n, 1, 1, 1, 1);
+    };
+    auto dbgEnd = [&]() { device_->endDebugLabel(cmd->getNativeHandle()); };
+
     // ---- AS（重建后首帧录制构建）----
     if (asDirty_ && wantAs) {
+        dbgBegin("RT.AS Build");
         uint64_t scratchOffset = 0;
         for (auto& b : blas_) {
             cmd->buildBLAS(b.get(), blasScratch_.get(), scratchOffset, false);
@@ -831,6 +843,7 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
         }
         cmd->buildTLAS(tlas_.get(), instanceDescBuf_.get(), tlasScratch_.get(), 0, false);
         asDirty_ = false;
+        dbgEnd();
     }
 
     // 纹理状态便捷：写前 → UAV，写后 → 只读
@@ -843,6 +856,7 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
 
     // ---- 1. RT-GBuffer（DispatchRays）----
     if (wantGBuffer) {
+        dbgBegin("RT.GBuffer");
         toUAV(worldPosTex_.get()); toUAV(normalRoughTex_.get());
         toUAV(albedoMetalTex_.get()); toUAV(emissiveAoTex_.get());
 
@@ -860,28 +874,34 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
 
         toRead(worldPosTex_.get()); toRead(normalRoughTex_.get());
         toRead(albedoMetalTex_.get()); toRead(emissiveAoTex_.get());
+        dbgEnd();
     }
 
     // ---- 2. ReSTIR 初始候选 ----
     if (wantInit) {
+        dbgBegin("RT.ReSTIR Initial");
         toUAV(reservoirInitTex_.get());
         frameData_.step = 0; frameData_.reset = 0;
         dispatchCompute(cmd, frameSlot, restirInitPipe_.get(), restirInitPass_.group.get(),
                         groupsX, groupsY, &frameData_, sizeof(frameData_));
         toRead(reservoirInitTex_.get());
+        dbgEnd();
     }
 
     // ---- 3. ReSTIR 空间复用 ----
     if (wantSpatial) {
+        dbgBegin("RT.ReSTIR Spatial");
         toUAV(reservoirSpatialTex_.get());
         frameData_.step = 0; frameData_.reset = 0;
         dispatchCompute(cmd, frameSlot, restirSpatialPipe_.get(), restirSpatialPass_.group.get(),
                         groupsX, groupsY, &frameData_, sizeof(frameData_));
         toRead(reservoirSpatialTex_.get());
+        dbgEnd();
     }
 
     // ---- 4. ReSTIR 时间复用（ping-pong 历史读写；静态变体组）----
     if (wantTemporal) {
+        dbgBegin("RT.ReSTIR Temporal");
         toUAV(reservoirFinalTex_.get());
         toUAV(histPos_[nextIdx].get()); toUAV(histNormal_[nextIdx].get());
         toUAV(histReservoir_[nextIdx].get());
@@ -894,10 +914,12 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
         toRead(reservoirFinalTex_.get());
         toRead(histPos_[nextIdx].get()); toRead(histNormal_[nextIdx].get());
         toRead(histReservoir_[nextIdx].get());
+        dbgEnd();
     }
 
     // ---- 5. 着色（DispatchRays：ReSTIR 直接光 + PT 间接光）----
     if (wantShade) {
+        dbgBegin("RT.Shading (PT)");
         toUAV(colorTex_.get());
         frameData_.step = 0; frameData_.reset = 0;
         cmd->bindRayTracingPipeline(shadePipe_.get());
@@ -911,20 +933,24 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
                        4 * kSBTRecordSize, kSBTRecordSize, 2,        // hit groups
                        width_, height_, 1);
         toRead(colorTex_.get());
+        dbgEnd();
     }
 
     // ---- 6. SVGF：方差估计（ping-pong 颜色/方差历史；静态变体组）----
     if (wantSvgf) {
+        dbgBegin("RT.SVGF Variance");
         toUAV(histColor_[nextIdx].get()); toUAV(histVar_[nextIdx].get());
         frameData_.step = 0; frameData_.reset = historyValid_ ? 0u : 1u;
         dispatchCompute(cmd, frameSlot, svgfVarPipe_.get(),
                         svgfVarPass_[histIdx_].group.get(),
                         groupsX, groupsY, &frameData_, sizeof(frameData_));
         toRead(histColor_[nextIdx].get()); toRead(histVar_[nextIdx].get());
+        dbgEnd();
     }
 
     // ---- 7. SVGF：3 层 à-trous（步长 1/2/4，乒乓；静态组）----
     if (settings.denoiser && wantSvgf) {
+        dbgBegin("RT.SVGF Atrous x3");
         struct StepCfg { RHIBindingGroup* group; RHITexture* output; };
         const StepCfg steps[3] = {
             { atrousStep1_[nextIdx].group.get(), colorFilteredTex_.get() },
@@ -939,10 +965,12 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
                             groupsX, groupsY, &frameData_, sizeof(frameData_));
             toRead(steps[i].output);
         }
+        dbgEnd();
     }
 
     // ---- 8. Resolve：ACES tonemap → 输出（静态变体：denoiser 开/关）----
     if (wantResolve) {
+        dbgBegin("RT.Resolve (Tonemap)");
         const bool denoised = settings.denoiser && wantSvgf;
         toUAV(outputTex_.get());
         frameData_.step = 0; frameData_.reset = 0;
@@ -950,6 +978,7 @@ void GPURayTracer::renderFrame(RHICommandBuffer* cmd, uint32_t frameSlot,
                         resolvePass_[denoised ? 0 : 1].group.get(),
                         groupsX, groupsY, &frameData_, sizeof(frameData_));
         toRead(outputTex_.get());
+        dbgEnd();
     }
 
     // ---- 帧尾：历史推进 ----

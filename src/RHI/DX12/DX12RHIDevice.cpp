@@ -15,6 +15,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
+#include <cstring>
 #include <windows.h>
 
 using namespace DX12TypeConversions;
@@ -282,8 +283,17 @@ void DX12RHIDevice::reportValidationMessages() {
         if (message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION) severity = "CORRUPTION";
         else if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR) severity = "ERROR";
         else if (message->Severity == D3D12_MESSAGE_SEVERITY_WARNING) severity = "WARNING";
-        std::fprintf(stderr, "[D3D12 validation] %s: %s\n", severity,
-                     message->pDescription ? message->pDescription : "(no description)");
+
+        // 原生工具标记 API（BeginEvent/EndEvent，供 RenderDoc/PIX 捕获）的已知噪音：
+        // 部分系统调试层将其标记为 "should use PIXBeginEvent"，且不参与配对计数
+        // → BEGIN_END_EVENT_MISMATCH 假阳性。按描述过滤（消息仍保留在队列中）。
+        const char* desc = message->pDescription ? message->pDescription : "";
+        if (std::strstr(desc, "::BeginEvent") || std::strstr(desc, "::EndEvent") ||
+            std::strstr(desc, "PixBeginEvent") || std::strstr(desc, "PixEndEvent")) {
+            continue;
+        }
+
+        std::fprintf(stderr, "[D3D12 validation] %s: %s\n", severity, desc);
     }
     validationReported_ = total;
 #endif
@@ -730,25 +740,41 @@ void DX12RHIDevice::beginDebugLabel(void* commandBuffer, const char* name,
 {
     (void)r; (void)g; (void)b; (void)a;
     auto* list = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
+    if (!list || !name) return;
     if (g_pixBegin) {
         g_pixBegin(list, 0, name);
+        return;
     }
+    // 无 WinPixEventRuntime.dll 时用 D3D12 原生工具标记。
+    // metadata 约定（历史 PIX 惯例，RenderDoc/Nsight 均按此解码）：
+    //   0 = 宽字符（Size/2 个 wchar_t）、1 = ANSI（Size 字节）。
+    // 传 0 + ANSI 字符串会被按 UTF-16 解码 → 中文乱码（曾踩坑）。
+    list->BeginEvent(1, name, static_cast<UINT>(std::strlen(name)));
 }
 
 void DX12RHIDevice::endDebugLabel(void* commandBuffer)
 {
     auto* list = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
+    if (!list) return;
     if (g_pixEnd) {
         g_pixEnd(list);
+        return;
     }
+    list->EndEvent();
 }
 
 void DX12RHIDevice::insertDebugLabel(void* commandBuffer, const char* name,
                                      float r, float g, float b, float a)
 {
     (void)r; (void)g; (void)b; (void)a;
-    beginDebugLabel(commandBuffer, name, 0, 0, 0, 0);
-    endDebugLabel(commandBuffer);
+    auto* list = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
+    if (!list || !name) return;
+    if (g_pixBegin) {
+        beginDebugLabel(commandBuffer, name, 0, 0, 0, 0);
+        endDebugLabel(commandBuffer);
+        return;
+    }
+    list->SetMarker(1, name, static_cast<UINT>(std::strlen(name)));
 }
 
 // =============================================================================

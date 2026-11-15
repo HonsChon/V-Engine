@@ -18,6 +18,21 @@
 
 using namespace DX12TypeConversions;
 
+namespace {
+
+/// UTF-8 → wide（资源调试名用）
+std::wstring dx12WideFromUtf8(const std::string& s) {
+    if (s.empty()) return {};
+    const int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (len <= 1) return {};
+    std::wstring wide(static_cast<size_t>(len), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &wide[0], len);
+    wide.resize(static_cast<size_t>(len - 1));
+    return wide;
+}
+
+} // namespace
+
 #if defined(_DEBUG)
 // =============================================================================
 // Debug-only: cross-check DXIL bindings against the root signature we built.
@@ -672,6 +687,11 @@ RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setRenderPass(
     return *this;
 }
 
+RHIGraphicsPipelineBuilder& DX12GraphicsPipelineBuilder::setDebugName(const std::string& name) {
+    debugName_ = name;
+    return *this;
+}
+
 // ---- Graphics Pipeline State ----
 
 void DX12GraphicsPipelineBuilder::buildGraphicsPipelineState(
@@ -795,6 +815,9 @@ void DX12GraphicsPipelineBuilder::buildGraphicsPipelineState(
     if (FAILED(hr)) {
         throw std::runtime_error("[DX12GraphicsPipelineBuilder] failed to create graphics pipeline state");
     }
+    if (!debugName_.empty()) {
+        outPSO->SetName(dx12WideFromUtf8(debugName_).c_str());
+    }
 }
 
 std::shared_ptr<RHIPipeline> DX12GraphicsPipelineBuilder::build() {
@@ -839,6 +862,11 @@ RHIComputePipelineBuilder& DX12ComputePipelineBuilder::addPushConstant(
     return *this;
 }
 
+RHIComputePipelineBuilder& DX12ComputePipelineBuilder::setDebugName(const std::string& name) {
+    debugName_ = name;
+    return *this;
+}
+
 std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
     DX12RootSignatureResult rootResult = DX12BuildRootSignature(device_, bindingLayouts_,
                                                                 pushConstantRanges_,
@@ -861,6 +889,9 @@ std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
     HRESULT hr = device_->getDevice()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso));
     if (FAILED(hr)) {
         throw std::runtime_error("[DX12ComputePipelineBuilder] failed to create compute pipeline state");
+    }
+    if (!debugName_.empty()) {
+        pso->SetName(dx12WideFromUtf8(debugName_).c_str());
     }
 
     return std::make_shared<DX12RHIPipeline>(device_, pso, rootResult.rootSig,
@@ -926,6 +957,11 @@ RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addBindingLayout(RH
 RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addPushConstant(
     RHIShaderStage stages, uint32_t offset, uint32_t size) {
     pushConstantRanges_.push_back({ stages, offset, size });
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::setDebugName(const std::string& name) {
+    debugName_ = name;
     return *this;
 }
 
@@ -1022,6 +1058,9 @@ std::shared_ptr<RHIPipeline> DX12RayTracingPipelineBuilder::build() {
     HRESULT hr = device5->CreateStateObject(&rtPsoDesc, IID_PPV_ARGS(&stateObject));
     if (FAILED(hr)) {
         throw std::runtime_error("[DX12RayTracingPipelineBuilder] failed to create raytracing state object");
+    }
+    if (!debugName_.empty()) {
+        stateObject->SetName(dx12WideFromUtf8(debugName_).c_str());
     }
 
     return std::make_shared<DX12RHIPipeline>(device_, stateObject, rootResult.rootSig,

@@ -110,6 +110,9 @@ public:
     // RenderPass
     virtual RHIGraphicsPipelineBuilder& setRenderPass(RHIRenderPass* renderPass, uint32_t subpass = 0) = 0;
 
+    /// 调试名（RenderDoc / PIX 管线面板显示）
+    virtual RHIGraphicsPipelineBuilder& setDebugName(const std::string& name) = 0;
+
     // Build!
     virtual std::shared_ptr<RHIPipeline> build() = 0;
 
@@ -128,6 +131,9 @@ public:
     virtual RHIComputePipelineBuilder& setComputeShader(const std::string& path) = 0;
     virtual RHIComputePipelineBuilder& addBindingLayout(RHIBindingLayout* layout) = 0;
     virtual RHIComputePipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) = 0;
+
+    /// 调试名（RenderDoc / PIX 管线面板显示）
+    virtual RHIComputePipelineBuilder& setDebugName(const std::string& name) = 0;
 
     virtual std::shared_ptr<RHIPipeline> build() = 0;
 
@@ -171,6 +177,9 @@ public:
     // 绑定布局与 push constants（与 graphics/compute 管线同约定）
     virtual RHIRayTracingPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) = 0;
     virtual RHIRayTracingPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) = 0;
+
+    /// 调试名（RenderDoc / PIX 管线面板显示）
+    virtual RHIRayTracingPipelineBuilder& setDebugName(const std::string& name) = 0;
 
     virtual std::shared_ptr<RHIPipeline> build() = 0;
 

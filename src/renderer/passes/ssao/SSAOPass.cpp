@@ -150,9 +150,11 @@ void SSAOPass::createDeinterleavedTextures() {
     desc.arrayLayers = NUM_LAYERS;
     desc.format = RHIFormat::R16G16B16A16_SFLOAT;
     desc.usage = RHITextureUsage::Sampled | RHITextureUsage::Storage;
+    desc.debugName = "SSAO.DeinterleavedPosition";
     m_deinterleavedPosTex = rhiDevice_->createTexture(desc);
 
     // Normal array: same format
+    desc.debugName = "SSAO.DeinterleavedNormal";
     m_deinterleavedNorTex = rhiDevice_->createTexture(desc);
 }
 
@@ -164,6 +166,7 @@ void SSAOPass::createAOTextures() {
     desc.arrayLayers = NUM_LAYERS;
     desc.format = RHIFormat::R8_UNORM;
     desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+    desc.debugName = "SSAO.Raw";
     m_aoArrayTex = rhiDevice_->createTexture(desc);
 
     // Per-layer views for framebuffers
@@ -177,6 +180,7 @@ void SSAOPass::createAOTextures() {
     fullDesc.height = height;
     fullDesc.format = RHIFormat::R8_UNORM;
     fullDesc.usage = RHITextureUsage::Sampled | RHITextureUsage::Storage;
+    fullDesc.debugName = "SSAO.Reinterleaved";
     m_fullAOTex = rhiDevice_->createTexture(fullDesc);
 
     // Blurred AO (final output)
@@ -185,6 +189,7 @@ void SSAOPass::createAOTextures() {
     blurDesc.height = height;
     blurDesc.format = RHIFormat::R8_UNORM;
     blurDesc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferDst;
+    blurDesc.debugName = "SSAO.Blurred";
     m_blurredAOTex = rhiDevice_->createTexture(blurDesc);
 }
 

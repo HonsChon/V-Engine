@@ -30,6 +30,8 @@ VulkanRHIBuffer::VulkanRHIBuffer(VulkanRHIDevice* device, const RHIBufferDesc& d
     if (vkCreateBuffer(vkDev, &bufferInfo, nullptr, &buffer_) != VK_SUCCESS) {
         throw std::runtime_error("[VulkanRHIBuffer] Failed to create buffer!");
     }
+    setVkObjectDebugName(vkDev, VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(buffer_),
+                         desc_.debugName);
 
     // Allocate memory
     VkMemoryRequirements memReq;

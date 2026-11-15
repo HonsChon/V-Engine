@@ -189,6 +189,7 @@ public:
     RHIGraphicsPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIGraphicsPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
     RHIGraphicsPipelineBuilder& setRenderPass(RHIRenderPass* renderPass, uint32_t subpass) override;
+    RHIGraphicsPipelineBuilder& setDebugName(const std::string& name) override;
 
     std::shared_ptr<RHIPipeline> build() override;
 
@@ -199,6 +200,7 @@ private:
 
     DX12RHIDevice* device_;
 
+    std::string debugName_;
     std::string vertShaderPath_;
     std::string fragShaderPath_;
 
@@ -263,11 +265,13 @@ public:
     RHIComputePipelineBuilder& setComputeShader(const std::string& path) override;
     RHIComputePipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIComputePipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
+    RHIComputePipelineBuilder& setDebugName(const std::string& name) override;
 
     std::shared_ptr<RHIPipeline> build() override;
 
 private:
     DX12RHIDevice* device_;
+    std::string debugName_;
     std::string computeShaderPath_;
     std::vector<const RHIBindingLayout*> bindingLayouts_;
     std::vector<RHIPushConstantRange>    pushConstantRanges_;
@@ -297,11 +301,13 @@ public:
     RHIRayTracingPipelineBuilder& setMaxRecursionDepth(uint32_t depth) override;
     RHIRayTracingPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
     RHIRayTracingPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
+    RHIRayTracingPipelineBuilder& setDebugName(const std::string& name) override;
 
     std::shared_ptr<RHIPipeline> build() override;
 
 private:
     DX12RHIDevice* device_;
+    std::string debugName_;
 
     struct Library {
         std::string path;

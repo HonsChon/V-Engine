@@ -93,6 +93,7 @@ void GBufferPass::createAttachments() {
         desc.height = height_;
         desc.format = RHIFormat::R16G16B16A16_SFLOAT;
         desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
+        desc.debugName = "GBuffer.Position";
         attachmentTextures_[POSITION] = rhiDevice_->createTexture(desc);
     }
 
@@ -103,6 +104,7 @@ void GBufferPass::createAttachments() {
         desc.height = height_;
         desc.format = RHIFormat::R16G16B16A16_SFLOAT;
         desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
+        desc.debugName = "GBuffer.Normal";
         attachmentTextures_[NORMAL] = rhiDevice_->createTexture(desc);
     }
 
@@ -113,6 +115,7 @@ void GBufferPass::createAttachments() {
         desc.height = height_;
         desc.format = RHIFormat::R8G8B8A8_UNORM;
         desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled | RHITextureUsage::TransferSrc;
+        desc.debugName = "GBuffer.Albedo";
         attachmentTextures_[ALBEDO] = rhiDevice_->createTexture(desc);
     }
 
@@ -123,6 +126,7 @@ void GBufferPass::createAttachments() {
         desc.height = height_;
         desc.format = RHIFormat::D32_SFLOAT;
         desc.usage = RHITextureUsage::DepthStencilAttachment | RHITextureUsage::Sampled;
+        desc.debugName = "GBuffer.Depth";
         attachmentTextures_[DEPTH] = rhiDevice_->createTexture(desc);
     }
 }

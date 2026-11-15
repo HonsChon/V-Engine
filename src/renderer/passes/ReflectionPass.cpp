@@ -97,6 +97,7 @@ void ReflectionPass::createRenderTargets() {
         desc.height = rtHeight_;
         desc.format = RHIFormat::R8G8B8A8_UNORM;
         desc.usage = RHITextureUsage::ColorAttachment | RHITextureUsage::Sampled;
+        desc.debugName = "Water.ReflectionColor";
         colorTexture_ = rhiDevice_->createTexture(desc);
     }
     // 深度 — 仅反射渲染期使用，无需采样
@@ -106,6 +107,7 @@ void ReflectionPass::createRenderTargets() {
         desc.height = rtHeight_;
         desc.format = RHIFormat::D32_SFLOAT;
         desc.usage = RHITextureUsage::DepthStencilAttachment;
+        desc.debugName = "Water.ReflectionDepth";
         depthTexture_ = rhiDevice_->createTexture(desc);
     }
 }

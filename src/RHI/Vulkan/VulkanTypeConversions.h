@@ -2,6 +2,7 @@
 
 #include "RHITypes.h"
 #include <vulkan/vulkan.h>
+#include <string>
 #include <stdexcept>
 
 // =============================================================================
@@ -437,6 +438,21 @@ inline VkImageAspectFlags getAspectFlags(RHIFormat format) {
         return flags;
     }
     return VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+// ---- 调试对象命名（VK_EXT_debug_utils；扩展未启用时静默跳过）----
+inline void setVkObjectDebugName(VkDevice device, VkObjectType objectType,
+                                 uint64_t objectHandle, const std::string& name) {
+    if (name.empty() || objectHandle == 0 || device == VK_NULL_HANDLE) return;
+    auto func = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+        vkGetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT"));
+    if (!func) return;
+    VkDebugUtilsObjectNameInfoEXT info{};
+    info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType = objectType;
+    info.objectHandle = objectHandle;
+    info.pObjectName = name.c_str();
+    func(device, &info);
 }
 
 } // namespace VulkanTypeConversions

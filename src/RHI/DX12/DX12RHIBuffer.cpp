@@ -80,6 +80,17 @@ void DX12RHIBuffer::createResource(D3D12_HEAP_TYPE heapType,
     {
         throw std::runtime_error("[DX12RHIBuffer] failed to create buffer resource");
     }
+
+    // 资源调试名（RenderDoc/PIX 资源面板）
+    if (!desc_.debugName.empty()) {
+        const int len = MultiByteToWideChar(CP_UTF8, 0, desc_.debugName.c_str(), -1, nullptr, 0);
+        if (len > 1) {
+            std::wstring wide(static_cast<size_t>(len), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, desc_.debugName.c_str(), -1, &wide[0], len);
+            wide.resize(static_cast<size_t>(len - 1));
+            buffer_->SetName(wide.c_str());
+        }
+    }
 }
 
 void* DX12RHIBuffer::map() {
