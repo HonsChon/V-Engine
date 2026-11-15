@@ -839,9 +839,108 @@ void SoftwareRaytracer::resizeRestirBuffers() {
     restirInitial_.assign(n, Reservoir{});
     restirSpatial_.assign(n, Reservoir{});
     restirFinal_.assign(n, Reservoir{});
+    denoiseA_.assign(n, glm::vec3(0.0f));
+    denoiseB_.assign(n, glm::vec3(0.0f));
     restirPrev_.clear();
     restirPrevGBuffer_.clear();
     restirHistoryValid_ = false;
+}
+
+// ============================================================
+// 降噪器 — à-trous 联合双边滤波（GBuffer 边缘保持，SVGF 简化版）
+// ============================================================
+
+std::vector<uint8_t> SoftwareRaytracer::resolveForOutput() {
+    // 降噪仅 ReSTIR 模式可用（需逐像素 GBuffer）
+    if (settings.restirDenoiser
+        && settings.algorithm == Algorithm::PathTracingRestir
+        && !instances_.empty() && !lights_.empty()) {
+        denoiseHDR();
+        return Framebuffer::tonemapRGBA8(denoiseA_, width_, height_, settings.exposure);
+    }
+    return fb_.resolveRGBA8(settings.exposure);
+}
+
+void SoftwareRaytracer::denoiseHDR() {
+    // 初始化：HDR 平均值
+    for (uint32_t y = 0; y < height_; ++y) {
+        for (uint32_t x = 0; x < width_; ++x) {
+            denoiseA_[static_cast<size_t>(y) * width_ + x] = fb_.pixel(x, y);
+        }
+    }
+
+    // 3 层 à-trous：步长 1 → 2 → 4（等效半径 ~7px，平坦区抹噪、几何边缘保持）
+    for (int step : {1, 2, 4}) {
+        dispatchTiles([this, step](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
+            denoiseFilterBlock(denoiseA_, denoiseB_, x0, y0, tw, th, step);
+        });
+        std::swap(denoiseA_, denoiseB_);
+    }
+}
+
+void SoftwareRaytracer::denoiseFilterBlock(const std::vector<glm::vec3>& src,
+                                           std::vector<glm::vec3>& dst,
+                                           uint32_t x0, uint32_t y0, uint32_t tw,
+                                           uint32_t th, int step)
+{
+    // 5x5 二项式空间核（归一化，中心权重 36/256）
+    static const float spatialKernel[5][5] = {
+        { 1.0f / 256.0f, 4.0f / 256.0f,  6.0f / 256.0f, 4.0f / 256.0f, 1.0f / 256.0f },
+        { 4.0f / 256.0f, 16.0f / 256.0f, 24.0f / 256.0f, 16.0f / 256.0f, 4.0f / 256.0f },
+        { 6.0f / 256.0f, 24.0f / 256.0f, 36.0f / 256.0f, 24.0f / 256.0f, 6.0f / 256.0f },
+        { 4.0f / 256.0f, 16.0f / 256.0f, 24.0f / 256.0f, 16.0f / 256.0f, 4.0f / 256.0f },
+        { 1.0f / 256.0f, 4.0f / 256.0f,  6.0f / 256.0f, 4.0f / 256.0f, 1.0f / 256.0f },
+    };
+
+    for (uint32_t y = 0; y < th; ++y) {
+        for (uint32_t x = 0; x < tw; ++x) {
+            uint32_t px = x0 + x;
+            uint32_t py = y0 + y;
+            size_t idx = static_cast<size_t>(py) * width_ + px;
+
+            const SurfaceInfo& s0 = restirGBuffer_[idx];
+            if (!s0.valid) {
+                dst[idx] = src[idx];   // 天空确定性 → 不滤
+                continue;
+            }
+
+            // 深度容忍度随步长放大（远处梯度平缓）
+            float sigmaDepth = 0.02f * s0.depth * static_cast<float>(step);
+            float invTwoSigmaD2 = 1.0f / (2.0f * sigmaDepth * sigmaDepth + 1e-20f);
+
+            glm::vec3 sum(0.0f);
+            float wsum = 0.0f;
+
+            for (int dy = -2; dy <= 2; ++dy) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    int nx = static_cast<int>(px) + dx * step;
+                    int ny = static_cast<int>(py) + dy * step;
+                    if (nx < 0 || ny < 0 || nx >= static_cast<int>(width_)
+                        || ny >= static_cast<int>(height_)) continue;
+
+                    size_t nidx = static_cast<size_t>(ny) * width_ + nx;
+                    const SurfaceInfo& s1 = restirGBuffer_[nidx];
+                    if (!s1.valid) continue;   // 不跨天空边界
+
+                    // 法线权重（幂次锐化，几何边缘保持）
+                    float nDot = glm::max(0.0f, glm::dot(s0.normal, s1.normal));
+                    float wn = std::pow(nDot, 32.0f);
+
+                    // 深度权重（高斯）
+                    float dd = s1.depth - s0.depth;
+                    float wd = std::exp(-dd * dd * invTwoSigmaD2);
+
+                    float w = spatialKernel[dy + 2][dx + 2] * wn * wd;
+                    if (w <= 0.0f) continue;
+
+                    sum += src[nidx] * w;
+                    wsum += w;
+                }
+            }
+
+            dst[idx] = wsum > 0.0f ? sum / wsum : src[idx];
+        }
+    }
 }
 
 // ============================================================

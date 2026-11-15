@@ -30,12 +30,14 @@ struct RenderSettings {
     bool rtShadows = true;          // 阴影射线
     float rtSkyIntensity = 1.0f;    // 天光强度
     float rtResolutionScale = 0.5f; // 内部分辨率比例（1.0 = 全分辨率）
+    float rtExposure = 1.0f;        // 曝光（tone map 前线性乘）
 
     // ReSTIR（rtAlgorithm == 2）
     int rtRestirCandidates = 32;        // 初始候选数 M
     int rtRestirSpatialNeighbors = 3;   // 空间复用邻居数 K
     bool rtRestirTemporal = true;       // 时间复用
     bool rtRestirShadowInTarget = false;// 可见性计入目标函数（贵但阴影更准）
+    bool rtRestirDenoiser = true;       // GBuffer 引导双边滤波降噪
 
     // Feature toggles
     bool enableSSR = true;

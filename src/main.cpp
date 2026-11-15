@@ -25,6 +25,8 @@
 //   --rt-lights N         注入 N 个网格测试点光源（多光源/ReSTIR 测试）
 //   --rt-frames N         渲染帧数（时间复用需多帧，结果取平均；默认 1）
 //   --rt-shadow-in-target ReSTIR 可见性计入目标函数（更准，更贵）
+//   --rt-exposure F       曝光（tone map 前线性乘，默认 1.0）
+//   --rt-no-denoise       关闭输出降噪（默认开启双边滤波）
 // 示例: VulkanPBR --autotest 890 --seconds 20   (聚类 → viz → 换模式 → soak)
 //       VulkanPBR --scene assets/scenes/a.vscene --seconds 5
 //       VulkanPBR --autotest 5 --cam 0,6,4,-90,-55 --seconds 10  (高空俯视水场景)
@@ -77,6 +79,10 @@ int main(int argc, char** argv) {
                 config.rtFrames = std::max(1, std::stoi(argv[++i]));
             } else if (std::strcmp(argv[i], "--rt-shadow-in-target") == 0) {
                 config.rtShadowInTarget = true;
+            } else if (std::strcmp(argv[i], "--rt-exposure") == 0 && i + 1 < argc) {
+                config.rtExposure = std::max(0.01f, std::stof(argv[++i]));
+            } else if (std::strcmp(argv[i], "--rt-no-denoise") == 0) {
+                config.rtDenoise = false;
             } else if (std::strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
                 float v[5] = {0, 0, 5, -90, 0};
                 if (std::sscanf(argv[++i], "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) >= 3) {

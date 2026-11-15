@@ -48,12 +48,14 @@ struct RaytraceSettings {
     int maxBounces = 5;         // 最大弹射次数
     bool shadows = true;        // 阴影射线开关
     float skyIntensity = 1.0f;  // 环境天光强度
+    float exposure = 1.0f;      // 曝光（tone map 前线性乘）
 
     // ========== ReSTIR（PathTracingRestir 模式）==========
     int restirCandidates = 32;        // 初始候选数 M（每像素每帧）
     int restirSpatialNeighbors = 3;   // 空间复用邻居数 K
     bool restirTemporal = true;       // 时间复用开关
     bool restirShadowInTarget = false;// 可见性计入目标函数（更准，每候选 1 阴影射线）
+    bool restirDenoiser = true;       // GBuffer 引导 à-trous 双边滤波（输出路径）
 };
 
 /// 网格数据（局部空间三角形 + BVH，按 meshPath 去重共享）
@@ -105,6 +107,12 @@ public:
     void renderFrame(uint32_t frameIndex);
 
     const Framebuffer& framebuffer() const { return fb_; }
+
+    /**
+     * @brief 输出用解析（曝光 + 可选降噪 + tone map）
+     * 降噪仅在 ReSTIR 模式且 settings.restirDenoiser 时生效（需 GBuffer）
+     */
+    std::vector<uint8_t> resolveForOutput();
 
     // ========== 统计 ==========
     uint32_t instanceCount() const { return static_cast<uint32_t>(instances_.size()); }
@@ -179,6 +187,11 @@ private:
                           uint32_t frameIndex, int spp);
     void resizeRestirBuffers();
 
+    // ---- 降噪器（à-trous 联合双边滤波，GBuffer 边缘保持）----
+    void denoiseHDR();
+    void denoiseFilterBlock(const std::vector<glm::vec3>& src, std::vector<glm::vec3>& dst,
+                            uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th, int step);
+
     // ---- 数据 ----
     std::vector<RTMeshData> meshes_;
     std::vector<RTInstance> instances_;
@@ -209,6 +222,10 @@ private:
     glm::mat4 prevViewProj_ = glm::mat4(1.0f);      // 上一帧 viewProj（重投影）
     glm::vec3 prevCamPos_ = glm::vec3(0.0f);
     bool restirHistoryValid_ = false;               // 时间历史是否可用
+
+    // ---- 降噪器双缓冲（HDR 平均副本，逐层 à-trous）----
+    std::vector<glm::vec3> denoiseA_;
+    std::vector<glm::vec3> denoiseB_;
 
     // ---- 统计 ----
     float lastFrameMs_ = 0.0f;

@@ -53,17 +53,26 @@ public:
         return acc_[static_cast<size_t>(y) * width_ + x] / static_cast<float>(samples_);
     }
 
-    /// 解析为 RGBA8（top-down 行序，tone map + gamma 2.2），可直接上传纹理/保存 PNG
-    std::vector<uint8_t> resolveRGBA8() const {
-        std::vector<uint8_t> out(static_cast<size_t>(width_) * height_ * 4);
+    /// 解析为 RGBA8（top-down 行序，曝光 + ACES tone map + gamma 2.2）
+    std::vector<uint8_t> resolveRGBA8(float exposure = 1.0f) const {
+        std::vector<glm::vec3> hdr(static_cast<size_t>(width_) * height_);
         float invSamples = samples_ > 0 ? 1.0f / static_cast<float>(samples_) : 0.0f;
-        for (uint32_t y = 0; y < height_; ++y) {
-            for (uint32_t x = 0; x < width_; ++x) {
-                glm::vec3 c = acc_[static_cast<size_t>(y) * width_ + x] * invSamples;
+        for (size_t i = 0; i < hdr.size(); ++i) hdr[i] = acc_[i] * invSamples;
+        return tonemapRGBA8(hdr, width_, height_, exposure);
+    }
+
+    /// 线性 HDR 图像 → RGBA8（曝光 + ACES tone map + gamma），降噪等外部处理后的输出共用
+    static std::vector<uint8_t> tonemapRGBA8(const std::vector<glm::vec3>& hdr,
+                                             uint32_t width, uint32_t height,
+                                             float exposure) {
+        std::vector<uint8_t> out(static_cast<size_t>(width) * height * 4);
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                glm::vec3 c = hdr[static_cast<size_t>(y) * width + x] * exposure;
                 c = acesTonemap(c);
                 // gamma 2.2 编码
                 c = glm::pow(glm::max(c, glm::vec3(0.0f)), glm::vec3(1.0f / 2.2f));
-                size_t idx = (static_cast<size_t>(y) * width_ + x) * 4;
+                size_t idx = (static_cast<size_t>(y) * width + x) * 4;
                 out[idx + 0] = static_cast<uint8_t>(c.r * 255.0f + 0.5f);
                 out[idx + 1] = static_cast<uint8_t>(c.g * 255.0f + 0.5f);
                 out[idx + 2] = static_cast<uint8_t>(c.b * 255.0f + 0.5f);

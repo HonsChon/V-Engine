@@ -761,6 +761,10 @@ void SceneRenderer::updateRayTrace() {
         m_rtLastRestirShadowTarget = s.rtRestirShadowInTarget;
     }
 
+    // 输出参数（曝光/降噪）每帧直接应用
+    rt.settings.exposure = s.rtExposure;
+    rt.settings.restirDenoiser = s.rtRestirDenoiser;
+
     // ---- 3. 相机 / 分辨率变化 → 重建相机与显示纹理 + 重置累积 ----
     auto extent = m_swapChain->getExtent();
     uint32_t rtW = std::max(1u, static_cast<uint32_t>(extent.width * s.rtResolutionScale));
@@ -793,9 +797,9 @@ void SceneRenderer::updateRayTrace() {
     // ---- 4. CPU 渲染一帧（累积）----
     rt.renderFrame(m_rtFrameIndex++);
 
-    // ---- 5. 结果上传显示纹理 ----
+    // ---- 5. 结果上传显示纹理（曝光 + 可选降噪）----
     if (m_raytraceColor) {
-        auto rgba = rt.framebuffer().resolveRGBA8();
+        auto rgba = rt.resolveForOutput();
         m_raytraceColor->uploadPixels(rgba.data(), rgba.size());
     }
 }

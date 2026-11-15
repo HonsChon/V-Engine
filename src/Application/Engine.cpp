@@ -896,6 +896,8 @@ bool Engine::renderOfflineRaytrace() {
     rt.settings.maxBounces = m_config.rtBounces;
     rt.settings.shadows = true;
     rt.settings.restirShadowInTarget = m_config.rtShadowInTarget;
+    rt.settings.exposure = m_config.rtExposure;
+    rt.settings.restirDenoiser = m_config.rtDenoise;
 
     const char* algoName = rt.settings.algorithm == VEngine::RT::Algorithm::PathTracingRestir
         ? "path tracing + ReSTIR"
@@ -919,7 +921,7 @@ bool Engine::renderOfflineRaytrace() {
               << rt.totalTriangles() << " tris, " << rt.totalNodes() << " BVH nodes, "
               << rt.lightCount() << " lights, " << rt.rayCount() << " rays)" << std::endl;
 
-    auto rgba = rt.framebuffer().resolveRGBA8();
+    auto rgba = rt.resolveForOutput();
     if (!VEngine::RT::savePNG(m_config.rtOutputPath, rgba,
                               m_config.rtWidth, m_config.rtHeight)) {
         std::cerr << "[Engine] Offline raytrace: failed to save "

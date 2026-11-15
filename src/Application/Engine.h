@@ -64,6 +64,8 @@ struct EngineConfig {
     int rtLights = 0;             // >0: 注入 N 个网格测试点光源（多光源场景）
     int rtFrames = 1;             // 渲染帧数（时间复用需多帧，结果取平均）
     bool rtShadowInTarget = true; // ReSTIR 可见性计入目标函数（离线精度优先）
+    float rtExposure = 1.0f;      // 曝光（tone map 前线性乘）
+    bool rtDenoise = true;        // 输出降噪（GBuffer 引导双边滤波，ReSTIR 模式）
 };
 
 class Engine {

@@ -122,6 +122,7 @@ void DebugPanel::render() {
             ImGui::SliderInt("Max Bounces", &renderSettings->rtMaxBounces, 1, 16);
             ImGui::Checkbox("Shadows", &renderSettings->rtShadows);
             ImGui::SliderFloat("Sky Intensity", &renderSettings->rtSkyIntensity, 0.0f, 3.0f, "%.2f");
+            ImGui::SliderFloat("Exposure", &renderSettings->rtExposure, 0.1f, 4.0f, "%.2f");
             ImGui::SliderFloat("Resolution Scale", &renderSettings->rtResolutionScale, 0.1f, 1.0f, "%.2f");
 
             if (renderSettings->rtAlgorithm == 2) {
@@ -133,6 +134,10 @@ void DebugPanel::render() {
                 ImGui::Checkbox("Shadow In Target", &renderSettings->rtRestirShadowInTarget);
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Visibility in target fn (M shadow rays/frame, more accurate)");
+                }
+                ImGui::Checkbox("Denoiser (bilateral)", &renderSettings->rtRestirDenoiser);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("GBuffer-guided a-trous joint bilateral filter");
                 }
             }
 
