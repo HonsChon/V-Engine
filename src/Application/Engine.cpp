@@ -160,7 +160,8 @@ void Engine::initializeSubsystems() {
         std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
     }
 
-    // 10. Scene: 恢复上次打开的场景（editor_settings.json），无记录则用演示场景
+    // 10. Scene: 恢复上次打开的场景（editor_settings.json）；
+    //     无记录则默认加载 Sponza（资产缺失时回退演示场景）
     {
         std::string lastScene = loadLastScene();
         if (!lastScene.empty()) {
@@ -169,7 +170,8 @@ void Engine::initializeSubsystems() {
                 std::cout << "[Engine] Last scene unavailable, using default scene\n";
                 createDefaultScene();
             }
-        } else {
+        } else if (!openSceneFromFile("assets/scenes/sponza.vscene")) {
+            std::cout << "[Engine] Default Sponza scene unavailable, using demo scene\n";
             createDefaultScene();
         }
     }
