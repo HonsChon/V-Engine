@@ -226,6 +226,7 @@ private:
     // ---- 降噪器双缓冲（HDR 平均副本，逐层 à-trous）----
     std::vector<glm::vec3> denoiseA_;
     std::vector<glm::vec3> denoiseB_;
+    std::vector<float> denoiseVar_;   // 每像素噪声方差（SVGF 颜色权重用）
 
     // ---- 统计 ----
     float lastFrameMs_ = 0.0f;

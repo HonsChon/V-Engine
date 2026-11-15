@@ -841,6 +841,7 @@ void SoftwareRaytracer::resizeRestirBuffers() {
     restirFinal_.assign(n, Reservoir{});
     denoiseA_.assign(n, glm::vec3(0.0f));
     denoiseB_.assign(n, glm::vec3(0.0f));
+    denoiseVar_.assign(n, 0.0f);
     restirPrev_.clear();
     restirPrevGBuffer_.clear();
     restirHistoryValid_ = false;
@@ -862,14 +863,37 @@ std::vector<uint8_t> SoftwareRaytracer::resolveForOutput() {
 }
 
 void SoftwareRaytracer::denoiseHDR() {
-    // 初始化：HDR 平均值
+    // 初始化：HDR 平均值 + 噪声方差图（统计方差，随样本数自动收缩）
     for (uint32_t y = 0; y < height_; ++y) {
         for (uint32_t x = 0; x < width_; ++x) {
-            denoiseA_[static_cast<size_t>(y) * width_ + x] = fb_.pixel(x, y);
+            size_t idx = static_cast<size_t>(y) * width_ + x;
+            denoiseA_[idx] = fb_.pixel(x, y);
+            denoiseVar_[idx] = fb_.pixelVariance(x, y);
         }
     }
 
-    // 3 层 à-trous：步长 1 → 2 → 4（等效半径 ~7px，平坦区抹噪、几何边缘保持）
+    // 方差图 3×3 平滑（稳定估计，SVGF 惯例）→ denoiseVar_ 原地滤波
+    std::vector<float> smoothed(denoiseVar_.size(), 0.0f);
+    for (uint32_t y = 0; y < height_; ++y) {
+        for (uint32_t x = 0; x < width_; ++x) {
+            float sum = 0.0f;
+            int n = 0;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int nx = static_cast<int>(x) + dx;
+                    int ny = static_cast<int>(y) + dy;
+                    if (nx < 0 || ny < 0 || nx >= static_cast<int>(width_)
+                        || ny >= static_cast<int>(height_)) continue;
+                    sum += denoiseVar_[static_cast<size_t>(ny) * width_ + nx];
+                    ++n;
+                }
+            }
+            smoothed[static_cast<size_t>(y) * width_ + x] = sum / std::max(n, 1);
+        }
+    }
+    denoiseVar_ = std::move(smoothed);
+
+    // 3 层 à-trous：步长 1 → 2 → 4（平坦噪声区抹平，几何/颜色边缘保持）
     for (int step : {1, 2, 4}) {
         dispatchTiles([this, step](uint32_t x0, uint32_t y0, uint32_t tw, uint32_t th) {
             denoiseFilterBlock(denoiseA_, denoiseB_, x0, y0, tw, th, step);
@@ -904,6 +928,30 @@ void SoftwareRaytracer::denoiseFilterBlock(const std::vector<glm::vec3>& src,
                 continue;
             }
 
+            // ---- SVGF 颜色权重（方差自适应 + 相对亮度上限钳制）----
+            // 方差含像素内 AA 纹理展布（细节区被撑大 → σ_c 过大 → 糊），
+            // 用局部亮度的固定比例钳制上限：保证 >3·cap·lum 的对比边缘
+            // （地砖缝隙等真实细节）恒被拒绝，噪声（≤cap 量级）放行。
+            // 参数可由环境变量临时校准（RT_SVGF_G / RT_SVGF_CAP / RT_SVGF_POW）
+            float var = denoiseVar_[idx];
+            float lum0 = luminance(src[idx]);
+            static const float svgfG = [] {
+                const char* e = getenv("RT_SVGF_G");
+                return e ? static_cast<float>(atof(e)) : 1.33f;
+            }();
+            static const float svgfCap = [] {
+                const char* e = getenv("RT_SVGF_CAP");
+                return e ? static_cast<float>(atof(e)) : 0.15f;
+            }();
+            static const float svgfPow = [] {
+                const char* e = getenv("RT_SVGF_POW");
+                return e ? static_cast<float>(atof(e)) : 1.0f;
+            }();
+            float stepScale = std::pow(static_cast<float>(step), svgfPow);
+            float capLum = svgfCap * std::max(lum0, 1e-6f);
+            float sigmaC2 = std::min(svgfG * var * stepScale, capLum * capLum) + 1e-8f;
+            float invTwoSigmaC2 = 1.0f / (2.0f * sigmaC2);
+
             // 深度容忍度随步长放大（远处梯度平缓）
             float sigmaDepth = 0.02f * s0.depth * static_cast<float>(step);
             float invTwoSigmaD2 = 1.0f / (2.0f * sigmaDepth * sigmaDepth + 1e-20f);
@@ -930,7 +978,12 @@ void SoftwareRaytracer::denoiseFilterBlock(const std::vector<glm::vec3>& src,
                     float dd = s1.depth - s0.depth;
                     float wd = std::exp(-dd * dd * invTwoSigmaD2);
 
-                    float w = spatialKernel[dy + 2][dx + 2] * wn * wd;
+                    // 颜色权重（SVGF 核心）：亮度差按噪声尺度归一 —
+                    // 真实纹理边缘 |Δl| >> σ_c → 拒绝；噪声 |Δl| ~ σ_c → 放行
+                    float dl = luminance(src[nidx]) - lum0;
+                    float wc = std::exp(-dl * dl * invTwoSigmaC2);
+
+                    float w = spatialKernel[dy + 2][dx + 2] * wn * wd * wc;
                     if (w <= 0.0f) continue;
 
                     sum += src[nidx] * w;
