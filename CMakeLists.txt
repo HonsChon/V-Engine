@@ -260,6 +260,7 @@ if(WIN32)
         src/RHI/DX12/DX12RHICommandBuffer.cpp
         src/RHI/DX12/DX12RHITexture.cpp
         src/RHI/DX12/DX12RHIPipeline.cpp
+        src/RHI/DX12/DX12RHIAccelerationStructure.cpp
         src/RHI/DX12/DX12RHIRenderPass.cpp
         src/RHI/DX12/DX12RHIFramebuffer.cpp
         src/RHI/DX12/DX12RHIDescriptor.cpp
@@ -274,6 +275,7 @@ if(WIN32)
         src/RHI/DX12/DX12RHICommandBuffer.h
         src/RHI/DX12/DX12RHITexture.h
         src/RHI/DX12/DX12RHIPipeline.h
+        src/RHI/DX12/DX12RHIAccelerationStructure.h
         src/RHI/DX12/DX12RHIRenderPass.h
         src/RHI/DX12/DX12RHIFramebuffer.h
         src/RHI/DX12/DX12RHIDescriptor.h
@@ -374,10 +376,12 @@ set(PASSES_HEADERS
 # Renderer - 渲染器
 set(RENDERER_SOURCES
     src/renderer/SceneRenderer.cpp
+    src/renderer/raytrace/GPURayTracer.cpp
 )
 
 set(RENDERER_HEADERS
     src/renderer/SceneRenderer.h
+    src/renderer/raytrace/GPURayTracer.h
 )
 
 # Raytrace - CPU 软光追（BVH / Whitted / 路径追踪 / ReSTIR / 贴图）
@@ -852,6 +856,56 @@ if(WIN32)
         # load shaders_dx12/blit_*.dxil / clear_*.dxil, which are compiled from
         # the smoke shader set — the engine target must build those too.
         add_dependencies(${PROJECT_NAME} CompileDX12EngineShaders CompileDX12Shaders)
+
+        # ============================================================
+        # GPU 光追（DXR）原生 HLSL 集
+        # DXR 阶段（rgen/chit/miss + RayQuery compute）无法走 GLSL→spirv-cross
+        # 链，直接用 dxc 编译原生 HLSL：
+        #   lib_6_3  — ray tracing library（多入口）
+        #   cs_6_5   — compute（含 inline raytracing / RayQuery）
+        # 产物: bin/shaders_dx12/raytrace/*.dxil
+        # ============================================================
+        function(dx12_compile_native_hlsl DX12F_SRC DX12F_PROFILE DX12F_DXIL_REL DX12F_OUTVAR)
+            set(DX12F_DXIL "${DX12_SHADER_OUT_DIR}/${DX12F_DXIL_REL}")
+            add_custom_command(
+                OUTPUT ${DX12F_DXIL}
+                COMMAND ${DX12_DXC} -T ${DX12F_PROFILE} -Fo ${DX12F_DXIL}
+                        -I "${CMAKE_SOURCE_DIR}/shaders/hlsl/raytrace" ${DX12F_SRC}
+                DEPENDS ${DX12F_SRC}
+                        "${CMAKE_SOURCE_DIR}/shaders/hlsl/raytrace/rt_common.hlsli"
+                        "${CMAKE_SOURCE_DIR}/shaders/hlsl/raytrace/rt_bindings.hlsli"
+                COMMENT "DXR native HLSL: ${DX12F_SRC} -> shaders_dx12/${DX12F_DXIL_REL} (${DX12F_PROFILE})"
+            )
+            set(${DX12F_OUTVAR} ${${DX12F_OUTVAR}} ${DX12F_DXIL} PARENT_SCOPE)
+        endfunction()
+
+        file(MAKE_DIRECTORY ${DX12_SHADER_OUT_DIR}/raytrace)
+
+        # <源文件>|<profile>|<dxil 相对名>
+        # rt_shade 用 lib_6_5：RayQuery（inline raytracing，DXR 1.1）在 raygen/chit
+        # 内使用要求 Tier 1.1 + lib_6_5。
+        set(DXR_RAYTRACE_SHADERS
+            raytrace/rt_gbuffer.hlsl|lib_6_3|raytrace/rt_gbuffer.dxil
+            raytrace/rt_shade.hlsl|lib_6_5|raytrace/rt_shade.dxil
+            raytrace/rt_restir_initial.comp.hlsl|cs_6_5|raytrace/rt_restir_initial.dxil
+            raytrace/rt_restir_spatial.comp.hlsl|cs_6_5|raytrace/rt_restir_spatial.dxil
+            raytrace/rt_restir_temporal.comp.hlsl|cs_6_5|raytrace/rt_restir_temporal.dxil
+            raytrace/rt_svgf_variance.comp.hlsl|cs_6_5|raytrace/rt_svgf_variance.dxil
+            raytrace/rt_svgf_atrous.comp.hlsl|cs_6_5|raytrace/rt_svgf_atrous.dxil
+            raytrace/rt_resolve.comp.hlsl|cs_6_5|raytrace/rt_resolve.dxil
+        )
+        set(DXR_RAYTRACE_OUTPUTS)
+        foreach(SHADER_SPEC ${DXR_RAYTRACE_SHADERS})
+            string(REPLACE "|" ";" SHADER_PARTS ${SHADER_SPEC})
+            list(GET SHADER_PARTS 0 SHADER_SRC)
+            list(GET SHADER_PARTS 1 SHADER_PROFILE)
+            list(GET SHADER_PARTS 2 SHADER_DXIL_NAME)
+            dx12_compile_native_hlsl("${CMAKE_SOURCE_DIR}/shaders/hlsl/${SHADER_SRC}"
+                                     ${SHADER_PROFILE} ${SHADER_DXIL_NAME} DXR_RAYTRACE_OUTPUTS)
+        endforeach()
+
+        add_custom_target(CompileDXRRaytraceShaders ALL DEPENDS ${DXR_RAYTRACE_OUTPUTS})
+        add_dependencies(${PROJECT_NAME} CompileDXRRaytraceShaders)
     else()
         message(WARNING "DX12 shader tools (glslc/spirv-cross/dxc) not found; skipping DX12 shader compilation")
     endif()

@@ -31,6 +31,18 @@ public:
 
     void bindGraphicsPipeline(RHIPipeline* pipeline) override;
     void bindComputePipeline(RHIPipeline* pipeline) override;
+    void bindRayTracingPipeline(RHIPipeline* pipeline) override;
+
+    // ---- Ray tracing (DXR) ----
+    void buildBLAS(RHIBLAS* blas, RHIBuffer* scratch,
+                   uint64_t scratchOffset = 0, bool update = false) override;
+    void buildTLAS(RHITLAS* tlas, RHIBuffer* instanceData, RHIBuffer* scratch,
+                   uint64_t scratchOffset = 0, bool update = false) override;
+    void traceRays(RHIPipeline* pipeline, RHIBuffer* sbt,
+                   uint64_t rayGenOffset, uint64_t rayGenSize,
+                   uint64_t missOffset, uint64_t missStride, uint32_t missCount,
+                   uint64_t hitGroupOffset, uint64_t hitGroupStride, uint32_t hitGroupCount,
+                   uint32_t width, uint32_t height, uint32_t depth = 1) override;
 
     void setBindingGroup(uint32_t set, RHIBindingGroup* group) override;
 
@@ -84,6 +96,8 @@ public:
 private:
     void bindPipelineInternal(DX12RHIPipeline* pipeline, bool isCompute);
     void setDescriptorHeaps();
+    /// ID3D12GraphicsCommandList4（DXR 命令），懒 QI；不支持时抛错
+    ID3D12GraphicsCommandList4* cmdList4();
     void transitionTo(ID3D12Resource* resource, D3D12_RESOURCE_STATES from,
                       D3D12_RESOURCE_STATES to);
     // Target resource state for an image layout, honoring UAV-capable textures
@@ -93,6 +107,7 @@ private:
 
     DX12RHIDevice*                device_;
     ID3D12GraphicsCommandList*    cmdList_ = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> cmdList4_;
 
     DX12RHIPipeline*  currentPipeline_ = nullptr;
     bool              isCompute_ = false;

@@ -21,6 +21,14 @@ public:
 
     virtual RHIPipelineType getType() const = 0;
 
+    /// RT 管线：按 export/hit-group 名取 shader identifier（32B，指向管线
+    /// 内部存储，生命周期与管线一致）。非 RT 管线返回 false。
+    virtual bool getShaderIdentifier(const std::string& name,
+                                     const void*& outId, uint32_t& outSize) const {
+        (void)name; (void)outId; (void)outSize;
+        return false;
+    }
+
     RHIPipeline(const RHIPipeline&) = delete;
     RHIPipeline& operator=(const RHIPipeline&) = delete;
 
@@ -125,4 +133,47 @@ public:
 
 protected:
     RHIComputePipelineBuilder() = default;
+};
+
+// =============================================================================
+// Ray Tracing Pipeline Builder — Abstract Interface (DXR)
+//
+// 输入是 DXIL library（.dxil，含 [shader(...)] 入口），而非单 stage 着色器。
+// 绑定约定与 graphics/compute 相同：layout i -> space i，binding b -> register b，
+// push constants -> 根常量 b0 space=layoutCount（docs/DX12-RHI-Notes.md §11）。
+// 只使用全局根签名（无 local root signature / 无 per-instance SBT 参数），
+// 实例数据通过 InstanceID() 索引全局实例缓冲获取。
+// =============================================================================
+
+class RHIRayTracingPipelineBuilder {
+public:
+    virtual ~RHIRayTracingPipelineBuilder() = default;
+
+    /// 添加一个 DXIL library（导出全部 entry point；库内非 entry 函数不受影响）
+    virtual RHIRayTracingPipelineBuilder& addLibrary(const std::string& path) = 0;
+
+    /// raygen 入口导出名（如 "rgMain"）
+    virtual RHIRayTracingPipelineBuilder& setRayGen(const std::string& exportName) = 0;
+
+    /// miss shader（按 miss index 注册，TraceRay 的 rayFlags 后第三个参数）
+    virtual RHIRayTracingPipelineBuilder& addMiss(const std::string& exportName,
+                                                  uint32_t missIndex) = 0;
+
+    /// hit group：closestHit 必填，anyHit 可为空
+    virtual RHIRayTracingPipelineBuilder& addHitGroup(const std::string& groupName,
+                                                      const std::string& closestHit,
+                                                      const std::string& anyHit = "") = 0;
+
+    virtual RHIRayTracingPipelineBuilder& setMaxPayloadSize(uint32_t bytes) = 0;
+    virtual RHIRayTracingPipelineBuilder& setMaxAttributeSize(uint32_t bytes) = 0;
+    virtual RHIRayTracingPipelineBuilder& setMaxRecursionDepth(uint32_t depth) = 0;
+
+    // 绑定布局与 push constants（与 graphics/compute 管线同约定）
+    virtual RHIRayTracingPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) = 0;
+    virtual RHIRayTracingPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) = 0;
+
+    virtual std::shared_ptr<RHIPipeline> build() = 0;
+
+protected:
+    RHIRayTracingPipelineBuilder() = default;
 };

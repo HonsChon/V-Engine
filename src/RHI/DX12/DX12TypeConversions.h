@@ -65,6 +65,8 @@ inline RHIFormat fromDXGIFormat(DXGI_FORMAT format) {
 // ---- Buffer Usage -> D3D12 Resource Flags ----
 inline D3D12_RESOURCE_FLAGS toD3D12ResourceFlags(RHIBufferUsage usage) {
     D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE;
+    // 注意：RayTracing（SBT 等缓冲）不加 UAV —— UPLOAD 堆禁止 ALLOW_UA；
+    // AS 结果资源由 DX12RHIAccelerationStructure 自建（自带 ALLOW_UA）。
     if (hasFlag(usage, RHIBufferUsage::Storage)) {
         flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     }

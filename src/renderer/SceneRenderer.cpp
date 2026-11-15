@@ -31,6 +31,9 @@
 // CPU 软光追
 #include "SoftwareRaytracer.h"
 
+// GPU 硬件光追（DXR）
+#include "raytrace/GPURayTracer.h"
+
 // RHI
 #include "RHIDevice.h"
 #include "RHISwapChain.h"
@@ -104,6 +107,7 @@ void SceneRenderer::cleanup() {
     cleanupGPUDrivenRendering();
     cleanupDeferredShading();
     cleanupRayTrace();
+    cleanupGPURayTrace();
     m_fxaaPass.reset();
     m_forwardPass.reset();
     cleanupOffscreenTarget();
@@ -515,7 +519,9 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
 // ============================================================
 
 void SceneRenderer::recordCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex) {
-    if (m_settings.renderMode == RenderMode::RayTrace) {
+    if (m_settings.renderMode == RenderMode::GPURayTrace) {
+        recordGPURayTraceCommands(cmd, imageIndex, frameIndex);
+    } else if (m_settings.renderMode == RenderMode::RayTrace) {
         recordRayTraceCommands(cmd, imageIndex, frameIndex);
     } else if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
         recordDeferredCommands(cmd, imageIndex, frameIndex);
@@ -854,6 +860,125 @@ size_t SceneRenderer::computeSceneHash() const {
 }
 
 // ============================================================
+// GPU 硬件光追（DXR）
+// ============================================================
+
+void SceneRenderer::initGPURayTrace() {
+    if (m_gpuRaytraceInitialized) return;
+
+    // DXR Tier 1.1 检查（RayQuery 在 ReSTIR/NEE 中必需）
+    m_gpuRaytraceAvailable = VEngine::GRT::GPURayTracer::isSupported(m_rhiDevice);
+    if (!m_gpuRaytraceAvailable) {
+        std::cout << "[SceneRenderer] GPU ray tracing unavailable (requires DX12 backend "
+                     "with DXR Tier 1.1); falling back to Normal mode" << std::endl;
+        m_settings.renderMode = RenderMode::Normal;
+        return;
+    }
+
+    try {
+        m_gpuRaytracer = std::make_unique<VEngine::GRT::GPURayTracer>(m_rhiDevice);
+    } catch (const std::exception& e) {
+        std::cerr << "[SceneRenderer] GPU ray tracer init failed: " << e.what()
+                  << "; falling back to Normal mode" << std::endl;
+        m_gpuRaytracer.reset();
+        m_gpuRaytraceAvailable = false;
+        m_settings.renderMode = RenderMode::Normal;
+        return;
+    }
+
+    m_gpuRaytraceInitialized = true;
+    m_grtSceneHash = 0;             // 强制首帧重建场景
+    m_grtLastView = glm::mat4(0.0f);
+    m_grtLastProj = glm::mat4(0.0f);
+}
+
+void SceneRenderer::cleanupGPURayTrace() {
+    if (!m_gpuRaytraceInitialized) return;
+    if (m_rhiDevice) m_rhiDevice->waitIdle();
+    m_gpuRaytracer.reset();
+    m_gpuRaytraceInitialized = false;
+    std::cout << "[SceneRenderer] GPU ray tracer cleaned up\n";
+}
+
+void SceneRenderer::recordGPURayTraceCommands(RHICommandBuffer* cmd, uint32_t imageIndex,
+                                              uint32_t frameIndex) {
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "GPU Raytrace (DXR)", 0.2f, 0.9f, 0.5f, 1.0f);
+
+    if (!m_gpuRaytraceInitialized) initGPURayTrace();
+
+    const auto& s = m_settings;
+    if (m_gpuRaytracer && m_camera && m_scene) {
+        auto& rt = *m_gpuRaytracer;
+
+        // ---- 1. 场景变化 → 重建（BLAS/TLAS/几何/材质/灯光）----
+        size_t sceneHash = computeSceneHash();
+        if (sceneHash != m_grtSceneHash) {
+            m_grtSceneHash = sceneHash;
+            rt.buildFromScene(m_scene);
+        }
+
+        // ---- 2. 相机 / 分辨率变化 → setCamera（内部重置历史）----
+        auto extent = m_swapChain->getExtent();
+        uint32_t rtW = std::max(1u, static_cast<uint32_t>(extent.width * s.rtResolutionScale));
+        uint32_t rtH = std::max(1u, static_cast<uint32_t>(extent.height * s.rtResolutionScale));
+
+        glm::mat4 view = m_camera->getViewMatrix();
+        // DX12 使用 GLM 原生投影（Y-up，与 CPU 版同式；不套 Vulkan Y 翻转）
+        glm::mat4 proj = glm::perspective(glm::radians(m_camera->getZoom()),
+                                          rtW / static_cast<float>(rtH), 0.1f, 1000.0f);
+
+        bool cameraChanged = (view != m_grtLastView || proj != m_grtLastProj);
+        if (cameraChanged) {
+            m_grtLastView = view;
+            m_grtLastProj = proj;
+            rt.resetHistory();       // 相机变化：时间复用/方差历史失效
+        }
+        rt.setCamera(view, proj, rtW, rtH);
+
+        // ---- 3. 设置快照 + GPU pass 录制 ----
+        VEngine::GRT::GRTSettings gs;
+        gs.maxBounces = std::max(1, s.rtMaxBounces);
+        gs.shadows = s.rtShadows;
+        gs.skyIntensity = s.rtSkyIntensity;
+        gs.exposure = s.rtExposure;
+        gs.restirCandidates = std::max(1, s.rtRestirCandidates);
+        gs.restirSpatialNeighbors = std::max(0, s.rtRestirSpatialNeighbors);
+        gs.restirTemporal = s.rtRestirTemporal;
+        gs.restirShadowInTarget = s.rtRestirShadowInTarget;
+        gs.denoiser = s.rtRestirDenoiser;
+
+        rt.renderFrame(cmd, frameIndex, gs);
+    }
+
+    // === swapchain：结果 blit + UI ===
+    {
+        std::vector<RHIClearValue> clears = {
+            RHIClearValue::Color(0.1f, 0.2f, 0.4f, 1.0f),
+            RHIClearValue::DepthStencil(1.0f, 0)
+        };
+        cmd->beginRenderPass(
+            m_swapChain->getRHIRenderPass(),
+            m_swapChain->getRHIFramebuffer(imageIndex),
+            clears);
+    }
+
+    // 全屏直通 blit（复用 FXAA passthrough 分支；RT 已有 à-trous + 时域抗锯齿）
+    if (m_fxaaPass && m_gpuRaytracer && m_gpuRaytracer->getOutputTexture()) {
+        m_fxaaPass->setSourceTexture(m_gpuRaytracer->getOutputTexture(), m_offscreenSampler.get());
+        m_fxaaPass->render(cmd, frameIndex, false);
+    }
+
+    // UI
+    m_rhiDevice->beginDebugLabel(cmd->getNativeHandle(), "UI Rendering", 0.8f, 0.2f, 0.8f, 1.0f);
+    updateUI();
+    renderUI(cmd);
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+
+    cmd->endRenderPass();
+    m_rhiDevice->endDebugLabel(cmd->getNativeHandle());
+}
+
+// ============================================================
 // 命令录制 — 延迟渲染
 // ============================================================
 
@@ -1049,6 +1174,15 @@ void SceneRenderer::updateUI() {
                 m_raytracer->totalNodes(),
                 m_raytracer->instanceCount(),
                 std::thread::hardware_concurrency());
+        }
+
+        // GPU 光追统计（GPURayTrace 模式）
+        if (m_settings.renderMode == RenderMode::GPURayTrace && m_gpuRaytracer) {
+            const auto& st = m_gpuRaytracer->getStats();
+            debugPanel->setGPURaytraceStats(
+                static_cast<float>(st.lastFrameMs),
+                static_cast<float>(st.lastAsBuildMs),
+                st.instances, st.meshes, st.triangles, st.lights, st.textures);
         }
     }
 

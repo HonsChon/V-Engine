@@ -42,6 +42,9 @@ public:
                       uint64_t offset = 0, uint64_t range = 0) override;
     void updateTexture(uint32_t binding, RHITexture* texture,
                        RHISampler* sampler = nullptr) override;
+    void updateTextureArrayElement(uint32_t binding, uint32_t arrayIndex,
+                                   RHITexture* texture) override;
+    void updateAccelerationStructure(uint32_t binding, RHITLAS* tlas) override;
 
     // Resource-block handles (CBV/SRV/UAV).
     D3D12_GPU_DESCRIPTOR_HANDLE getResourceGPUHandle() const { return resourceGpuBase_; }
@@ -64,6 +67,7 @@ private:
     void writeTextureView(const RHIBindingEntry& entry,
                           D3D12_CPU_DESCRIPTOR_HANDLE cpu,
                           RHITexture* texture, RHISampler* sampler);
+    void writeAccelerationStructureView(RHITLAS* tlas, D3D12_CPU_DESCRIPTOR_HANDLE cpu);
 
     DX12RHIDevice* device_ = nullptr;
 

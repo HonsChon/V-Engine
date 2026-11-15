@@ -59,6 +59,7 @@ enum class RHIBufferUsage : uint32_t {
     Indirect     = 1 << 4,
     TransferSrc  = 1 << 5,
     TransferDst  = 1 << 6,
+    RayTracing   = 1 << 7,   // acceleration-structure storage / shader binding table
 };
 
 // =============================================================================
@@ -89,9 +90,17 @@ enum class RHIShaderStage : uint32_t {
     TessControl = 1 << 4,
     TessEval    = 1 << 5,
 
+    // Ray tracing stages (DXR)
+    RayGeneration = 1 << 6,
+    Miss           = 1 << 7,
+    ClosestHit     = 1 << 8,
+    AnyHit         = 1 << 9,
+    Library        = 1 << 10,   // DXIL library container (not a stage per se)
+
     // Common combinations
     VertexFragment = Vertex | Fragment,
     All            = Vertex | Fragment | Compute | Geometry | TessControl | TessEval,
+    RayTracingAll  = RayGeneration | Miss | ClosestHit | AnyHit,
 };
 
 // =============================================================================
@@ -111,13 +120,16 @@ enum class RHIMemoryUsage {
 enum class RHIDescriptorType {
     UniformBuffer,
     StorageBuffer,
+    StorageBufferReadOnly,   // SRV raw/structured buffer（HLSL ByteAddressBuffer/StructuredBuffer 读）
     CombinedImageSampler,
     SampledImage,
+    SampledImageArray,       // bindless 纹理数组（descriptor table，动态索引）
     StorageImage,
     Sampler,
     InputAttachment,
     UniformBufferDynamic,
     StorageBufferDynamic,
+    AccelerationStructure,   // TLAS SRV
 };
 
 // =============================================================================
@@ -127,6 +139,7 @@ enum class RHIDescriptorType {
 enum class RHIPipelineType {
     Graphics,
     Compute,
+    RayTracing,
 };
 
 // =============================================================================

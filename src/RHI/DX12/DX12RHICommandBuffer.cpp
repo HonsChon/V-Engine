@@ -3,6 +3,7 @@
 #include "DX12RHIBuffer.h"
 #include "DX12RHITexture.h"
 #include "DX12RHIPipeline.h"
+#include "DX12RHIAccelerationStructure.h"
 #include "DX12RHIDescriptor.h"
 #include "DX12RHIRenderPass.h"
 #include "DX12RHIFramebuffer.h"
@@ -121,6 +122,142 @@ void DX12RHICommandBuffer::bindGraphicsPipeline(RHIPipeline* pipeline) {
 
 void DX12RHICommandBuffer::bindComputePipeline(RHIPipeline* pipeline) {
     bindPipelineInternal(static_cast<DX12RHIPipeline*>(pipeline), true);
+}
+
+// =============================================================================
+// Ray tracing (DXR)
+// =============================================================================
+
+ID3D12GraphicsCommandList4* DX12RHICommandBuffer::cmdList4() {
+    if (!cmdList4_) {
+        if (FAILED(cmdList_->QueryInterface(IID_PPV_ARGS(&cmdList4_)))) {
+            throw std::runtime_error("[DX12RHICommandBuffer] ID3D12GraphicsCommandList4 unavailable (no DXR support?)");
+        }
+    }
+    return cmdList4_.Get();
+}
+
+void DX12RHICommandBuffer::bindRayTracingPipeline(RHIPipeline* pipeline) {
+    auto* dxPipeline = static_cast<DX12RHIPipeline*>(pipeline);
+    if (dxPipeline->getType() != RHIPipelineType::RayTracing) {
+        throw std::runtime_error("[DX12RHICommandBuffer] bindRayTracingPipeline: not a ray tracing pipeline");
+    }
+    setDescriptorHeaps();
+    cmdList_->SetComputeRootSignature(dxPipeline->getD3D12RootSignature());
+    cmdList4()->SetPipelineState1(dxPipeline->getD3D12StateObject());
+    // RT 走 compute 根槽位：后续 setBindingGroup/pushConstants 用 compute 路径
+    currentPipeline_ = dxPipeline;
+    isCompute_ = true;
+}
+
+void DX12RHICommandBuffer::buildBLAS(RHIBLAS* blas, RHIBuffer* scratch,
+                                     uint64_t scratchOffset, bool update) {
+    auto* dxBLAS = static_cast<DX12RHIBLAS*>(blas);
+    auto* dxScratch = static_cast<DX12RHIBuffer*>(scratch);
+    if (!dxBLAS || !dxScratch) {
+        throw std::runtime_error("[DX12RHICommandBuffer] buildBLAS: null arguments");
+    }
+
+    // 顶点/索引缓冲需切到 NON_PIXEL_SHADER_RESOURCE（DXR 读取）
+    for (const auto& g : dxBLAS->getGeometries()) {
+        auto ensureBufState = [](DX12RHICommandBuffer* self, DX12RHIBuffer* buf,
+                                 D3D12_RESOURCE_STATES state) {
+            if (!buf) return;
+            if (buf->getCurrentState() != state) {
+                self->transitionTo(buf->getD3D12Resource(), buf->getCurrentState(), state);
+                buf->setCurrentState(state);
+            }
+        };
+        ensureBufState(this, static_cast<DX12RHIBuffer*>(g.vertexBuffer),
+                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ensureBufState(this, static_cast<DX12RHIBuffer*>(g.indexBuffer),
+                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    // scratch 需为 UAV
+    if (dxScratch->getCurrentState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+        transitionTo(dxScratch->getD3D12Resource(), dxScratch->getCurrentState(),
+                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        dxScratch->setCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
+    dxBLAS->fillBuildDesc(buildDesc,
+                          dxScratch->getGPUVirtualAddress() + scratchOffset, update);
+    cmdList4()->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+
+    // UAV barrier：后续 build / trace 依赖 AS 写入完成
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = nullptr;
+    cmdList_->ResourceBarrier(1, &uavBarrier);
+}
+
+void DX12RHICommandBuffer::buildTLAS(RHITLAS* tlas, RHIBuffer* instanceData, RHIBuffer* scratch,
+                                     uint64_t scratchOffset, bool update) {
+    auto* dxTLAS = static_cast<DX12RHITLAS*>(tlas);
+    auto* dxInstances = static_cast<DX12RHIBuffer*>(instanceData);
+    auto* dxScratch = static_cast<DX12RHIBuffer*>(scratch);
+    if (!dxTLAS || !dxInstances || !dxScratch) {
+        throw std::runtime_error("[DX12RHICommandBuffer] buildTLAS: null arguments");
+    }
+
+    // 实例描述缓冲：UPLOAD 堆的 GENERIC_READ 已覆盖读取需求
+    if (dxInstances->getCurrentState() != D3D12_RESOURCE_STATE_GENERIC_READ &&
+        dxInstances->getCurrentState() != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) {
+        transitionTo(dxInstances->getD3D12Resource(), dxInstances->getCurrentState(),
+                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        dxInstances->setCurrentState(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    if (dxScratch->getCurrentState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+        transitionTo(dxScratch->getD3D12Resource(), dxScratch->getCurrentState(),
+                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        dxScratch->setCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
+    dxTLAS->fillBuildDesc(buildDesc,
+                          dxInstances->getGPUVirtualAddress(),
+                          dxScratch->getGPUVirtualAddress() + scratchOffset, update);
+    cmdList4()->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = nullptr;
+    cmdList_->ResourceBarrier(1, &uavBarrier);
+}
+
+void DX12RHICommandBuffer::traceRays(RHIPipeline* pipeline, RHIBuffer* sbt,
+                                     uint64_t rayGenOffset, uint64_t rayGenSize,
+                                     uint64_t missOffset, uint64_t missStride, uint32_t missCount,
+                                     uint64_t hitGroupOffset, uint64_t hitGroupStride, uint32_t hitGroupCount,
+                                     uint32_t width, uint32_t height, uint32_t depth) {
+    auto* dxPipeline = static_cast<DX12RHIPipeline*>(pipeline);
+    auto* dxSbt = static_cast<DX12RHIBuffer*>(sbt);
+    if (!dxPipeline || !dxSbt) {
+        throw std::runtime_error("[DX12RHICommandBuffer] traceRays: null arguments");
+    }
+    if (dxPipeline->getType() != RHIPipelineType::RayTracing) {
+        throw std::runtime_error("[DX12RHICommandBuffer] traceRays: not a ray tracing pipeline");
+    }
+
+    // SBT（UPLOAD 堆，GENERIC_READ 恒定）无需状态切换
+    const D3D12_GPU_VIRTUAL_ADDRESS base = dxSbt->getGPUVirtualAddress();
+
+    D3D12_DISPATCH_RAYS_DESC desc = {};
+    desc.RayGenerationShaderRecord.StartAddress = base + rayGenOffset;
+    desc.RayGenerationShaderRecord.SizeInBytes = rayGenSize;
+    desc.MissShaderTable.StartAddress = base + missOffset;
+    desc.MissShaderTable.SizeInBytes = static_cast<UINT64>(missCount) * missStride;
+    desc.MissShaderTable.StrideInBytes = missStride;
+    desc.HitGroupTable.StartAddress = base + hitGroupOffset;
+    desc.HitGroupTable.SizeInBytes = static_cast<UINT64>(hitGroupCount) * hitGroupStride;
+    desc.HitGroupTable.StrideInBytes = hitGroupStride;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Depth = depth;
+    cmdList4()->DispatchRays(&desc);
 }
 
 // ---- Render pass ----

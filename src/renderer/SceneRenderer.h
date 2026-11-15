@@ -56,6 +56,9 @@ namespace VEngine {
     namespace RT {
         class SoftwareRaytracer;
     }
+    namespace GRT {
+        class GPURayTracer;
+    }
 }
 
 // UI
@@ -188,6 +191,12 @@ private:
     /// 场景数据指纹（变换/材质/光源/网格路径变化 → 重建光追场景）
     size_t computeSceneHash() const;
 
+    // ========== GPU 硬件光追（DXR）==========
+    void initGPURayTrace();
+    void cleanupGPURayTrace();
+    /// 场景/相机/设置变化检测 + GPU pass 录制（在命令缓冲上直接派发）
+    void recordGPURayTraceCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+
     // ========== 矩阵工具 ==========
     /// GLM 的 perspective 面向 Y-up 的 GL/D3D 惯例;Vulkan 的 NDC Y 向下,需要
     /// 翻转投影的 Y 轴才与画面一致。DX12 直接使用标准矩阵。
@@ -259,6 +268,14 @@ private:
     int m_rtLastRestirNeighbors = -1;
     bool m_rtLastRestirTemporal = true;
     bool m_rtLastRestirShadowTarget = false;
+
+    // ========== GPU 硬件光追（DXR）==========
+    std::unique_ptr<VEngine::GRT::GPURayTracer> m_gpuRaytracer;
+    bool m_gpuRaytraceInitialized = false;
+    bool m_gpuRaytraceAvailable = false;           // DXR Tier 1.1 检查（一次性）
+    size_t m_grtSceneHash = 0;                     // 场景变化检测（与 CPU 共用 hash）
+    glm::mat4 m_grtLastView = glm::mat4(0.0f);     // 相机变化检测（历史重置）
+    glm::mat4 m_grtLastProj = glm::mat4(0.0f);
 
     // ========== 状态 ==========
     RenderSettings m_settings;

@@ -58,14 +58,17 @@ struct RHITextureBinding {
     RHISampler* sampler = nullptr;
 };
 
+class RHITLAS;
+
 struct RHIBindingGroupEntry {
     uint32_t binding = 0;
 
     // One of these should be set
     RHIBufferBinding  bufferBinding;
     RHITextureBinding textureBinding;
+    RHITLAS*          accelerationStructure = nullptr;
 
-    enum class Kind { Buffer, Texture } kind = Kind::Buffer;
+    enum class Kind { Buffer, Texture, AccelerationStructure } kind = Kind::Buffer;
 };
 
 struct RHIBindingGroupDesc {
@@ -90,6 +93,15 @@ struct RHIBindingGroupDesc {
         entries.push_back(entry);
         return *this;
     }
+
+    RHIBindingGroupDesc& setAccelerationStructure(uint32_t binding, RHITLAS* tlas) {
+        RHIBindingGroupEntry entry;
+        entry.binding = binding;
+        entry.kind = RHIBindingGroupEntry::Kind::AccelerationStructure;
+        entry.accelerationStructure = tlas;
+        entries.push_back(entry);
+        return *this;
+    }
 };
 
 class RHIBindingGroup {
@@ -101,6 +113,16 @@ public:
                                uint64_t offset = 0, uint64_t range = 0) = 0;
     virtual void updateTexture(uint32_t binding, RHITexture* texture,
                                 RHISampler* sampler = nullptr) = 0;
+    /// 更新数组绑定（bindless）中的一个元素：binding 必须是 count>1 的
+    /// SampledImageArray 条目，index < count。
+    virtual void updateTextureArrayElement(uint32_t binding, uint32_t arrayIndex,
+                                           RHITexture* texture) {
+        (void)binding; (void)arrayIndex; (void)texture;   // 后端不支持的默认忽略
+    }
+    /// 更新加速结构绑定（TLAS 重建后）
+    virtual void updateAccelerationStructure(uint32_t binding, RHITLAS* tlas) {
+        (void)binding; (void)tlas;   // 后端不支持的默认忽略
+    }
 
     RHIBindingGroup(const RHIBindingGroup&) = delete;
     RHIBindingGroup& operator=(const RHIBindingGroup&) = delete;

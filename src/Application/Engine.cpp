@@ -367,6 +367,17 @@ void Engine::handleKey(int key) {
         std::cout << "[Engine] GPU Culling " << (settings.enableGPUCulling ? "ON" : "OFF") << "\n";
         if (settings.enableGPUCulling) m_renderer->initGPUDrivenRendering();
         break;
+    case GLFW_KEY_F6: {
+        // GPU 硬件光追（DXR；Tier 不可用时由 SceneRenderer 回退 Normal）
+        if (settings.renderMode != RenderMode::GPURayTrace) {
+            settings.renderMode = RenderMode::GPURayTrace;
+            std::cout << "[Engine] → GPU Ray Trace (DXR)\n";
+        } else {
+            settings.renderMode = RenderMode::Normal;
+            std::cout << "[Engine] → Normal (Forward)\n";
+        }
+        break;
+    }
     case GLFW_KEY_7:
         settings.enableNanite = !settings.enableNanite;
         std::cout << "[Engine] Nanite " << (settings.enableNanite ? "ON" : "OFF") << "\n";

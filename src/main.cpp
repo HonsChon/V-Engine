@@ -45,6 +45,10 @@ int main(int argc, char** argv) {
                 for (const char* p = argv[++i]; *p; ++p) {
                     if (*p >= '0' && *p <= '9') {
                         config.autotestKeys.push_back(GLFW_KEY_0 + (*p - '0'));
+                    } else if ((*p == 'F' || *p == 'f') && p[1] >= '1' && p[1] <= '9') {
+                        // F 键：F1..F9（GPU 光追 = F6 等）
+                        config.autotestKeys.push_back(GLFW_KEY_F1 + (p[1] - '1'));
+                        ++p;
                     }
                 }
             } else if (std::strcmp(argv[i], "--interval") == 0 && i + 1 < argc) {

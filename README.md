@@ -23,6 +23,16 @@
 
 ### 🎨 渲染系统
 - **双管线渲染** - 前向渲染 + 延迟渲染，可实时切换
+- **GPU 硬件光追 (DXR)** - `F6` 切换（DX12 后端 / DXR Tier 1.1+）
+  - RHI 新增加速结构（BLAS/TLAS）、RTPSO、SBT、DispatchRays 抽象
+  - RT-GBuffer 主射线 → **ReSTIR DI**（M 候选 / K 邻域空间复用 /
+    `prevViewProj` 重投影时间复用，无偏 shift-corrected MIS 合并）→
+    1spp 路径追踪间接光（NEE + Fresnel 分瓣 + Russian Roulette）→
+    **SVGF**（方差引导 3 层 à-trous）→ ACES tonemap
+  - 原生 HLSL 着色器（lib_6_3/6_5 DXR + cs_6_5 RayQuery），绕过
+    spirv-cross 转译链；bindless 贴图数组（动态索引 1024 槽）
+  - 与 CPU 软光追（`src/raytrace/`）逐阶段算法对齐，便于对照验证；
+    CPU 版保留为回归参考（[docs/GPURayTracing.md](docs/GPURayTracing.md)）
 - **G-Buffer** - 多渲染目标 (MRT)，存储世界位置/法线/Albedo/深度
 - **SSAO** - 屏幕空间环境光遮蔽（延迟管线，分块采样 deinterleave/
   reinterleave + 双边模糊，三级质量预设，默认启用，DebugPanel 实时开关）
@@ -485,6 +495,7 @@ private:
 | 按键 | 功能 |
 |------|------|
 | `5` | **切换水面场景 (启用延迟渲染)** |
+| `F6` | **切换 GPU 硬件光追 (DX12/DXR Tier 1.1+，含 ReSTIR + SVGF)** |
 | `F1` | **切换 UI 显示/隐藏** |
 | `ESC` | 退出程序 |
 

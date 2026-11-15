@@ -5,6 +5,7 @@
 #include "DX12RHIShader.h"
 #include "DX12RHIDescriptor.h"
 #include "DX12RHIPipeline.h"
+#include "DX12RHIAccelerationStructure.h"
 #include "DX12RHIRenderPass.h"
 #include "DX12RHIFramebuffer.h"
 #include "DX12RHICommandBuffer.h"
@@ -21,8 +22,8 @@ using namespace DX12TypeConversions;
 namespace {
 
 constexpr UINT kRingSegments          = 4;
-constexpr UINT kResourceRingTotal     = 8192;   // 4 x 2048 CBV/SRV/UAV
-constexpr UINT kSamplerRingTotal      = 512;    // 4 x 128 SAMPLER
+constexpr UINT kResourceRingTotal     = 16384;  // 4 x 4096 CBV/SRV/UAV（含 bindless 贴图数组）
+constexpr UINT kSamplerRingTotal      = 2048;   // 4 x 512  SAMPLER（大场景材质组 + RT）
 constexpr UINT kRtvRingTotal          = 256;    // 4 x 64  RTV (CPU only)
 constexpr UINT kDsvRingTotal          = 128;    // 4 x 32  DSV (CPU only)
 constexpr UINT kCpuUavRingTotal       = 64;     // 4 x 16  CBV/SRV/UAV, CPU only (UAV clears)
@@ -82,6 +83,7 @@ void DX12RHIDevice::GetHardwareAdapter(IDXGIFactory2* pFactory, IDXGIAdapter1** 
 {
     *ppAdapter = nullptr;
     ComPtr<IDXGIAdapter1> adapter;
+    ComPtr<IDXGIAdapter1> firstWorking;   // 无 DXR 适配器时的兜底
 
     for (UINT adapterIndex = 0;
          pFactory->EnumAdapters1(adapterIndex, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND;
@@ -94,14 +96,34 @@ void DX12RHIDevice::GetHardwareAdapter(IDXGIFactory2* pFactory, IDXGIAdapter1** 
             adapter.Reset();
             continue;
         }
-        if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0,
-                                        __uuidof(ID3D12Device), nullptr))) {
-            break;
+
+        ComPtr<ID3D12Device> testDevice;
+        if (FAILED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0,
+                                     __uuidof(ID3D12Device), &testDevice))) {
+            adapter.Reset();
+            continue;
+        }
+        if (!firstWorking) {
+            firstWorking = adapter;
+        }
+
+        // 优先选择支持 DXR 的适配器（多 GPU 系统：虚拟显示适配器可能
+        // 先于独立显卡被枚举到，其 D3D12 设备没有光追支持）
+        D3D12_FEATURE_DATA_D3D12_OPTIONS5 opts5 = {};
+        if (SUCCEEDED(testDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
+                                                      &opts5, sizeof(opts5)))
+            && opts5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0)
+        {
+            char name[128] = {};
+            WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr);
+            std::cout << "[DX12RHIDevice] DXR-capable adapter: " << name << "\n";
+            *ppAdapter = adapter.Detach();
+            return;
         }
         adapter.Reset();
     }
 
-    *ppAdapter = adapter.Detach();
+    *ppAdapter = firstWorking.Detach();
 }
 
 void DX12RHIDevice::createDevice()
@@ -111,6 +133,16 @@ void DX12RHIDevice::createDevice()
         ComPtr<ID3D12Debug> debugController;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
             debugController->EnableDebugLayer();
+        }
+        // GPU-Based Validation：捕获 GPU 侧资源状态误用（DXR 调试用）。
+        // 用环境变量 DX12_GBV=1 显式开启（默认关：注入层本身可能触发驱动级问题）。
+        const char* gbv = std::getenv("DX12_GBV");
+        if (gbv && *gbv && *gbv != '0') {
+            ComPtr<ID3D12Debug1> debugController1;
+            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController1)))) {
+                debugController1->SetEnableGPUBasedValidation(TRUE);
+                std::cout << "[DX12RHIDevice] GPU-based validation enabled\n";
+            }
         }
     }
 #endif
@@ -438,6 +470,50 @@ std::shared_ptr<RHIGraphicsPipelineBuilder> DX12RHIDevice::createGraphicsPipelin
 std::shared_ptr<RHIComputePipelineBuilder> DX12RHIDevice::createComputePipelineBuilder()
 {
     return std::make_shared<DX12ComputePipelineBuilder>(this);
+}
+
+// =============================================================================
+// Ray tracing (DXR)
+// =============================================================================
+
+std::shared_ptr<RHIRayTracingPipelineBuilder> DX12RHIDevice::createRayTracingPipelineBuilder()
+{
+    return std::make_shared<DX12RayTracingPipelineBuilder>(this);
+}
+
+uint32_t DX12RHIDevice::queryRayTracingTier()
+{
+    D3D12_FEATURE_DATA_D3D12_OPTIONS5 opts5 = {};
+    HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &opts5, sizeof(opts5));
+    if (FAILED(hr)) {
+        std::cout << "[DX12RHIDevice] OPTIONS5 query failed (hr=0x"
+                  << std::hex << hr << std::dec << ")\n";
+        return 0;
+    }
+    switch (opts5.RaytracingTier) {
+        case D3D12_RAYTRACING_TIER_1_0:
+            std::cout << "[DX12RHIDevice] Raytracing Tier 1.0\n";
+            return 10;
+        case D3D12_RAYTRACING_TIER_1_1:
+        case D3D12_RAYTRACING_TIER_1_2:   // 1.2 ⊃ 1.1（RayQuery 可用）
+            std::cout << "[DX12RHIDevice] Raytracing Tier "
+                      << (opts5.RaytracingTier == D3D12_RAYTRACING_TIER_1_1 ? "1.1" : "1.2") << "\n";
+            return 11;
+        default:
+            std::cout << "[DX12RHIDevice] Raytracing not supported (tier="
+                      << static_cast<int>(opts5.RaytracingTier) << ")\n";
+            return 0;
+    }
+}
+
+std::shared_ptr<RHIBLAS> DX12RHIDevice::createBLAS(const RHIBLASDesc& desc)
+{
+    return std::make_shared<DX12RHIBLAS>(this, desc);
+}
+
+std::shared_ptr<RHITLAS> DX12RHIDevice::createTLAS(const RHITLASDesc& desc)
+{
+    return std::make_shared<DX12RHITLAS>(this, desc);
 }
 
 std::shared_ptr<RHIRenderPass> DX12RHIDevice::createRenderPass(const RHIRenderPassDesc& desc)

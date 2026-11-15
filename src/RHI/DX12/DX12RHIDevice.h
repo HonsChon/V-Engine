@@ -7,6 +7,7 @@
 #include "RHIShader.h"
 #include "RHIDescriptor.h"
 #include "RHIPipeline.h"
+#include "RHIAccelerationStructure.h"
 #include "RHIRenderPass.h"
 #include "RHISwapChain.h"
 #include "RHICommandBuffer.h"
@@ -74,6 +75,12 @@ public:
 
     std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() override;
     std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() override;
+    std::shared_ptr<RHIRayTracingPipelineBuilder> createRayTracingPipelineBuilder() override;
+
+    // ---- Ray tracing (DXR) ----
+    uint32_t queryRayTracingTier() override;
+    std::shared_ptr<RHIBLAS> createBLAS(const RHIBLASDesc& desc) override;
+    std::shared_ptr<RHITLAS> createTLAS(const RHITLASDesc& desc) override;
 
     std::shared_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) override;
     std::shared_ptr<RHIFramebuffer> createFramebuffer(const RHIFramebufferDesc& desc) override;

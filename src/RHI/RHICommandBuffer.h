@@ -12,6 +12,8 @@ class RHIPipeline;
 class RHIBindingGroup;
 class RHIBuffer;
 class RHITexture;
+class RHIBLAS;
+class RHITLAS;
 
 // =============================================================================
 // RHI CommandBuffer — Abstract Interface
@@ -45,6 +47,9 @@ public:
     // ---- Pipeline binding ----
     virtual void bindGraphicsPipeline(RHIPipeline* pipeline) = 0;
     virtual void bindComputePipeline(RHIPipeline* pipeline) = 0;
+    /// RT 管线绑定：SetPipelineState1 + 全局根签名（compute 槽位语义，
+    /// 之后的 setBindingGroup/pushConstants 走 compute 路径）。
+    virtual void bindRayTracingPipeline(RHIPipeline* pipeline) = 0;
 
     // ---- Descriptor / Binding Group ----
     virtual void setBindingGroup(uint32_t set, RHIBindingGroup* group) = 0;
@@ -89,6 +94,27 @@ public:
     // ---- Compute commands ----
     virtual void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
     virtual void dispatchIndirect(RHIBuffer* buffer, uint64_t offset) = 0;
+
+    // ---- Ray tracing commands (DXR) ----
+    /// 构建 BLAS。scratch 尺寸 >= BLAS::getScratchSize()（update 时用 update 尺寸）。
+    /// 顶点/索引缓冲的 NON_PIXEL_SHADER_RESOURCE 状态切换由实现内部处理。
+    virtual void buildBLAS(RHIBLAS* blas, RHIBuffer* scratch,
+                           uint64_t scratchOffset = 0, bool update = false) = 0;
+
+    /// 构建 TLAS。instanceData 为调用方填充的实例描述缓冲（64B/实例，
+    /// 布局由后端约定），scratch 同上。update=true 走增量 refit。
+    virtual void buildTLAS(RHITLAS* tlas, RHIBuffer* instanceData, RHIBuffer* scratch,
+                           uint64_t scratchOffset = 0, bool update = false) = 0;
+
+    /// DispatchRays。sbt 为 shader binding table 缓冲；各 region 以字节偏移给出，
+    /// stride 为每条记录字节数，count 为记录条数（miss/hit 表 SizeInBytes =
+    /// count * stride）。需先 bindRayTracingPipeline。
+    virtual void traceRays(RHIPipeline* pipeline,
+                           RHIBuffer* sbt,
+                           uint64_t rayGenOffset, uint64_t rayGenSize,
+                           uint64_t missOffset,    uint64_t missStride, uint32_t missCount,
+                           uint64_t hitGroupOffset, uint64_t hitGroupStride, uint32_t hitGroupCount,
+                           uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
 
     // ---- Push constants ----
     virtual void pushConstants(RHIShaderStage stages, uint32_t offset,

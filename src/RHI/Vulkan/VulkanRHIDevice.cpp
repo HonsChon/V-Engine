@@ -125,6 +125,24 @@ std::shared_ptr<RHIComputePipelineBuilder> VulkanRHIDevice::createComputePipelin
     return std::make_shared<VulkanComputePipelineBuilder>(this);
 }
 
+// ---- Ray tracing stubs (VK_KHR_ray_tracing_pipeline 未实现) ----
+
+std::shared_ptr<RHIRayTracingPipelineBuilder> VulkanRHIDevice::createRayTracingPipelineBuilder() {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
+uint32_t VulkanRHIDevice::queryRayTracingTier() {
+    return 0;
+}
+
+std::shared_ptr<RHIBLAS> VulkanRHIDevice::createBLAS(const RHIBLASDesc&) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
+std::shared_ptr<RHITLAS> VulkanRHIDevice::createTLAS(const RHITLASDesc&) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
 std::shared_ptr<RHIRenderPass> VulkanRHIDevice::createRenderPass(const RHIRenderPassDesc& desc) {
     return std::make_shared<VulkanRHIRenderPass>(this, desc);
 }

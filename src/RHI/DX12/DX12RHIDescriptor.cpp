@@ -96,6 +96,8 @@ DX12RHIBindingGroup::DX12RHIBindingGroup(DX12RHIDevice* device, RHIBindingLayout
         if (e.kind == RHIBindingGroupEntry::Kind::Buffer) {
             writeBufferView(entry, cpu, e.bufferBinding.buffer,
                             e.bufferBinding.offset, e.bufferBinding.range);
+        } else if (e.kind == RHIBindingGroupEntry::Kind::AccelerationStructure) {
+            writeAccelerationStructureView(e.accelerationStructure, cpu);
         } else {
             writeTextureView(entry, cpu, e.textureBinding.texture, e.textureBinding.sampler);
         }
@@ -206,6 +208,51 @@ void DX12RHIBindingGroup::updateTexture(uint32_t binding, RHITexture* texture,
     }
 }
 
+void DX12RHIBindingGroup::updateTextureArrayElement(uint32_t binding, uint32_t arrayIndex,
+                                                    RHITexture* texture) {
+    RHIBindingEntry entry;
+    bool isSampler = false;
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
+    if (!findBinding(binding, entry, isSampler, cpu) || isSampler) {
+        throw std::runtime_error("[DX12RHIBindingGroup] updateTextureArrayElement: binding not found");
+    }
+    if (entry.type != RHIDescriptorType::SampledImageArray &&
+        entry.type != RHIDescriptorType::SampledImage) {
+        throw std::runtime_error("[DX12RHIBindingGroup] updateTextureArrayElement: not a sampled-image array binding");
+    }
+    if (arrayIndex >= entry.count || !texture) {
+        return;
+    }
+    // findBinding 返回的是该 binding 首个槽位；数组元素 = 首槽 + arrayIndex
+    cpu.ptr += static_cast<SIZE_T>(arrayIndex) * cbvSrvUavSize_;
+    writeTextureView(entry, cpu, texture, nullptr);
+}
+
+void DX12RHIBindingGroup::updateAccelerationStructure(uint32_t binding, RHITLAS* tlas) {
+    RHIBindingEntry entry;
+    bool isSampler = false;
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
+    if (!findBinding(binding, entry, isSampler, cpu) || isSampler) {
+        throw std::runtime_error("[DX12RHIBindingGroup] updateAccelerationStructure: binding not found");
+    }
+    if (entry.type != RHIDescriptorType::AccelerationStructure) {
+        throw std::runtime_error("[DX12RHIBindingGroup] updateAccelerationStructure: not an AS binding");
+    }
+    writeAccelerationStructureView(tlas, cpu);
+}
+
+void DX12RHIBindingGroup::writeAccelerationStructureView(RHITLAS* tlas,
+                                                         D3D12_CPU_DESCRIPTOR_HANDLE cpu) {
+    if (!tlas) {
+        return;
+    }
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.RaytracingAccelerationStructure.Location = tlas->getGPUAddress();
+    device_->getDevice()->CreateShaderResourceView(nullptr, &srv, cpu);
+}
+
 // -----------------------------------------------------------------------------
 // View writers
 // -----------------------------------------------------------------------------
@@ -264,6 +311,29 @@ void DX12RHIBindingGroup::writeBufferView(const RHIBindingEntry& entry,
             device_->getDevice()->CreateUnorderedAccessView(resource, nullptr, &uav, cpu);
             break;
         }
+        case RHIDescriptorType::StorageBufferReadOnly: {
+            // 只读 SRV（原生 HLSL ByteAddressBuffer / StructuredBuffer 读取）
+            const uint64_t remaining = dxBuf->getResourceSize() - offset;
+            const uint64_t size = (range == 0) ? remaining : std::min<uint64_t>(range, remaining);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+            srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+            if (dxBuf->desc_.structStride > 0) {
+                srv.Format = DXGI_FORMAT_UNKNOWN;
+                srv.Buffer.FirstElement = static_cast<UINT>(offset / dxBuf->desc_.structStride);
+                srv.Buffer.NumElements = static_cast<UINT>(std::max<uint64_t>(size / dxBuf->desc_.structStride, 1));
+                srv.Buffer.StructureByteStride = dxBuf->desc_.structStride;
+            } else {
+                srv.Format = DXGI_FORMAT_R32_TYPELESS;
+                srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+                srv.Buffer.FirstElement = static_cast<UINT>(offset / 4);
+                srv.Buffer.NumElements = static_cast<UINT>(std::max<uint64_t>(size / 4, 1));
+                srv.Buffer.StructureByteStride = 0;
+            }
+            device_->getDevice()->CreateShaderResourceView(resource, &srv, cpu);
+            break;
+        }
         default:
             throw std::runtime_error("[DX12RHIBindingGroup] updateBuffer: unsupported descriptor type");
     }
@@ -281,6 +351,7 @@ void DX12RHIBindingGroup::writeTextureView(const RHIBindingEntry& entry,
 
     switch (entry.type) {
         case RHIDescriptorType::SampledImage:
+        case RHIDescriptorType::SampledImageArray:
         case RHIDescriptorType::CombinedImageSampler:
         case RHIDescriptorType::InputAttachment: {
             D3D12_SHADER_RESOURCE_VIEW_DESC srv = dxTex->getSRVDesc();

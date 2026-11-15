@@ -60,6 +60,19 @@ public:
         rtThreads = threads;
     }
 
+    // 设置 GPU 光追统计（GPURayTrace 模式，SceneRenderer 每帧更新）
+    void setGPURaytraceStats(float frameMs, float asBuildMs, uint32_t instances,
+                             uint32_t meshes, uint32_t triangles, uint32_t lights,
+                             uint32_t textures) {
+        grtFrameMs = frameMs;
+        grtAsBuildMs = asBuildMs;
+        grtInstances = instances;
+        grtMeshes = meshes;
+        grtTriangles = triangles;
+        grtLights = lights;
+        grtTextures = textures;
+    }
+
 private:
     // 渲染统计
     float fps = 0.0f;
@@ -103,4 +116,13 @@ private:
     uint32_t rtBvhNodes = 0;
     uint32_t rtInstances = 0;
     uint32_t rtThreads = 0;
+
+    // GPU 光追统计
+    float grtFrameMs = 0.0f;
+    float grtAsBuildMs = 0.0f;
+    uint32_t grtInstances = 0;
+    uint32_t grtMeshes = 0;
+    uint32_t grtTriangles = 0;
+    uint32_t grtLights = 0;
+    uint32_t grtTextures = 0;
 };

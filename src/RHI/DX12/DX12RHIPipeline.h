@@ -42,12 +42,26 @@ public:
                     int pushConstantRootParam,
                     std::vector<std::pair<uint32_t, uint32_t>> vertexBindingStrides,
                     RHIPrimitiveTopology topology);
+
+    /// RT 管线构造：持有 RTPSO + 全局根签名（compute 槽位绑定）
+    DX12RHIPipeline(DX12RHIDevice* device,
+                    Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject,
+                    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSig,
+                    std::vector<LayoutTables> layoutTables,
+                    int pushConstantRootParam);
     ~DX12RHIPipeline() override = default;
 
     RHIPipelineType getType() const override { return type_; }
 
     ID3D12PipelineState* getD3D12PipelineState() const { return pso_.Get(); }
     ID3D12RootSignature* getD3D12RootSignature() const { return rootSig_.Get(); }
+
+    // ---- Ray tracing (RTPSO) ----
+    ID3D12StateObject* getD3D12StateObject() const { return stateObject_.Get(); }
+    /// 按 export/group 名取 shader identifier（32B，指向 RTPSO 内部存储，
+    /// 生命周期与管线一致）。未找到返回 false。
+    bool getShaderIdentifier(const std::string& name,
+                             const void*& outId, uint32_t& outSize) const override;
 
     // ---- Root-signature mapping (used by DX12RHICommandBuffer) ----
     int getTableRootParam(uint32_t set, bool samplerTable) const {
@@ -82,6 +96,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature>  rootSig_;
     RHIPipelineType type_ = RHIPipelineType::Graphics;
 
+    // Ray tracing
+    Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject_;
+    Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> stateObjectProps_;
+
+private:
     std::vector<LayoutTables> layoutTables_;
     int                       pushConstantRootParam_ = -1;
     std::vector<std::pair<uint32_t, uint32_t>> vertexBindingStrides_;
@@ -250,6 +269,59 @@ public:
 private:
     DX12RHIDevice* device_;
     std::string computeShaderPath_;
+    std::vector<const RHIBindingLayout*> bindingLayouts_;
+    std::vector<RHIPushConstantRange>    pushConstantRanges_;
+};
+
+// =============================================================================
+// DX12RayTracingPipelineBuilder — D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE
+//
+// DXIL library 通配导出（"*"）+ HIT_GROUP + 全局根签名（复用
+// DX12BuildRootSignature，绑定约定与 graphics/compute 一致）。
+// =============================================================================
+
+class DX12RayTracingPipelineBuilder : public RHIRayTracingPipelineBuilder
+{
+public:
+    explicit DX12RayTracingPipelineBuilder(DX12RHIDevice* device);
+    ~DX12RayTracingPipelineBuilder() override = default;
+
+    RHIRayTracingPipelineBuilder& addLibrary(const std::string& path) override;
+    RHIRayTracingPipelineBuilder& setRayGen(const std::string& exportName) override;
+    RHIRayTracingPipelineBuilder& addMiss(const std::string& exportName, uint32_t missIndex) override;
+    RHIRayTracingPipelineBuilder& addHitGroup(const std::string& groupName,
+                                              const std::string& closestHit,
+                                              const std::string& anyHit = "") override;
+    RHIRayTracingPipelineBuilder& setMaxPayloadSize(uint32_t bytes) override;
+    RHIRayTracingPipelineBuilder& setMaxAttributeSize(uint32_t bytes) override;
+    RHIRayTracingPipelineBuilder& setMaxRecursionDepth(uint32_t depth) override;
+    RHIRayTracingPipelineBuilder& addBindingLayout(RHIBindingLayout* layout) override;
+    RHIRayTracingPipelineBuilder& addPushConstant(RHIShaderStage stages, uint32_t offset, uint32_t size) override;
+
+    std::shared_ptr<RHIPipeline> build() override;
+
+private:
+    DX12RHIDevice* device_;
+
+    struct Library {
+        std::string path;
+        std::vector<unsigned char> blob;   // DXIL 容器字节
+    };
+    std::vector<Library> libraries_;
+
+    struct HitGroup {
+        std::string name;
+        std::string closestHit;
+        std::string anyHit;
+    };
+    std::string rayGen_;
+    std::vector<std::pair<std::string, uint32_t>> missShaders_;   // (export, missIndex)
+    std::vector<HitGroup> hitGroups_;
+
+    uint32_t maxPayloadSize_ = 32;
+    uint32_t maxAttributeSize_ = 16;    // BuiltInTriangleIntersectionAttributes = 2 floats
+    uint32_t maxRecursionDepth_ = 1;
+
     std::vector<const RHIBindingLayout*> bindingLayouts_;
     std::vector<RHIPushConstantRange>    pushConstantRanges_;
 };

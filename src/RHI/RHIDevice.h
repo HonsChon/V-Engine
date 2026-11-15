@@ -20,6 +20,9 @@ class RHICommandBuffer;
 class RHISwapChain;
 class RHIGraphicsPipelineBuilder;
 class RHIComputePipelineBuilder;
+class RHIRayTracingPipelineBuilder;
+class RHIBLAS;
+class RHITLAS;
 
 struct RHIBufferDesc;
 struct RHITextureDesc;
@@ -29,6 +32,8 @@ struct RHIBindingGroupDesc;
 struct RHIRenderPassDesc;
 struct RHIFramebufferDesc;
 struct RHISwapChainDesc;
+struct RHIBLASDesc;
+struct RHITLASDesc;
 
 // =============================================================================
 // RHI Device — Abstract Core Factory Interface
@@ -52,6 +57,16 @@ public:
     // ---- Pipeline builders ----
     virtual std::shared_ptr<RHIGraphicsPipelineBuilder> createGraphicsPipelineBuilder() = 0;
     virtual std::shared_ptr<RHIComputePipelineBuilder>  createComputePipelineBuilder() = 0;
+    virtual std::shared_ptr<RHIRayTracingPipelineBuilder> createRayTracingPipelineBuilder() = 0;
+
+    // ---- Ray tracing (DXR) ----
+    /// 光追支持等级：0 = 不支持，10 = Tier 1.0，11 = Tier 1.1（inline raytracing）
+    virtual uint32_t queryRayTracingTier() = 0;
+
+    /// 创建 BLAS（内部查询 prebuild info 并分配 AS 结果资源）
+    virtual std::shared_ptr<RHIBLAS> createBLAS(const RHIBLASDesc& desc) = 0;
+    /// 创建 TLAS
+    virtual std::shared_ptr<RHITLAS> createTLAS(const RHITLASDesc& desc) = 0;
 
     // ---- RenderPass / Framebuffer ----
     virtual std::shared_ptr<RHIRenderPass>  createRenderPass(const RHIRenderPassDesc& desc) = 0;

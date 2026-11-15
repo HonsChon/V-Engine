@@ -32,6 +32,7 @@ public:
     // ---- Pipeline binding ----
     void bindGraphicsPipeline(RHIPipeline* pipeline) override;
     void bindComputePipeline(RHIPipeline* pipeline) override;
+    void bindRayTracingPipeline(RHIPipeline* pipeline) override;
 
     // ---- Descriptor / Binding Group ----
     void setBindingGroup(uint32_t set, RHIBindingGroup* group) override;
@@ -62,6 +63,16 @@ public:
     // ---- Compute commands ----
     void dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
     void dispatchIndirect(RHIBuffer* buffer, uint64_t offset) override;
+
+    // ---- Ray tracing (未实现，存根) ----
+    void buildBLAS(RHIBLAS* blas, RHIBuffer* scratch, uint64_t scratchOffset, bool update) override;
+    void buildTLAS(RHITLAS* tlas, RHIBuffer* instanceData, RHIBuffer* scratch,
+                   uint64_t scratchOffset, bool update) override;
+    void traceRays(RHIPipeline* pipeline, RHIBuffer* sbt,
+                   uint64_t rayGenOffset, uint64_t rayGenSize,
+                   uint64_t missOffset, uint64_t missStride, uint32_t missCount,
+                   uint64_t hitGroupOffset, uint64_t hitGroupStride, uint32_t hitGroupCount,
+                   uint32_t width, uint32_t height, uint32_t depth) override;
 
     // ---- Push constants ----
     void pushConstants(RHIShaderStage stages, uint32_t offset,

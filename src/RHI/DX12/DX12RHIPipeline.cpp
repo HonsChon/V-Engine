@@ -250,6 +250,46 @@ int DX12RHIPipeline::getVertexBindingStride(uint32_t binding) const {
 }
 
 // =============================================================================
+// DX12RHIPipeline — RT (RTPSO)
+// =============================================================================
+
+DX12RHIPipeline::DX12RHIPipeline(DX12RHIDevice* device,
+                                 Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject,
+                                 Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSig,
+                                 std::vector<LayoutTables> layoutTables,
+                                 int pushConstantRootParam)
+    : device_(device)
+    , rootSig_(std::move(rootSig))
+    , type_(RHIPipelineType::RayTracing)
+    , layoutTables_(std::move(layoutTables))
+    , pushConstantRootParam_(pushConstantRootParam)
+    , stateObject_(std::move(stateObject))
+{
+    if (FAILED(stateObject_.As(&stateObjectProps_))) {
+        throw std::runtime_error("[DX12RHIPipeline] RTPSO does not expose ID3D12StateObjectProperties");
+    }
+}
+
+bool DX12RHIPipeline::getShaderIdentifier(const std::string& name,
+                                          const void*& outId, uint32_t& outSize) const {
+    if (!stateObjectProps_) {
+        return false;
+    }
+    std::wstring wide(name.size(), L'\0');
+    const int written = MultiByteToWideChar(CP_UTF8, 0, name.c_str(),
+                                            static_cast<int>(name.size()), &wide[0],
+                                            static_cast<int>(wide.size()));
+    wide.resize(written > 0 ? static_cast<size_t>(written) : 0);
+    const void* id = stateObjectProps_->GetShaderIdentifier(wide.c_str());
+    if (!id) {
+        return false;
+    }
+    outId = id;
+    outSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    return true;
+}
+
+// =============================================================================
 // Static helpers: RHI -> DX12 type conversions for PSO building
 // =============================================================================
 
@@ -272,8 +312,11 @@ static D3D12_DESCRIPTOR_RANGE_TYPE toD3D12RangeType(RHIDescriptorType type) {
         case RHIDescriptorType::StorageImage:
             return D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
         case RHIDescriptorType::SampledImage:
+        case RHIDescriptorType::SampledImageArray:
         case RHIDescriptorType::CombinedImageSampler:
         case RHIDescriptorType::InputAttachment:
+        case RHIDescriptorType::StorageBufferReadOnly:
+        case RHIDescriptorType::AccelerationStructure:
             return D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         case RHIDescriptorType::Sampler:
             return D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
@@ -792,7 +835,8 @@ RHIComputePipelineBuilder& DX12ComputePipelineBuilder::addBindingLayout(RHIBindi
 }
 RHIComputePipelineBuilder& DX12ComputePipelineBuilder::addPushConstant(
     RHIShaderStage stages, uint32_t offset, uint32_t size) {
-    pushConstantRanges_.push_back({ stages, offset, size }); return *this;
+    pushConstantRanges_.push_back({ stages, offset, size });
+    return *this;
 }
 
 std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
@@ -825,4 +869,162 @@ std::shared_ptr<RHIPipeline> DX12ComputePipelineBuilder::build() {
                                              rootResult.pushConstantRootParam,
                                              std::vector<std::pair<uint32_t, uint32_t>>{},
                                              RHIPrimitiveTopology::TriangleList);
+}
+
+// =============================================================================
+// DX12RayTracingPipelineBuilder
+// =============================================================================
+
+DX12RayTracingPipelineBuilder::DX12RayTracingPipelineBuilder(DX12RHIDevice* device)
+    : device_(device) {}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addLibrary(const std::string& path) {
+    Library lib;
+    lib.path = path;
+    libraries_.push_back(std::move(lib));
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::setRayGen(const std::string& exportName) {
+    rayGen_ = exportName;
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addMiss(const std::string& exportName,
+                                                                     uint32_t missIndex) {
+    missShaders_.push_back({ exportName, missIndex });
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addHitGroup(const std::string& groupName,
+                                                                         const std::string& closestHit,
+                                                                         const std::string& anyHit) {
+    hitGroups_.push_back({ groupName, closestHit, anyHit });
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::setMaxPayloadSize(uint32_t bytes) {
+    maxPayloadSize_ = bytes;
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::setMaxAttributeSize(uint32_t bytes) {
+    maxAttributeSize_ = bytes;
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::setMaxRecursionDepth(uint32_t depth) {
+    maxRecursionDepth_ = depth;
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addBindingLayout(RHIBindingLayout* layout) {
+    bindingLayouts_.push_back(layout);
+    return *this;
+}
+
+RHIRayTracingPipelineBuilder& DX12RayTracingPipelineBuilder::addPushConstant(
+    RHIShaderStage stages, uint32_t offset, uint32_t size) {
+    pushConstantRanges_.push_back({ stages, offset, size });
+    return *this;
+}
+
+std::shared_ptr<RHIPipeline> DX12RayTracingPipelineBuilder::build() {
+    if (libraries_.empty() || rayGen_.empty()) {
+        throw std::runtime_error("[DX12RayTracingPipelineBuilder] needs at least one library and a raygen export");
+    }
+
+    // Global root signature: binding convention identical to graphics/compute
+    DX12RootSignatureResult rootResult = DX12BuildRootSignature(device_, bindingLayouts_,
+                                                                pushConstantRanges_,
+                                                                /*allowInputAssembler=*/false);
+
+    // Pre-load DXIL library bytes (subobject pointers must outlive CreateStateObject)
+    struct LoadedLib {
+        std::vector<unsigned char> bytes;
+        D3D12_SHADER_BYTECODE bytecode = {};
+    };
+    std::vector<LoadedLib> loaded;
+    loaded.reserve(libraries_.size());
+    for (auto& lib : libraries_) {
+        DX12RHIShader shader(device_, RHIShaderStage::Library, lib.path);
+        D3D12_SHADER_BYTECODE bc = shader.getBytecode();
+        LoadedLib ll;
+        ll.bytes.assign(static_cast<const unsigned char*>(bc.pShaderBytecode),
+                        static_cast<const unsigned char*>(bc.pShaderBytecode) + bc.BytecodeLength);
+        ll.bytecode.BytecodeLength = static_cast<UINT>(ll.bytes.size());
+        loaded.push_back(std::move(ll));
+    }
+
+    // Raw subobject construction (NumExports = 0 -> export every entry point).
+    // All descs / wide strings live in stable containers until CreateStateObject returns.
+    std::vector<std::wstring> wideStrings;
+    wideStrings.reserve(hitGroups_.size() * 3 + 1);
+    auto intern = [&wideStrings](const std::string& s) -> LPCWSTR {
+        wideStrings.emplace_back(s.begin(), s.end());
+        return wideStrings.back().c_str();
+    };
+
+    std::vector<D3D12_DXIL_LIBRARY_DESC>          libDescs;
+    std::vector<D3D12_HIT_GROUP_DESC>             hitGroupDescs;
+    std::vector<D3D12_GLOBAL_ROOT_SIGNATURE>      globalRootSigDesc(1);
+    std::vector<D3D12_RAYTRACING_SHADER_CONFIG>   shaderConfigDesc(1);
+    std::vector<D3D12_RAYTRACING_PIPELINE_CONFIG> pipelineConfigDesc(1);
+    std::vector<D3D12_STATE_SUBOBJECT>            subobjects;
+
+    libDescs.reserve(loaded.size());
+    for (auto& ll : loaded) {
+        ll.bytecode.pShaderBytecode = ll.bytes.data();
+        D3D12_DXIL_LIBRARY_DESC libDesc = {};
+        libDesc.DXILLibrary = ll.bytecode;
+        libDesc.NumExports = 0;
+        libDesc.pExports = nullptr;
+        libDescs.push_back(libDesc);
+    }
+
+    hitGroupDescs.reserve(hitGroups_.size());
+    for (const auto& hg : hitGroups_) {
+        D3D12_HIT_GROUP_DESC hgDesc = {};
+        hgDesc.HitGroupExport = intern(hg.name);
+        hgDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+        hgDesc.ClosestHitShaderImport = intern(hg.closestHit);
+        hgDesc.AnyHitShaderImport = hg.anyHit.empty() ? nullptr : intern(hg.anyHit);
+        hgDesc.IntersectionShaderImport = nullptr;
+        hitGroupDescs.push_back(hgDesc);
+    }
+
+    globalRootSigDesc[0].pGlobalRootSignature = rootResult.rootSig.Get();
+    shaderConfigDesc[0].MaxPayloadSizeInBytes = maxPayloadSize_;
+    shaderConfigDesc[0].MaxAttributeSizeInBytes = maxAttributeSize_;
+    pipelineConfigDesc[0].MaxTraceRecursionDepth = maxRecursionDepth_;
+
+    subobjects.reserve(libDescs.size() + hitGroupDescs.size() + 3);
+    for (auto& d : libDescs) {
+        subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &d });
+    }
+    for (auto& d : hitGroupDescs) {
+        subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &d });
+    }
+    subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &globalRootSigDesc[0] });
+    subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfigDesc[0] });
+    subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfigDesc[0] });
+
+    D3D12_STATE_OBJECT_DESC rtPsoDesc = {};
+    rtPsoDesc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    rtPsoDesc.NumSubobjects = static_cast<UINT>(subobjects.size());
+    rtPsoDesc.pSubobjects = subobjects.data();
+
+    Microsoft::WRL::ComPtr<ID3D12Device5> device5;
+    if (FAILED(device_->getDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        throw std::runtime_error("[DX12RayTracingPipelineBuilder] ID3D12Device5 unavailable (no DXR support?)");
+    }
+    Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject;
+    HRESULT hr = device5->CreateStateObject(&rtPsoDesc, IID_PPV_ARGS(&stateObject));
+    if (FAILED(hr)) {
+        throw std::runtime_error("[DX12RayTracingPipelineBuilder] failed to create raytracing state object");
+    }
+
+    return std::make_shared<DX12RHIPipeline>(device_, stateObject, rootResult.rootSig,
+                                             std::move(rootResult.layoutTables),
+                                             rootResult.pushConstantRootParam);
 }

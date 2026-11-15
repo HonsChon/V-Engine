@@ -11,9 +11,10 @@
  * 渲染模式
  */
 enum class RenderMode {
-    Normal,      // 前向渲染 (Forward PBR)
-    WaterScene,  // 延迟渲染 + SSR + Water
-    RayTrace     // CPU 软光追（Whitted / 路径追踪，渐进累积）
+    Normal,       // 前向渲染 (Forward PBR)
+    WaterScene,   // 延迟渲染 + SSR + Water
+    RayTrace,     // CPU 软光追（Whitted / 路径追踪，渐进累积）
+    GPURayTrace   // GPU 硬件光追（DXR：RT-GBuffer + ReSTIR + 1spp PT + SVGF）
 };
 
 /**
@@ -22,6 +23,13 @@ enum class RenderMode {
 struct RenderSettings {
     // 渲染模式
     RenderMode renderMode = RenderMode::Normal;
+
+    // ========== GPU 硬件光追（RenderMode::GPURayTrace，DX12/DXR）==========
+    // 管线固定为 ReSTIR DI + 1spp PT 间接光 + SVGF（对齐 CPU 版 rtAlgorithm==2）
+    // 复用字段：rtMaxBounces / rtShadows / rtSkyIntensity / rtResolutionScale /
+    //          rtExposure / rtRestirCandidates / rtRestirSpatialNeighbors /
+    //          rtRestirTemporal / rtRestirShadowInTarget / rtRestirDenoiser
+    bool rtGpuShowDebugView = false;   // 预留：GBuffer 调试视图
 
     // ========== CPU 软光追（RenderMode::RayTrace）==========
     int rtAlgorithm = 0;            // 0=Whitted, 1=路径追踪, 2=PT+ReSTIR

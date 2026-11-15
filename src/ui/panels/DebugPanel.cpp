@@ -106,11 +106,44 @@ void DebugPanel::render() {
     // === 渲染模式 + CPU 软光追 ===
     if (renderSettings) {
         if (ImGui::CollapsingHeader("Render Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
-            const char* modeLabels[] = { "Forward (Raster)", "Deferred + Water", "CPU Ray Trace" };
+            const char* modeLabels[] = { "Forward (Raster)", "Deferred + Water",
+                                         "CPU Ray Trace", "GPU Ray Trace (DXR)" };
             int mode = static_cast<int>(renderSettings->renderMode);
             if (ImGui::Combo("Mode", &mode, modeLabels, IM_ARRAYSIZE(modeLabels))) {
                 renderSettings->renderMode = static_cast<RenderMode>(mode);
             }
+        }
+
+        if (renderSettings->renderMode == RenderMode::GPURayTrace &&
+            ImGui::CollapsingHeader("GPU Ray Tracing (DXR)", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::TextUnformatted("ReSTIR DI + 1spp PT + SVGF (DXR)");
+            ImGui::SliderInt("Max Bounces", &renderSettings->rtMaxBounces, 1, 8);
+            ImGui::Checkbox("Shadows", &renderSettings->rtShadows);
+            ImGui::SliderFloat("Sky Intensity", &renderSettings->rtSkyIntensity, 0.0f, 3.0f, "%.2f");
+            ImGui::SliderFloat("Exposure", &renderSettings->rtExposure, 0.1f, 4.0f, "%.2f");
+            ImGui::SliderFloat("Resolution Scale", &renderSettings->rtResolutionScale, 0.1f, 1.0f, "%.2f");
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("ReSTIR (unbiased MIS)");
+            ImGui::SliderInt("Candidates M", &renderSettings->rtRestirCandidates, 4, 128);
+            ImGui::SliderInt("Spatial Neighbors K", &renderSettings->rtRestirSpatialNeighbors, 0, 8);
+            ImGui::Checkbox("Temporal Reuse", &renderSettings->rtRestirTemporal);
+            ImGui::Checkbox("Shadow In Target", &renderSettings->rtRestirShadowInTarget);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Visibility in target fn (M shadow rays/frame, more accurate)");
+            }
+            ImGui::Checkbox("Denoiser (SVGF a-trous)", &renderSettings->rtRestirDenoiser);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Variance-driven joint bilateral filter (3x a-trous)");
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Frame: %.2f ms (CPU submit)", grtFrameMs);
+            ImGui::Text("AS build: %.1f ms (on scene change)", grtAsBuildMs);
+            ImGui::Text("Tris: %u   BLAS: %u", grtTriangles, grtMeshes);
+            ImGui::Text("Instances: %u   Lights: %u", grtInstances, grtLights);
+            ImGui::Text("Bindless textures: %u", grtTextures);
         }
 
         if (renderSettings->renderMode == RenderMode::RayTrace &&

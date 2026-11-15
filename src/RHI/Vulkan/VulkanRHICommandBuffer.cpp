@@ -177,6 +177,27 @@ void VulkanRHICommandBuffer::dispatchIndirect(RHIBuffer* buffer, uint64_t offset
     vkCmdDispatchIndirect(cmd_, vkBuf->getVkBuffer(), offset);
 }
 
+// ---- Ray tracing stubs ----
+
+void VulkanRHICommandBuffer::bindRayTracingPipeline(RHIPipeline*) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
+void VulkanRHICommandBuffer::buildBLAS(RHIBLAS*, RHIBuffer*, uint64_t, bool) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
+void VulkanRHICommandBuffer::buildTLAS(RHITLAS*, RHIBuffer*, RHIBuffer*, uint64_t, bool) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
+void VulkanRHICommandBuffer::traceRays(RHIPipeline*, RHIBuffer*,
+                                       uint64_t, uint64_t, uint64_t, uint64_t, uint32_t,
+                                       uint64_t, uint64_t, uint32_t,
+                                       uint32_t, uint32_t, uint32_t) {
+    throw std::runtime_error("[VulkanRHI] hardware ray tracing is not implemented on the Vulkan backend (DX12/DXR only)");
+}
+
 // ---- Push constants ----
 
 void VulkanRHICommandBuffer::pushConstants(RHIShaderStage stages, uint32_t offset,

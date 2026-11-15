@@ -131,6 +131,11 @@ inline VkDescriptorType toVkDescriptorType(RHIDescriptorType type) {
         case RHIDescriptorType::InputAttachment:       return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
         case RHIDescriptorType::UniformBufferDynamic:  return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
         case RHIDescriptorType::StorageBufferDynamic:  return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+        // GPU 光追（DX12-only）专用类型：Vulkan 后端未实现 RT，给出近似映射
+        // 使布局创建不崩溃（实际不会走到渲染路径）。
+        case RHIDescriptorType::StorageBufferReadOnly:  return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        case RHIDescriptorType::SampledImageArray:      return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        case RHIDescriptorType::AccelerationStructure:  return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         default: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     }
 }
