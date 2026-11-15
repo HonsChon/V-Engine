@@ -216,6 +216,7 @@ include_directories(src/RHI/DX12)
 include_directories(src/Core)
 include_directories(src/renderer)
 include_directories(src/renderer/passes)
+include_directories(src/raytrace)
 include_directories(src/renderer/passes/ssao)
 include_directories(src/resources)
 include_directories(src/World)
@@ -379,6 +380,25 @@ set(RENDERER_HEADERS
     src/renderer/SceneRenderer.h
 )
 
+# Raytrace - CPU 软光追（BVH / Whitted / 路径追踪 / ReSTIR / 贴图）
+set(RAYTRACE_SOURCES
+    src/raytrace/BVH.cpp
+    src/raytrace/CpuTexture.cpp
+    src/raytrace/ImageWriter.cpp
+    src/raytrace/SoftwareRaytracer.cpp
+)
+
+set(RAYTRACE_HEADERS
+    src/raytrace/RaytracerTypes.h
+    src/raytrace/BVH.h
+    src/raytrace/ThreadPool.h
+    src/raytrace/Framebuffer.h
+    src/raytrace/ImageWriter.h
+    src/raytrace/Restir.h
+    src/raytrace/CpuTexture.h
+    src/raytrace/SoftwareRaytracer.h
+)
+
 # World - 世界/场景层：场景对象
 set(WORLD_SOURCES
     src/World/Camera.cpp
@@ -518,6 +538,7 @@ set(ALL_SOURCES
     ${CORE_SOURCES}
     ${PASSES_SOURCES}
     ${RENDERER_SOURCES}
+    ${RAYTRACE_SOURCES}
     ${WORLD_SOURCES}
     ${RESOURCES_SOURCES}
     ${SCENE_SOURCES}
@@ -534,6 +555,7 @@ set(ALL_HEADERS
     ${CORE_HEADERS}
     ${PASSES_HEADERS}
     ${RENDERER_HEADERS}
+    ${RAYTRACE_HEADERS}
     ${WORLD_HEADERS}
     ${RESOURCES_HEADERS}
     ${SCENE_HEADERS}
@@ -557,6 +579,7 @@ source_group("Source Files/RHI/DX12" FILES ${DX12_SOURCES})
 source_group("Source Files/Core" FILES ${CORE_SOURCES})
 source_group("Source Files/Renderer" FILES ${RENDERER_SOURCES})
 source_group("Source Files/Renderer/Passes" FILES ${PASSES_SOURCES})
+source_group("Source Files/Raytrace" FILES ${RAYTRACE_SOURCES})
 source_group("Source Files/World" FILES ${WORLD_SOURCES})
 source_group("Source Files/Resources" FILES ${RESOURCES_SOURCES})
 source_group("Source Files/Scene" FILES ${SCENE_SOURCES})
@@ -572,6 +595,7 @@ source_group("Header Files/RHI/DX12" FILES ${DX12_HEADERS})
 source_group("Header Files/Core" FILES ${CORE_HEADERS})
 source_group("Header Files/Renderer" FILES ${RENDERER_HEADERS})
 source_group("Header Files/Renderer/Passes" FILES ${PASSES_HEADERS})
+source_group("Header Files/Raytrace" FILES ${RAYTRACE_HEADERS})
 source_group("Header Files/World" FILES ${WORLD_HEADERS})
 source_group("Header Files/Resources" FILES ${RESOURCES_HEADERS})
 source_group("Header Files/Scene" FILES ${SCENE_HEADERS})
@@ -673,6 +697,7 @@ elseif(APPLE)
         "-framework QuartzCore"
         "-framework Metal"
         "-framework AppKit"
+        "-framework UniformTypeIdentifiers"
     )
     
 elseif(UNIX)

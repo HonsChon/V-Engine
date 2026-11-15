@@ -21,6 +21,8 @@
 #include "nanite/NaniteManager.h"
 #include "SceneSerializer.h"
 #include "ModelImporter.h"
+#include "SoftwareRaytracer.h"
+#include "ImageWriter.h"
 
 #include "nfd/nfd.h"
 
@@ -147,12 +149,16 @@ void Engine::initializeSubsystems() {
     std::cout << "[Engine] RenderSystem created\n";
 
     // 9. SceneRenderer (with ForwardPass)
-    m_renderer = std::make_unique<SceneRenderer>(m_rhiDevice.get(), m_rhiSwapChain.get());
-    m_renderer->initialize();
-    m_renderer->setScene(m_scene.get());
-    m_renderer->setCamera(m_camera.get());
-    m_renderer->setRenderSystem(m_renderSystem.get());
-    std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
+    //    离线软光追不需要 GPU 管线（部分环境 MoltenVK 管线创建可能失败，
+    //    跳过以保证 --raytrace 仅依赖 CPU 与 MeshManager）
+    if (!m_config.raytraceOffline) {
+        m_renderer = std::make_unique<SceneRenderer>(m_rhiDevice.get(), m_rhiSwapChain.get());
+        m_renderer->initialize();
+        m_renderer->setScene(m_scene.get());
+        m_renderer->setCamera(m_camera.get());
+        m_renderer->setRenderSystem(m_renderSystem.get());
+        std::cout << "[Engine] SceneRenderer created (with Engine-level RHI device)\n";
+    }
 
     // 10. Scene: 恢复上次打开的场景（editor_settings.json），无记录则用演示场景
     {
@@ -172,7 +178,7 @@ void Engine::initializeSubsystems() {
     VEngine::SelectionManager::getInstance().setScene(m_scene.get());
 
     // 12. UI (ImGui)
-    if (m_config.enableUI) {
+    if (m_config.enableUI && !m_config.raytraceOffline) {
         m_imguiLayer = std::make_unique<ImGuiLayer>(
             m_window->getNativeHandle(),
             m_rhiDevice.get(),
@@ -817,6 +823,114 @@ void Engine::saveSceneToPath(const std::string& filePath) {
         saveLastScene(filePath);   // 记住最近场景
         updateSceneTitle();
     }
+}
+
+// ============================================================
+// 离线软光追（--raytrace）
+// ============================================================
+
+void Engine::injectTestLights(int count) {
+    if (!m_scene || count <= 0) return;
+
+    auto& registry = m_scene->getRegistry();
+
+    // 覆盖 Sponza 走廊范围的网格（x∈[-8,8] z∈[-5,5]，比例 16:10）
+    int nx = std::max(1, static_cast<int>(std::sqrt(count * 16.0 / 10.0)));
+    int nz = std::max(1, (count + nx - 1) / nx);
+    float stepX = 16.0f / nx;
+    float stepZ = 10.0f / nz;
+
+    int placed = 0;
+    for (int iz = 0; iz < nz && placed < count; ++iz) {
+        for (int ix = 0; ix < nx && placed < count; ++ix) {
+            auto lightEntity = m_scene->createEntity("RT_TestLight_" + std::to_string(placed));
+            auto& transform = lightEntity.getComponent<VEngine::TransformComponent>();
+            transform.position = glm::vec3(-8.0f + (ix + 0.5f) * stepX, 3.2f,
+                                           -5.0f + (iz + 0.5f) * stepZ);
+
+            auto& light = lightEntity.addComponent<VEngine::LightComponent>(
+                VEngine::LightType::Point);
+            // 确定性色彩变化（暖-冷），物理 1/d² 衰减
+            uint32_t h = VEngine::RT::pcgHash(static_cast<uint32_t>(placed) * 2654435761u);
+            float tint = (h & 0xFF) / 255.0f;   // 0..1
+            light.color = glm::mix(glm::vec3(1.0f, 0.75f, 0.55f),
+                                   glm::vec3(0.55f, 0.75f, 1.0f), tint);
+            light.intensity = 2.0f;
+            light.constantAttenuation = 0.0f;
+            light.linearAttenuation = 0.0f;
+            light.quadraticAttenuation = 1.0f;   // 1/d²
+            light.range = 0.0f;                  // 无限
+            ++placed;
+        }
+    }
+    std::cout << "[Engine] Injected " << placed << " test point lights" << std::endl;
+}
+
+bool Engine::renderOfflineRaytrace() {
+    if (!m_scene || !m_camera) {
+        std::cerr << "[Engine] Offline raytrace: scene/camera not ready" << std::endl;
+        return false;
+    }
+
+    // 多光源注入（--rt-lights，ReSTIR 测试用）
+    if (m_config.rtLights > 0) injectTestLights(m_config.rtLights);
+
+    VEngine::RT::SoftwareRaytracer rt;
+
+    std::cout << "[Engine] Offline raytrace: building scene (BVH)..." << std::endl;
+    rt.buildFromScene(m_scene.get());
+
+    // 相机（GL 惯例投影；Engine 构造已应用 --cam 覆盖）
+    glm::mat4 view = m_camera->getViewMatrix();
+    glm::mat4 proj = glm::perspective(
+        glm::radians(m_camera->getZoom()),
+        static_cast<float>(m_config.rtWidth) / static_cast<float>(m_config.rtHeight),
+        0.1f, 1000.0f);
+    rt.setCamera(view, proj, m_config.rtWidth, m_config.rtHeight);
+
+    rt.settings.algorithm = m_config.rtRestir
+        ? VEngine::RT::Algorithm::PathTracingRestir
+        : (m_config.rtPathTracing ? VEngine::RT::Algorithm::PathTracing
+                                  : VEngine::RT::Algorithm::Whitted);
+    rt.settings.samplesPerPixel = m_config.rtSamples;
+    rt.settings.maxBounces = m_config.rtBounces;
+    rt.settings.shadows = true;
+    rt.settings.restirShadowInTarget = m_config.rtShadowInTarget;
+    rt.settings.exposure = m_config.rtExposure;
+    rt.settings.restirDenoiser = m_config.rtDenoise;
+
+    const char* algoName = rt.settings.algorithm == VEngine::RT::Algorithm::PathTracingRestir
+        ? "path tracing + ReSTIR"
+        : rt.settings.algorithm == VEngine::RT::Algorithm::PathTracing
+            ? "path tracing" : "whitted";
+    std::cout << "[Engine] Offline raytrace: rendering " << m_config.rtWidth << "x"
+              << m_config.rtHeight << " spp=" << m_config.rtSamples
+              << " bounces=" << m_config.rtBounces
+              << " frames=" << m_config.rtFrames
+              << " algorithm=" << algoName
+              << "..." << std::endl;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    for (int f = 0; f < std::max(1, m_config.rtFrames); ++f) {
+        rt.renderFrame(static_cast<uint32_t>(f));
+    }
+    auto endTime = std::chrono::high_resolution_clock::now();
+    float renderMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+
+    std::cout << "[Engine] Offline raytrace: done in " << renderMs << " ms ("
+              << rt.totalTriangles() << " tris, " << rt.totalNodes() << " BVH nodes, "
+              << rt.lightCount() << " lights, " << rt.rayCount() << " rays)" << std::endl;
+
+    auto rgba = rt.resolveForOutput();
+    if (!VEngine::RT::savePNG(m_config.rtOutputPath, rgba,
+                              m_config.rtWidth, m_config.rtHeight)) {
+        std::cerr << "[Engine] Offline raytrace: failed to save "
+                  << m_config.rtOutputPath << std::endl;
+        return false;
+    }
+
+    std::cout << "[Engine] Offline raytrace: saved " << m_config.rtOutputPath << std::endl;
+    return true;
 }
 
 void Engine::saveScene() {

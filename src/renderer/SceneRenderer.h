@@ -53,6 +53,9 @@ namespace Nanite {
 namespace VEngine {
     class Scene;
     class RenderSystem;
+    namespace RT {
+        class SoftwareRaytracer;
+    }
 }
 
 // UI
@@ -176,6 +179,15 @@ private:
     void prepareNaniteCulling(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
     void recordNaniteDebugCommands(RHICommandBuffer* cmd, uint32_t frameIndex);
 
+    // ========== CPU 软光追 ==========
+    void initRayTrace();
+    void cleanupRayTrace();
+    /// CPU 渲染一帧（场景/相机/设置变化检测 + 累积 + 结果上传纹理）
+    void updateRayTrace();
+    void recordRayTraceCommands(RHICommandBuffer* cmd, uint32_t imageIndex, uint32_t frameIndex);
+    /// 场景数据指纹（变换/材质/光源/网格路径变化 → 重建光追场景）
+    size_t computeSceneHash() const;
+
     // ========== 矩阵工具 ==========
     /// GLM 的 perspective 面向 Y-up 的 GL/D3D 惯例;Vulkan 的 NDC Y 向下,需要
     /// 翻转投影的 Y 轴才与画面一致。DX12 直接使用标准矩阵。
@@ -227,6 +239,26 @@ private:
     // ========== 场景颜色纹理（SSR 采样）==========
     std::shared_ptr<RHITexture> m_sceneColorTexture;
     std::shared_ptr<RHISampler> m_sceneColorSampler;
+
+    // ========== CPU 软光追 ==========
+    std::unique_ptr<VEngine::RT::SoftwareRaytracer> m_raytracer;
+    std::shared_ptr<RHITexture> m_raytraceColor;   // 显示纹理（软光追结果上传）
+    bool m_raytraceInitialized = false;
+    uint32_t m_rtFrameIndex = 0;
+    uint32_t m_rtWidth = 0;                        // 内部分辨率（含 renderScale）
+    uint32_t m_rtHeight = 0;
+    glm::mat4 m_rtLastView = glm::mat4(0.0f);      // 相机变化检测
+    glm::mat4 m_rtLastProj = glm::mat4(0.0f);
+    size_t m_rtSceneHash = 0;                      // 场景变化检测
+    // 设置变化检测（仅光追相关字段）
+    int m_rtLastAlgorithm = -1;
+    int m_rtLastBounces = -1;
+    bool m_rtLastShadows = true;
+    float m_rtLastSkyIntensity = -1.0f;
+    int m_rtLastRestirCandidates = -1;
+    int m_rtLastRestirNeighbors = -1;
+    bool m_rtLastRestirTemporal = true;
+    bool m_rtLastRestirShadowTarget = false;
 
     // ========== 状态 ==========
     RenderSettings m_settings;

@@ -51,6 +51,21 @@ struct EngineConfig {
     float camPos[3] = {0.0f, 0.0f, 5.0f};
     float camYaw = -90.0f;    // -90 = 面向 -Z（默认相机朝向）
     float camPitch = 0.0f;
+
+    // 离线软光追（--raytrace）：主循环前渲染一帧并保存，随后退出
+    bool raytraceOffline = false;
+    std::string rtOutputPath = "raytrace_output.png";
+    int rtSamples = 64;           // 每像素样本数
+    int rtBounces = 5;            // 最大弹射次数
+    int rtWidth = 1280;           // 输出分辨率
+    int rtHeight = 720;
+    bool rtPathTracing = false;   // false=Whitted, true=路径追踪
+    bool rtRestir = false;        // PT + ReSTIR 直接光（覆盖 rtPathTracing）
+    int rtLights = 0;             // >0: 注入 N 个网格测试点光源（多光源场景）
+    int rtFrames = 1;             // 渲染帧数（时间复用需多帧，结果取平均）
+    bool rtShadowInTarget = true; // ReSTIR 可见性计入目标函数（离线精度优先）
+    float rtExposure = 1.0f;      // 曝光（tone map 前线性乘）
+    bool rtDenoise = true;        // 输出降噪（GBuffer 引导双边滤波，ReSTIR 模式）
 };
 
 class Engine {
@@ -79,6 +94,9 @@ public:
     bool openSceneFromFile(const std::string& filePath); // 打开 .vscene（成功返回 true）
     void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
 
+    // 离线软光追：CPU 渲染当前场景一帧并保存 PNG（返回是否成功）
+    bool renderOfflineRaytrace();
+
     float getDeltaTime() const { return m_deltaTime; }
     float getFPS() const { return m_fps; }
 
@@ -87,6 +105,9 @@ private:
     void createDefaultScene();
     void setupInputCallbacks();
     void shutdownSubsystems();
+
+    /// 注入 N 个网格排列点光源（--rt-lights，多光源/ReSTIR 测试用）
+    void injectTestLights(int count);
 
     // Frame sync
     void createSyncObjects();
