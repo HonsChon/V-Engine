@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Scene.h"
+#include <filesystem>
 #include <string>
 
 namespace VEngine {
@@ -15,6 +16,8 @@ namespace VEngine {
  *  - deserialize 复用同一个 Scene 对象、只清空 registry（Scene::clear），
  *    Engine/面板/SelectionManager 的指针无需重挂
  *  - 路径字符串原样保存；重开时的路径兜底解析见 AssetPath.h
+ *  - 文件路径用 std::filesystem::path（fstream 直接接受，Windows 下走
+ *    宽字符 API —— 中文/Unicode 路径不因 ANSI 代码页转换而损坏）
  *
  * 序列化组件范围：Tag/Transform/Relationship(经 parent UUID)/
  * MeshRenderer/PBRMaterial/Light/Camera（预留组件暂不序列化）
@@ -28,14 +31,14 @@ public:
      * @param filePath 目标路径（.vscene / .json）
      * @return 是否成功
      */
-    bool serialize(const std::string& filePath) const;
+    bool serialize(const std::filesystem::path& filePath) const;
 
     /**
      * @brief 从文件反序列化（清空现有场景后重建）
      * @param filePath 场景文件路径
      * @return 是否成功（失败时场景保持原状或为空）
      */
-    bool deserialize(const std::string& filePath);
+    bool deserialize(const std::filesystem::path& filePath);
 
 private:
     Scene* m_scene = nullptr;

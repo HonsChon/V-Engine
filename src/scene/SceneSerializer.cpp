@@ -214,7 +214,7 @@ void deserializeCamera(const json& j, CameraComponent& c) {
 // 序列化
 // ============================================================
 
-bool SceneSerializer::serialize(const std::string& filePath) const {
+bool SceneSerializer::serialize(const std::filesystem::path& filePath) const {
     if (!m_scene) return false;
 
     auto& registry = m_scene->m_registry;
@@ -288,7 +288,7 @@ bool SceneSerializer::serialize(const std::string& filePath) const {
     };
 
     // 父目录不存在时自动创建（如 assets/scenes/ 首次保存）
-    if (auto parent = fs::path(filePath).parent_path(); !parent.empty()) {
+    if (auto parent = filePath.parent_path(); !parent.empty()) {
         std::error_code ec;
         fs::create_directories(parent, ec);   // 已存在时无副作用
     }
@@ -313,7 +313,7 @@ bool SceneSerializer::serialize(const std::string& filePath) const {
 // 反序列化
 // ============================================================
 
-bool SceneSerializer::deserialize(const std::string& filePath) {
+bool SceneSerializer::deserialize(const std::filesystem::path& filePath) {
     if (!m_scene) return false;
 
     std::ifstream ifs(filePath, std::ios::binary);

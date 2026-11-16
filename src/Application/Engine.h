@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <filesystem>
 
 // Forward declarations
 class Window;
@@ -90,9 +91,12 @@ public:
     Camera* getCamera() const { return m_camera.get(); }
 
     // 场景操作（main.cpp 启动参数 / UI 菜单共用）
+    // 路径统一用 std::filesystem::path（Windows 原生宽字符，无编码歧义）；
+    // NFD 对话框经 u8path()、argv/内部字符串经 path(str) 转入
     void importModelFile(const std::string& filePath);   // 导入 .obj/.gltf/.glb
-    bool openSceneFromFile(const std::string& filePath); // 打开 .vscene（成功返回 true）
-    void saveSceneToPath(const std::string& filePath);   // 保存到指定路径
+    bool openSceneFromFile(const std::filesystem::path& filePath); // 打开 .vscene（成功返回 true）
+    bool openSceneFromFile(const std::string& filePath); // argv/内部字符串（ANSI 代码页）包装
+    bool saveSceneToPath(const std::filesystem::path& filePath);   // 保存到指定路径（成功返回 true）
 
     // 离线软光追：CPU 渲染当前场景一帧并保存 PNG（返回是否成功）
     bool renderOfflineRaytrace();
@@ -168,7 +172,7 @@ private:
     bool m_mouseEnabled = false;
 
     // 当前场景文件路径（空 = 未保存过；Ctrl+S 直接保存于此）
-    std::string m_currentScenePath;
+    std::filesystem::path m_currentScenePath;
 
     // Frame stats
     float m_deltaTime = 0.0f;

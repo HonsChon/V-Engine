@@ -55,13 +55,14 @@ namespace {
 // 编辑器状态持久化：CWD 下的小 JSON（与 imgui.ini 同位置约定，不进 git）
 constexpr const char* kEditorSettingsFile = "editor_settings.json";
 
-void saveLastScene(const std::string& scenePath) {
-    nlohmann::json j{{"lastScene", scenePath}};
+// editor_settings.json 为 UTF-8 JSON：路径按 u8string 存取，中文路径不损坏
+void saveLastScene(const std::filesystem::path& scenePath) {
+    nlohmann::json j{{"lastScene", scenePath.u8string()}};
     std::ofstream ofs(kEditorSettingsFile, std::ios::binary);
     if (ofs.is_open()) ofs << j.dump(2) << std::endl;
 }
 
-std::string loadLastScene() {
+std::string loadLastScene() {   // 返回 UTF-8 字符串（调用方经 u8path() 还原）
     std::ifstream ifs(kEditorSettingsFile, std::ios::binary);
     if (!ifs.is_open()) return {};
     try {
@@ -92,6 +93,12 @@ Engine::~Engine() {
 
 void Engine::initializeSubsystems() {
     std::cout << "[Engine] Initializing subsystems...\n";
+
+    // 0. NFD（文件对话框的 COM 初始化；失败仅告警——对话框可能因
+    //    其他组件已初始化 COM 而仍可用）
+    if (NFD_Init() != NFD_OKAY) {
+        std::cout << "[Engine] Warning: NFD_Init failed (" << NFD_GetError() << ")\n";
+    }
 
     // 1. Window
     Window::Config wc;
@@ -166,11 +173,11 @@ void Engine::initializeSubsystems() {
         std::string lastScene = loadLastScene();
         if (!lastScene.empty()) {
             std::cout << "[Engine] Restoring last scene: " << lastScene << "\n";
-            if (!openSceneFromFile(lastScene)) {
+            if (!openSceneFromFile(std::filesystem::u8path(lastScene))) {
                 std::cout << "[Engine] Last scene unavailable, using default scene\n";
                 createDefaultScene();
             }
-        } else if (!openSceneFromFile("assets/scenes/sponza.vscene")) {
+        } else if (!openSceneFromFile(std::filesystem::path("assets/scenes/sponza.vscene"))) {
             std::cout << "[Engine] Default Sponza scene unavailable, using demo scene\n";
             createDefaultScene();
         }
@@ -722,6 +729,8 @@ void Engine::shutdownSubsystems() {
     m_rhiDevice.reset();
     m_window.reset();
 
+    NFD_Quit();   // 与 initializeSubsystems 的 NFD_Init 配对
+
     std::cout << "[Engine] All subsystems shut down\n";
 }
 
@@ -803,14 +812,18 @@ void Engine::openSceneDialog() {
     };
     nfdresult_t result = NFD_OpenDialog(&outPath, filterItems, 2, nullptr);
     if (result == NFD_OKAY && outPath) {
-        openSceneFromFile(outPath);
+        // NFD 返回 UTF-8 路径；经 u8path 转原生宽字符（中文路径的关键）
+        std::filesystem::path path = std::filesystem::u8path(outPath);
         NFD_FreePath(outPath);
+        if (!openSceneFromFile(path)) {
+            std::cout << "[Engine] Failed to open scene: " << path.string() << "\n";
+        }
     } else if (result == NFD_ERROR) {
         std::cout << "[Engine] Open dialog error: " << NFD_GetError() << "\n";
     }
 }
 
-bool Engine::openSceneFromFile(const std::string& filePath) {
+bool Engine::openSceneFromFile(const std::filesystem::path& filePath) {
     if (!m_scene) return false;
     VEngine::SceneSerializer serializer(m_scene.get());
     if (serializer.deserialize(filePath)) {
@@ -818,9 +831,8 @@ bool Engine::openSceneFromFile(const std::string& filePath) {
         saveLastScene(filePath);   // 记住最近场景（下次启动恢复）
         updateSceneTitle();
         if (m_window) {
-            // 窗口标题反映当前场景（失败则忽略——纯显示用途）
-            std::string title = m_config.title + " - " +
-                std::filesystem::path(filePath).filename().string();
+            // 窗口标题反映当前场景（GLFW 要求 UTF-8；失败则忽略——纯显示用途）
+            std::string title = m_config.title + " - " + filePath.filename().u8string();
             m_window->setTitle(title);
         }
         return true;
@@ -828,14 +840,21 @@ bool Engine::openSceneFromFile(const std::string& filePath) {
     return false;
 }
 
-void Engine::saveSceneToPath(const std::string& filePath) {
-    if (!m_scene || filePath.empty()) return;
+bool Engine::openSceneFromFile(const std::string& filePath) {
+    // argv / 引擎内部字符串按本地 ANSI 代码页解释（与 CRT 一致）
+    return openSceneFromFile(std::filesystem::path(filePath));
+}
+
+bool Engine::saveSceneToPath(const std::filesystem::path& filePath) {
+    if (!m_scene || filePath.empty()) return false;
     VEngine::SceneSerializer serializer(m_scene.get());
     if (serializer.serialize(filePath)) {
         m_currentScenePath = filePath;
         saveLastScene(filePath);   // 记住最近场景
         updateSceneTitle();
+        return true;
     }
+    return false;
 }
 
 // ============================================================
@@ -964,23 +983,22 @@ void Engine::saveSceneAs() {
     nfdfilteritem_t filterItems[1] = { "V-Engine Scene", "vscene" };
     nfdresult_t result = NFD_SaveDialog(&outPath, filterItems, 1, nullptr, "scene.vscene");
     if (result == NFD_OKAY && outPath) {
-        std::string path = outPath;
+        // NFD 返回 UTF-8 路径；经 u8path 转原生宽字符（中文路径的关键）
+        std::filesystem::path path = std::filesystem::u8path(outPath);
         NFD_FreePath(outPath);
 
         // 未带扩展名时补默认后缀
-        if (!std::filesystem::path(path).has_extension()) {
+        if (!path.has_extension()) {
             path += ".vscene";
         }
 
-        VEngine::SceneSerializer serializer(m_scene.get());
-        if (serializer.serialize(path)) {
-            m_currentScenePath = path;
-            updateSceneTitle();
+        if (saveSceneToPath(path)) {
             if (m_window) {
-                std::string title = m_config.title + " - " +
-                    std::filesystem::path(path).filename().string();
+                std::string title = m_config.title + " - " + path.filename().u8string();
                 m_window->setTitle(title);
             }
+        } else {
+            std::cout << "[Engine] Failed to save scene: " << path.string() << "\n";
         }
     } else if (result == NFD_ERROR) {
         std::cout << "[Engine] Save dialog error: " << NFD_GetError() << "\n";
@@ -991,6 +1009,6 @@ void Engine::updateSceneTitle() {
     if (!m_uiManager) return;
     std::string title = m_currentScenePath.empty()
         ? std::string("Untitled")
-        : std::filesystem::path(m_currentScenePath).filename().string();
+        : m_currentScenePath.filename().u8string();   // ImGui 文本要求 UTF-8
     m_uiManager->setSceneTitle("Scene: " + title);
 }
