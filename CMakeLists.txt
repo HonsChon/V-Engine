@@ -376,6 +376,7 @@ set(PASSES_HEADERS
 # Renderer - 渲染器
 set(RENDERER_SOURCES
     src/renderer/SceneRenderer.cpp
+    src/renderer/SceneLighting.cpp
     src/renderer/raytrace/GPURayTracer.cpp
 )
 

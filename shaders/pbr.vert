@@ -8,13 +8,23 @@ layout(push_constant) uniform PushConstants {
     vec4 materialParams;  // x=opacity, y=alphaMode(0/1/2), z=alphaCutoff, w=unused
 } push;
 
-// UBO - 全局共享的数据（相机、光照）
+// UBO - 全局共享的数据（相机、场景多灯）
+// 与 pbr.frag / transparent.frag 声明完全一致（共用管线的跨阶段块必须匹配）
+struct LightData {
+    vec4 colorType;       // rgb 颜色, a 类型(0 Dir / 1 Point / 2 Spot)
+    vec4 positionInt;     // xyz 世界位置, a 强度
+    vec4 directionRange;  // xyz 方向, a range
+    vec4 atten;           // x const, y linear, z quadratic, w 内锥角(rad)
+    vec4 outerPad;        // x 外锥角(rad)
+};
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    vec4 viewPos;      // 使用 vec4 确保 std140 对齐
-    vec4 lightPos;     // 使用 vec4 确保 std140 对齐
-    vec4 lightColor;   // 使用 vec4 确保 std140 对齐
+    vec4 viewPos;
+    vec4 viewportInfo;
+    vec4 lightCountPad;              // x = lightCount
+    LightData lights[16];
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -28,8 +38,7 @@ layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec3 fragBitangent;
 layout(location = 5) out vec3 fragViewPos;
-layout(location = 6) out vec3 fragLightPos;
-layout(location = 7) out vec4 fragMaterialParams;
+layout(location = 6) out vec4 fragMaterialParams;
 
 void main() {
     // Transform position to world space (使用 Push Constants 的 model)
@@ -48,9 +57,8 @@ void main() {
     // Pass through texture coordinates
     fragTexCoord = inTexCoord;
     
-    // Pass view and light positions (提取 xyz 分量)
+    // Pass view position
     fragViewPos = ubo.viewPos.xyz;
-    fragLightPos = ubo.lightPos.xyz;
 
     // 传递材质透明参数
     fragMaterialParams = push.materialParams;

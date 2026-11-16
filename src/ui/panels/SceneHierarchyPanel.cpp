@@ -115,7 +115,13 @@ void SceneHierarchyPanel::renderECSHierarchy() {
         }
         if (ImGui::MenuItem("Create Light")) {
             auto newEntity = m_scene->createEntity("Light");
-            newEntity.addComponent<LightComponent>();
+            auto& light = newEntity.addComponent<LightComponent>();
+            // 默认强度/衰减调到立即可见（物理 1/d²，衰减组件默认值几乎不可见）
+            light.intensity = 30.0f;
+            light.constantAttenuation = 0.0f;
+            light.linearAttenuation = 0.0f;
+            light.quadraticAttenuation = 1.0f;
+            light.range = 0.0f;
             setSelectedEntity(newEntity.getHandle());
         }
         if (ImGui::MenuItem("Create Camera")) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPassBase.h"
+#include "SceneLighting.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -37,9 +38,9 @@ public:
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
         alignas(16) glm::vec4 viewPos;
-        alignas(16) glm::vec4 lightPos;
-        alignas(16) glm::vec4 lightColor;
-        alignas(16) glm::vec4 viewportInfo;   // x=width y=height（gl_FragCoord → UV）
+        alignas(16) glm::vec4 viewportInfo;   // x=width y=height，gl_FragCoord 转 UV 用
+        alignas(16) glm::vec4 lightCountPad; // x = lightCount
+        VEngine::RasterLight lights[VEngine::kMaxRasterLights];
     };
 
     // 与 ForwardPass::PushConstantData 布局一致（共用 pbr_vert.spv）

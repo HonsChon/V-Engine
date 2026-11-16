@@ -41,8 +41,6 @@ public:
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
         alignas(16) glm::vec4 viewPos;
-        alignas(16) glm::vec4 lightPos;
-        alignas(16) glm::vec4 lightColor;
     };
 
     GBufferPass(RHIDevice* rhiDevice,

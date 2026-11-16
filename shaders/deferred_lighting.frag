@@ -6,13 +6,21 @@
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
-// Uniform Buffer
+// Uniform Buffer（场景多灯；布局与 C++ LightingPass::LightingUBO 一致）
+struct LightData {
+    vec4 colorType;       // rgb 颜色, a 类型(0 Dir / 1 Point / 2 Spot)
+    vec4 positionInt;     // xyz 世界位置, a 强度
+    vec4 directionRange;  // xyz 方向, a range
+    vec4 atten;           // x const, y linear, z quadratic, w 内锥角(rad)
+    vec4 outerPad;        // x 外锥角(rad)
+};
+
 layout(binding = 0) uniform LightingUBO {
-    vec4 viewPos;       // xyz: 相机位置
-    vec4 lightPos;      // xyz: 光源位置
-    vec4 lightColor;    // rgb: 光源颜色, a: 强度
-    vec4 ambientColor;  // rgb: 环境光颜色, a: 强度
-    vec4 screenSize;    // xy: 屏幕尺寸
+    vec4 viewPos;        // xyz: 相机位置
+    vec4 ambientColor;   // rgb: 环境光颜色, a: 强度
+    vec4 screenSize;     // xy: 屏幕尺寸
+    vec4 lightCountPad;  // x: lightCount
+    LightData lights[16];
 } ubo;
 
 // G-Buffer 纹理
@@ -88,35 +96,68 @@ void main() {
     // 计算向量
     vec3 N = normalize(normal);
     vec3 V = normalize(ubo.viewPos.xyz - fragPos);
-    vec3 L = normalize(ubo.lightPos.xyz - fragPos);
-    vec3 H = normalize(V + L);
-    
-    // 光源衰减
-    float distance = length(ubo.lightPos.xyz - fragPos);
-    float attenuation = 1.0 / (distance * distance);
-    vec3 radiance = ubo.lightColor.rgb * ubo.lightColor.a * attenuation;
-    
+
     // 基础反射率 F0
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
-    
-    // Cook-Torrance BRDF
-    float NDF = distributionGGX(N, H, roughness);
-    float G = geometrySmith(N, V, L, roughness);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-    
-    vec3 numerator = NDF * G * F;
-    float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-    vec3 specular = numerator / denominator;
-    
-    // 能量守恒
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;
-    
-    // 最终辐射度
-    float NdotL = max(dot(N, L), 0.0);
-    vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
+
+    // 场景多灯累加（公式与 GPU RT lightRadiance 同语义）
+    vec3 Lo = vec3(0.0);
+    int lightCount = int(ubo.lightCountPad.x);
+
+    for (int i = 0; i < lightCount; ++i) {
+        LightData ld = ubo.lights[i];
+        int type = int(ld.colorType.a);
+
+        vec3 toLight;
+        float dist = 3.4e38;
+        if (type == 0) {
+            toLight = -ld.directionRange.xyz;
+        } else {
+            vec3 diff = ld.positionInt.xyz - fragPos;
+            dist = length(diff);
+            if (dist < 1e-6) continue;
+            toLight = diff / dist;
+        }
+
+        float NdotL = dot(N, toLight);
+        if (NdotL <= 0.0) continue;
+
+        vec3 radiance = ld.colorType.rgb * ld.positionInt.w;
+        if (type == 1) {
+            float att = 1.0 / (ld.atten.x + ld.atten.y * dist + ld.atten.z * dist * dist);
+            if (ld.directionRange.w > 0.0 && dist > ld.directionRange.w) {
+                att *= max(0.0, 1.0 - (dist - ld.directionRange.w) / ld.directionRange.w);
+            }
+            radiance *= att;
+        } else if (type == 2) {
+            float cosTheta = dot(-toLight, ld.directionRange.xyz);
+            float cosOuter = cos(ld.outerPad.x);
+            float cosInner = cos(ld.atten.w);
+            float spot = clamp((cosTheta - cosOuter) / max(cosInner - cosOuter, 1e-6), 0.0, 1.0);
+            spot *= spot;
+            float att = 1.0 / (ld.atten.x + ld.atten.y * dist + ld.atten.z * dist * dist);
+            radiance *= spot * att;
+        }
+
+        // Cook-Torrance BRDF
+        vec3 L = toLight;
+        vec3 H = normalize(V + L);
+        float NDF = distributionGGX(N, H, roughness);
+        float G = geometrySmith(N, V, L, roughness);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
+
+        // 能量守恒
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= 1.0 - metallic;
+
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+    }
     
     // 采样 SSAO 遮蔽值
     float ao = texture(gSSAO, fragTexCoord).r;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPassBase.h"
+#include "SceneLighting.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -31,10 +32,10 @@ public:
     // 光照 UBO 结构
     struct LightingUBO {
         alignas(16) glm::vec4 viewPos;      // 相机位置
-        alignas(16) glm::vec4 lightPos;     // 光源位置
-        alignas(16) glm::vec4 lightColor;   // 光源颜色 + 强度
-        alignas(16) glm::vec4 ambientColor; // 环境光颜色+ 强度
+        alignas(16) glm::vec4 ambientColor; // 环境光颜色 + 强度
         alignas(16) glm::vec4 screenSize;   // 屏幕尺寸
+        alignas(16) glm::vec4 lightCountPad;// x = lightCount
+        VEngine::RasterLight lights[VEngine::kMaxRasterLights];
     };
 
     LightingPass(RHIDevice* rhiDevice,
@@ -53,10 +54,9 @@ public:
     // 设置 SSAO 纹理 (Pure RHI)
     void setSSAOTexture(RHITexture* ssaoTexture, RHISampler* ssaoSampler);
 
-    // 更新光照参数
+    // 更新光照参数（场景多灯；ambient 走 setAmbientLight）
     void updateUniforms(uint32_t frameIndex, const glm::vec3& viewPos,
-                        const glm::vec3& lightPos, const glm::vec3& lightColor,
-                        float lightIntensity = 1.0f);
+                        const VEngine::RasterLight* lights, uint32_t lightCount);
 
     // 设置环境光
     void setAmbientLight(const glm::vec3& color, float intensity = 0.1f);

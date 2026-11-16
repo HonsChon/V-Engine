@@ -11,6 +11,7 @@
 #include "RHISampler.h"
 
 #include <stdexcept>
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 
@@ -168,14 +169,16 @@ void LightingPass::setSSAOTexture(RHITexture* ssaoTexture, RHISampler* ssaoSampl
 // =============================================================================
 
 void LightingPass::updateUniforms(uint32_t frameIndex, const glm::vec3& viewPos,
-                                   const glm::vec3& lightPos, const glm::vec3& lightColor,
-                                   float lightIntensity) {
+                                   const VEngine::RasterLight* lights, uint32_t lightCount) {
     LightingUBO ubo{};
     ubo.viewPos = glm::vec4(viewPos, 1.0f);
-    ubo.lightPos = glm::vec4(lightPos, 1.0f);
-    ubo.lightColor = glm::vec4(lightColor, lightIntensity);
     ubo.ambientColor = glm::vec4(ambientColor, ambientIntensity);
     ubo.screenSize = glm::vec4(static_cast<float>(width_), static_cast<float>(height_), 0.0f, 0.0f);
+    ubo.lightCountPad = glm::vec4(
+        static_cast<float>(std::min(lightCount, VEngine::kMaxRasterLights)), 0.0f, 0.0f, 0.0f);
+    for (uint32_t i = 0; i < VEngine::kMaxRasterLights; ++i) {
+        ubo.lights[i] = (i < lightCount) ? lights[i] : VEngine::RasterLight{};
+    }
 
     void* ptr = uniformBuffers_[frameIndex]->map();
     memcpy(ptr, &ubo, sizeof(ubo));

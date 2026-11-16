@@ -19,13 +19,11 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out mat3 fragTBN;
 
-// UBO - 全局共享的数据（相机、光照）
+// UBO - 全局共享的数据（相机；光照在 LightingPass）
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
     vec4 viewPos;
-    vec4 lightPos;
-    vec4 lightColor;
 } ubo;
 
 void main() {

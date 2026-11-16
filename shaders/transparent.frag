@@ -11,19 +11,26 @@ layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragTangent;
 layout(location = 4) in vec3 fragBitangent;
 layout(location = 5) in vec3 fragViewPos;
-layout(location = 6) in vec3 fragLightPos;
-layout(location = 7) in vec4 fragMaterialParams;  // x=opacity y=alphaMode z=alphaCutoff
+layout(location = 6) in vec4 fragMaterialParams;  // x=opacity y=alphaMode z=alphaCutoff
 
 layout(location = 0) out vec4 outColor;
 
-// Set 0: 全局 UBO + GBuffer 深度
+// Set 0: 全局 UBO + GBuffer 深度（与 pbr.vert/pbr.frag 声明一致）
+struct LightData {
+    vec4 colorType;       // rgb 颜色, a 类型(0 Dir / 1 Point / 2 Spot)
+    vec4 positionInt;     // xyz 世界位置, a 强度
+    vec4 directionRange;  // xyz 方向, a range
+    vec4 atten;           // x const, y linear, z quadratic, w 内锥角(rad)
+    vec4 outerPad;        // x 外锥角(rad)
+};
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
     vec4 viewPos;
-    vec4 lightPos;
-    vec4 lightColor;
-    vec4 viewportInfo;  // x=width y=height
+    vec4 viewportInfo;
+    vec4 lightCountPad;              // x = lightCount
+    LightData lights[16];
 } ubo;
 
 layout(binding = 1) uniform sampler2D gDepth;   // GBuffer 深度（NDC [0,1]，WaterPass 同款）
@@ -101,27 +108,59 @@ void main() {
     F0 = mix(F0, albedo, metallic);
 
     vec3 Lo = vec3(0.0);
-    vec3 L = normalize(fragLightPos - fragWorldPos);
-    vec3 H = normalize(V + L);
-    float distance = length(fragLightPos - fragWorldPos);
-    float attenuation = 1.0 / (distance * distance);
-    vec3 lightColor = vec3(300.0, 300.0, 300.0);
-    vec3 radiance = lightColor * attenuation;
+    int lightCount = int(ubo.lightCountPad.x);
 
-    float NDF = DistributionGGX(N, H, roughness);
-    float G = GeometrySmith(N, V, L, roughness);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+    for (int i = 0; i < lightCount; ++i) {
+        LightData ld = ubo.lights[i];
+        int type = int(ld.colorType.a);
 
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;
+        vec3 toLight;
+        float dist = 3.4e38;
+        if (type == 0) {
+            toLight = -ld.directionRange.xyz;
+        } else {
+            vec3 diff = ld.positionInt.xyz - fragWorldPos;
+            dist = length(diff);
+            if (dist < 1e-6) continue;
+            toLight = diff / dist;
+        }
 
-    vec3 numerator = NDF * G * F;
-    float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-    vec3 specular = numerator / denominator;
+        float NdotL = dot(N, toLight);
+        if (NdotL <= 0.0) continue;
 
-    float NdotL = max(dot(N, L), 0.0);
-    Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+        vec3 radiance = ld.colorType.rgb * ld.positionInt.w;
+        if (type == 1) {
+            float att = 1.0 / (ld.atten.x + ld.atten.y * dist + ld.atten.z * dist * dist);
+            if (ld.directionRange.w > 0.0 && dist > ld.directionRange.w) {
+                att *= max(0.0, 1.0 - (dist - ld.directionRange.w) / ld.directionRange.w);
+            }
+            radiance *= att;
+        } else if (type == 2) {
+            float cosTheta = dot(-toLight, ld.directionRange.xyz);
+            float cosOuter = cos(ld.outerPad.x);
+            float cosInner = cos(ld.atten.w);
+            float spot = clamp((cosTheta - cosOuter) / max(cosInner - cosOuter, 1e-6), 0.0, 1.0);
+            spot *= spot;
+            float att = 1.0 / (ld.atten.x + ld.atten.y * dist + ld.atten.z * dist * dist);
+            radiance *= spot * att;
+        }
+
+        vec3 L = toLight;
+        vec3 H = normalize(V + L);
+        float NDF = DistributionGGX(N, H, roughness);
+        float G = GeometrySmith(N, V, L, roughness);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= 1.0 - metallic;
+
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
+
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+    }
 
     vec3 ambient = vec3(0.03) * albedo * ao;
     vec3 color = ambient + Lo;

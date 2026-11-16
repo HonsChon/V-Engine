@@ -1,0 +1,104 @@
+{
+  "entities": [
+    {
+      "parent": 0,
+      "tag": "Ground",
+      "transform": {
+        "position": [0.0, -1.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [2.0, 1.0, 2.0]
+      },
+      "uuid": 9000000001,
+      "meshRenderer": {
+        "meshPath": "plane",
+        "visible": true
+      }
+    },
+    {
+      "parent": 0,
+      "tag": "Sphere",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "uuid": 9000000002,
+      "meshRenderer": {
+        "meshPath": "sphere",
+        "visible": true
+      }
+    },
+    {
+      "parent": 0,
+      "tag": "Sun",
+      "transform": {
+        "position": [0.0, 5.0, 0.0],
+        "rotation": [-1.2, 0.35, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "uuid": 9000000003,
+      "light": {
+        "type": "Directional",
+        "color": [1.0, 0.98, 0.92],
+        "intensity": 2.5,
+        "range": 100.0,
+        "constantAttenuation": 1.0,
+        "linearAttenuation": 0.09,
+        "quadraticAttenuation": 0.032,
+        "innerConeAngle": 0.2181,
+        "outerConeAngle": 0.2967,
+        "castShadows": true,
+        "shadowBias": 0.005,
+        "shadowMapResolution": 2048
+      }
+    },
+    {
+      "parent": 0,
+      "tag": "RedPoint",
+      "transform": {
+        "position": [2.5, 1.5, 2.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "uuid": 9000000004,
+      "light": {
+        "type": "Point",
+        "color": [1.0, 0.2, 0.1],
+        "intensity": 25.0,
+        "range": 0.0,
+        "constantAttenuation": 0.0,
+        "linearAttenuation": 0.0,
+        "quadraticAttenuation": 1.0,
+        "innerConeAngle": 0.2181,
+        "outerConeAngle": 0.2967,
+        "castShadows": true,
+        "shadowBias": 0.005,
+        "shadowMapResolution": 2048
+      }
+    },
+    {
+      "parent": 0,
+      "tag": "BlueSpot",
+      "transform": {
+        "position": [-2.0, 3.0, 0.5],
+        "rotation": [-1.5708, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "uuid": 9000000005,
+      "light": {
+        "type": "Spot",
+        "color": [0.2, 0.4, 1.0],
+        "intensity": 40.0,
+        "range": 0.0,
+        "constantAttenuation": 0.0,
+        "linearAttenuation": 0.0,
+        "quadraticAttenuation": 1.0,
+        "innerConeAngle": 0.3491,
+        "outerConeAngle": 0.5236,
+        "castShadows": true,
+        "shadowBias": 0.005,
+        "shadowMapResolution": 2048
+      }
+    }
+  ]
+}

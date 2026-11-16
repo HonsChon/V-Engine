@@ -5,6 +5,7 @@
 
 #include "SceneRenderer.h"
 
+#include "SceneLighting.h"
 #include "Camera.h"
 #include "Scene.h"
 #include "Entity.h"
@@ -414,8 +415,10 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     glm::mat4 proj = applyApiYFlip(glm::perspective(fov, aspect, 0.1f, 100.0f));
     glm::vec3 camPos = m_camera->getPosition();
 
-    // 光源（固定位置）
-    glm::vec3 lightPos(5.0f, 3.0f, 5.0f);
+    // 场景灯光采集（前向/延迟/反射共用；无灯时为后备点光）
+    VEngine::RasterLight sceneLights[VEngine::kMaxRasterLights];
+    uint32_t lightCount = VEngine::collectSceneLights(m_scene, sceneLights);
+    const float lightCountF = static_cast<float>(lightCount);
 
     // ForwardPass UBO
     if (m_forwardPass) {
@@ -423,28 +426,27 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
         ubo.view = view;
         ubo.proj = proj;
         ubo.viewPos = glm::vec4(camPos, 1.0f);
-        ubo.lightPos = glm::vec4(lightPos, 1.0f);
-        ubo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
+        ubo.viewportInfo = glm::vec4(
+            static_cast<float>(scExtent.width), static_cast<float>(scExtent.height), 0.0f, 0.0f);
+        ubo.lightCountPad = glm::vec4(lightCountF, 0.0f, 0.0f, 0.0f);
+        for (uint32_t i = 0; i < VEngine::kMaxRasterLights; ++i) ubo.lights[i] = sceneLights[i];
         m_forwardPass->updateUniformBuffer(frameIndex, ubo);
     }
 
     // 延迟渲染模式专属
     if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
-        // GBuffer UBO
+        // GBuffer UBO（光照在 LightingPass，GBuffer 只需相机）
         if (m_gbuffer) {
             GBufferPass::UniformBufferObject gbufferUBO{};
             gbufferUBO.view = view;
             gbufferUBO.proj = proj;
             gbufferUBO.viewPos = glm::vec4(camPos, 1.0f);
-            gbufferUBO.lightPos = glm::vec4(lightPos, 1.0f);
-            gbufferUBO.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
             m_gbuffer->updateUniformBuffer(frameIndex, gbufferUBO);
         }
 
-        // LightingPass
+        // LightingPass（场景多灯）
         if (m_lightingPass) {
-            m_lightingPass->updateUniforms(frameIndex, camPos, lightPos,
-                                            glm::vec3(300.0f, 300.0f, 300.0f), 1.0f);
+            m_lightingPass->updateUniforms(frameIndex, camPos, sceneLights, lightCount);
         }
 
         // TransparentPass（与 ForwardPass 同光照 + 视口尺寸）
@@ -453,19 +455,21 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
             tUbo.view = view;
             tUbo.proj = proj;
             tUbo.viewPos = glm::vec4(camPos, 1.0f);
-            tUbo.lightPos = glm::vec4(lightPos, 1.0f);
-            tUbo.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
             tUbo.viewportInfo = glm::vec4(
                 static_cast<float>(scExtent.width), static_cast<float>(scExtent.height), 0.0f, 0.0f);
+            tUbo.lightCountPad = glm::vec4(lightCountF, 0.0f, 0.0f, 0.0f);
+            for (uint32_t i = 0; i < VEngine::kMaxRasterLights; ++i) tUbo.lights[i] = sceneLights[i];
             m_transparentPass->updateUniformBuffer(frameIndex, tUbo);
         }
 
-        // 平面反射：镜像相机 + 斜近裁剪投影
+        // 平面反射：镜像相机 + 斜近裁剪投影（与 pbr 着色器共用场景灯）
         if (m_reflectionPass) {
             float waterHeight = m_waterPass ? m_waterPass->getWaterHeight() : 0.0f;
             ReflectionPass::UniformBufferObject reflUBO{};
-            reflUBO.lightPos = glm::vec4(lightPos, 1.0f);
-            reflUBO.lightColor = glm::vec4(300.0f, 300.0f, 300.0f, 1.0f);
+            reflUBO.viewportInfo = glm::vec4(
+                static_cast<float>(scExtent.width), static_cast<float>(scExtent.height), 0.0f, 0.0f);
+            reflUBO.lightCountPad = glm::vec4(lightCountF, 0.0f, 0.0f, 0.0f);
+            for (uint32_t i = 0; i < VEngine::kMaxRasterLights; ++i) reflUBO.lights[i] = sceneLights[i];
 
             if (camPos.y > waterHeight + 0.05f) {
                 m_cameraAboveWater = true;
