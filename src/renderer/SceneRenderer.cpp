@@ -434,6 +434,11 @@ void SceneRenderer::updateUniforms(uint32_t frameIndex) {
     }
 
     // 延迟渲染模式专属
+    // 惰性初始化：DebugPanel 组合框只切 renderMode 枚举，这里统一补管线初始化
+    // （与 CPU/GPU RT 的惰性初始化模式一致；init 幂等且失败自动回退 Normal）
+    if (m_settings.renderMode == RenderMode::WaterScene && !m_deferredInitialized) {
+        initDeferredShading();
+    }
     if (m_settings.renderMode == RenderMode::WaterScene && m_deferredInitialized) {
         // GBuffer UBO（光照在 LightingPass，GBuffer 只需相机）
         if (m_gbuffer) {
