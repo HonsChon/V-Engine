@@ -57,7 +57,9 @@ void rgGBuffer() {
                                       payload.bary, payload.normal, dir);
 
     float3 n = mat.normal;
-    if (dot(n, -dir) < 0.0) n = -n;   // 朝向相机一侧
+    // 双面几何：仅当几何法线背向相机时翻转。判定不使用法线贴图扰动结果
+    // （扰动后的法线仍保持在几何半球内，由 evalMaterial 保证）。
+    if (dot(payload.normal, -dir) < 0.0) n = -n;
 
     float depth = length(worldPos - gCamPos);
     gWorldPos[pix] = float4(worldPos, depth);

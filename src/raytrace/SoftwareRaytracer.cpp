@@ -450,8 +450,13 @@ void SoftwareRaytracer::evaluateShadedMaterial(const RTTriangle& tri, const RTIn
             glm::vec3 mapped = T * tn.x + B * tn.y + geomNormal * tn.z;
             mapped = glm::normalize(mapped);
             if (std::isfinite(mapped.x)) {
-                // 双面一致：映射法线保持朝向射线来向一侧
-                if (glm::dot(mapped, dir) > 0.0f) mapped = -mapped;
+                // 钳制在几何法线半球内（视角无关）。原按射线来向翻转会把
+                // 掠射视角下强扰动的法线翻到表面以下 → 阴影 ray 自交黑斑
+                // 随相机移动（与 GPU 版 rt_common.hlsli 同步修复）。
+                if (glm::dot(mapped, geomNormal) < 0.0f) {
+                    mapped = mapped - 2.0f * geomNormal * glm::dot(mapped, geomNormal);
+                    mapped = glm::normalize(mapped);
+                }
                 out.normal = mapped;
             }
         }

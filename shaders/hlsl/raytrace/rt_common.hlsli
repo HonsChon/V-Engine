@@ -218,8 +218,13 @@ ShadedMaterial evalMaterial(uint instanceIdx, uint primIndex, float2 bary, float
                 float3 B = cross(geomNormal, T);
                 float3 tn = sampleTexNormal(mat.texAlbNrmMR.y, uv);
                 float3 mapped = normalize(T * tn.x + B * tn.y + geomNormal * tn.z);
-                // 双面一致：映射法线保持朝向射线来向一侧
-                if (dot(mapped, rayDir) > 0.0) mapped = -mapped;
+                // 钳制在几何法线半球内（视角无关）。原实现按射线来向翻转：
+                // 掠射视角 + 强法线贴图扰动会把法线翻到几何表面以下，
+                // 阴影 ray 起点偏移随之沉入表面 → 地板自交黑斑随相机移动。
+                if (dot(mapped, geomNormal) < 0.0) {
+                    mapped = normalize(mapped
+                        - 2.0 * geomNormal * dot(mapped, geomNormal));
+                }
                 outM.normal = mapped;
             }
         }
